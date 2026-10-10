@@ -1,0 +1,686 @@
+/* ============================================================
+   akaiutil-gui - stylesheet TEMPLATE
+   (shared look with AKAISDS: everything down to the 'akaiutil-gui
+   additions' marker at the bottom is copied from its template, so the
+   two apps can be kept in sync; new rules go in the additions section)
+   ------------------------------------------------------------
+   This is not a plain .qss file - it's a template. Every color
+   is a dollar-brace placeholder instead of a literal hex code, filled in
+   by ui/theme.py's DARK_PALETTE or LIGHT_PALETTE at load time
+   (see render_stylesheet() there).
+
+   Edit the STRUCTURE here (selectors, spacing, borders-widths,
+   which properties exist) - edit the ACTUAL COLORS in
+   ui/theme.py instead, so both the dark and light theme stay
+   in lockstep automatically.
+   ============================================================ */
+
+/* ---------- Base ---------- */
+QWidget {
+    background-color: ${bg};
+    color: ${text};
+    font-size: 13px;
+}
+
+QMainWindow {
+    background-color: ${bg};
+}
+
+/* A plain QWidget used only as a transparent layout container (so it
+   blends into whatever ancestor panel it actually sits in, instead of
+   picking up the base QWidget rule's own ${bg}) - selected by object name
+   rather than each call site giving it its OWN local setStyleSheet(...).
+   That distinction matters beyond style: QToolTip's tip label copies its
+   palette from the nearest ANCESTOR widget that has a non-empty local
+   stylesheet of its own - a call-site-local "background: transparent;"
+   made every tooltip on a descendant of that container inherit a
+   transparent background with nothing behind it to composite against,
+   rendering solid black on at least some Linux compositors. Routing this
+   through the app-wide stylesheet by object name instead means no widget
+   in this chain has a local stylesheet, so descendant tooltips resolve
+   normally through the QToolTip rule below. See ui/program_editor_window.py's
+   call sites (search "transparentContainer") for where this is applied. */
+QWidget#transparentContainer {
+    background: transparent;
+}
+
+QLabel {
+    background: transparent;
+    color: ${text};
+}
+
+/* secondary/"muted" text (a label whose own widget code used to bake the
+   disabled-text color in with setStyleSheet, which couldn't follow a live
+   theme switch - an app-level rule restyles with everything else) */
+QLabel#mutedLabel {
+    color: ${text_disabled};
+}
+
+/* Qt's tooltip (QToolTip) is internally a QLabel too, so without its own
+   rule here it inherits the QLabel rule above - "background: transparent"
+   on a real top-level popup window, with nothing underneath for the
+   compositor to blend against, renders as an undrawn black box on at
+   least some Linux window managers/compositors instead of the OS's normal
+   tooltip look. Give it an explicit opaque background so it never falls
+   through to that. */
+QToolTip {
+    background-color: ${bg_dialog};
+    color: ${text};
+    border: 1px solid ${border};
+    padding: 4px 6px;
+}
+
+/* ---------- Buttons ---------- */
+QPushButton {
+    background-color: ${bg_button};
+    border: 1px solid ${border};
+    border-radius: 4px;
+    padding: 5px 12px;
+    color: ${text};
+}
+
+QPushButton:hover {
+    background-color: ${bg_button_hover};
+    border-color: ${border_hover};
+}
+
+QPushButton:pressed {
+    background-color: ${bg_button_pressed};
+}
+
+QPushButton:disabled {
+    background-color: ${bg_disabled};
+    border-color: ${border_disabled};
+    color: ${text_disabled};
+}
+
+/* checkable buttons used as a segmented control (e.g. the zone selector) -
+   the checked one should read as "currently selected", not just "toggled on" */
+QPushButton:checked {
+    background-color: ${accent};
+    border-color: ${accent};
+    color: ${text_on_accent};
+}
+
+QPushButton:checked:hover {
+    background-color: ${accent};
+}
+
+/* ---------- Line edits (queue row names, dialog fields) ---------- */
+QLineEdit {
+    background-color: ${bg_input};
+    border: 1px solid ${accent};
+    border-radius: 3px;
+    padding: 2px 4px;
+    color: ${text_bright};
+    selection-background-color: ${accent};
+}
+
+QLineEdit:read-only {
+    background: transparent;
+    border: 1px solid transparent;
+    color: ${text};
+}
+
+QLineEdit:disabled {
+    color: ${text_disabled};
+}
+
+/* ---------- Lists (file queue + hardware panel) ---------- */
+QListWidget {
+    background-color: ${bg_panel};
+    border: 1px solid ${border_list};
+    border-radius: 4px;
+    outline: none;
+}
+
+QListWidget::item {
+    border-bottom: 1px solid ${border_item};
+}
+
+QListWidget::item:selected {
+    background-color: ${bg_selected};
+}
+
+/* Program editor's Programs list (plain text rows, no per-row buttons) -
+   scoped by objectName rather than widening QListWidget::item generally,
+   since the dashboard's queue/hardware rows (and the keygroup list's own
+   swatch+label rows) already get their own comfortable height from the
+   custom row widget's own margins and don't need extra item padding
+   stacked on top.
+
+   Samples list (#sampleList) is deliberately NOT included here even
+   though its rows used to be identical plain text - it now uses a custom
+   per-row widget too (name + duration, see program_editor_window.py's
+   _build_sample_list_row_widget), and giving a QListWidget item BOTH a
+   `::item` CSS rule AND setItemWidget() is a confirmed real Qt/PySide6
+   rendering bug, not a hypothetical: the row widget's own text doubles up
+   into a garbled/illegible overlap the instant this selector matches it,
+   even with the item's own text left empty. The row widget's own margins
+   (matched to this same 6px/8px so the row height doesn't change) are the
+   padding for that list now - see AGENTS.md's Samples tab section. */
+QListWidget#programList::item {
+    padding: 6px 8px;
+}
+
+/* Program editor's zone card (Zone 1-4 selector + that zone's controls) -
+   same surface/border pair as the list panels above, so it reads as a
+   distinct card without introducing a new color */
+QWidget#zoneCard {
+    background-color: ${bg_panel};
+    border: 1px solid ${border};
+    border-radius: 4px;
+}
+
+/* Program tab's grouped sections (Volume/Pan/Velocity, LFO, Pitch, ...) -
+   same card treatment as the zone card above, under its own objectName
+   since this isn't zone content */
+QWidget#sectionCard {
+    background-color: ${bg_panel};
+    border: 1px solid ${border};
+    border-radius: 4px;
+}
+
+QLabel#sectionHeader {
+    color: ${text_bright};
+    font-weight: 600;
+    background: transparent;
+}
+
+/* a value that is INHERITED ("=Sample": the program doesn't override the sample's own setting) reads dimmer than an override */
+QComboBox[inherited="true"], QSpinBox[inherited="true"] {
+    color: ${text_disabled};
+}
+
+/* placeholder text shown when file transfer queue is empty */
+#emptyQueueLabel {
+  color: ${text_disabled};
+  font-style: italic;
+  font-size: 14px;
+  background: transparent;
+}
+
+/* ---------- Checkboxes (hardware panel rows) ---------- */
+QCheckBox {
+    background: transparent;
+    color: ${text};
+    spacing: 6px;
+}
+
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid ${border_checkbox};
+    border-radius: 3px;
+    background: ${bg_input};
+}
+
+QCheckBox::indicator:checked {
+    background: ${accent};
+    border-color: ${accent};
+    image: url(${checkmark_icon});
+}
+
+/* ---------- Progress bars ---------- */
+QProgressBar {
+    background-color: ${bg_disabled};
+    border: 1px solid ${border_progress};
+    border-radius: 4px;
+    text-align: center;
+    color: ${text};
+}
+
+QProgressBar::chunk {
+    background-color: ${accent};
+    border-radius: 3px;
+}
+
+QProgressBar[memoryLevel="warning"]::chunk {
+  background-color: ${warning};
+}
+
+QProgressBar[memoryLevel="critical"]::chunk {
+  background-color: ${critical};
+}
+
+/* ---------- Sliders (currently just the Slice Editor's own Sensitivity
+   control, ui/fine_slider.py's FineSlider) ---------- */
+/* the widget itself, distinct from its ::groove/::handle sub-controls
+   below - without this it picks up the base QWidget rule's own ${bg}
+   as a solid rectangle behind/around the (narrower) groove, reading as
+   an unwanted border/box around the slider */
+QSlider {
+    background: transparent;
+}
+
+QSlider::groove:horizontal {
+    height: 4px;
+    background: ${border};
+    border-radius: 2px;
+}
+
+QSlider::sub-page:horizontal {
+    /* the FILLED portion, left of the handle - the exact same green
+       ui/knob.py's Knob hand-paints its own value arc with (a fixed
+       literal there, not a theme token - same reasoning applies here:
+       it's deliberately the same regardless of dark/light theme, unlike
+       ${accent} which differs between them) */
+    background: #3aa88a;
+    border-radius: 2px;
+}
+
+QSlider::add-page:horizontal {
+    background: ${border};
+    border-radius: 2px;
+}
+
+/* handle is 14px, centered over a 4px groove: margin is
+   -(handle - groove) / 2 = -(14 - 4) / 2 = -5px top/bottom, the standard
+   QSS formula for vertically centering a taller handle over its groove */
+QSlider::handle:horizontal {
+    background: ${text_bright};
+    border: 1px solid ${border_hover};
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #3aa88a;
+}
+
+/* explicit :disabled rules, same reasoning AGENTS.md's "Loop type
+   gating" section documents for QComboBox/QSpinBox/QDoubleSpinBox above -
+   Fusion doesn't automatically grey these out without one */
+QSlider::groove:horizontal:disabled,
+QSlider::add-page:horizontal:disabled,
+QSlider::sub-page:horizontal:disabled {
+    background: ${border_disabled};
+}
+
+QSlider::handle:horizontal:disabled {
+    background: ${text_disabled};
+    border: 1px solid ${border_disabled};
+}
+/* ---------- Status bar ---------- */
+QStatusBar {
+    background-color: ${bg_statusbar};
+    color: ${text_statusbar};
+}
+
+/* Fusion's default QStatusBar::item is a sunken PANEL frame around each
+   permanently-added widget (addWidget()/addPermanentWidget()) - its own
+   border/background isn't covered by the plain QStatusBar rule above
+   (a distinct sub-control, styled separately in Qt Style Sheets), and
+   rendered as a visibly darker box that read as "doesn't match the rest
+   of the app" against this app's own flat, borderless look everywhere
+   else (confirmed from a screenshot, not just reasoned about). */
+QStatusBar::item {
+    border: none;
+}
+
+/* ---------- Dialogs (Edit sample, Global settings, MIDI settings) ---------- */
+QDialog {
+    background-color: ${bg_dialog};
+}
+
+QComboBox, QSpinBox, QDoubleSpinBox {
+    background-color: ${bg_input};
+    border: 1px solid ${border};
+    border-radius: 3px;
+    padding: 2px 4px;
+    color: ${text_bright};
+}
+
+/* QSpinBox/QDoubleSpinBox naturally render taller than QComboBox even with
+   identical padding above - Fusion reserves extra vertical room for their
+   stacked up/down buttons that a combo box's single drop-down arrow
+   doesn't need. Pinned to match by measurement (offscreen, this theme's
+   fonts): unstyled QSpinBox.sizeHint().height() == 29px; a QComboBox
+   sitting next to one (e.g. the Portamento card's Type combo next to its
+   Rate spinbox) read visibly shorter without this. min-height is
+   content-box height here (border/padding add on top, same as the shared
+   rule above), so this is NOT simply "29" - re-measure with
+   QComboBox.sizeHint() if this ever needs adjusting again. */
+QComboBox {
+    min-height: 23px;
+}
+
+QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {
+    border-color: ${border_hover};
+}
+
+/* base rule above sets an explicit background/border/color, which
+   otherwise wins over Fusion's own built-in disabled greying (that only
+   kicks in when nothing more specific already set those properties) - so
+   disabled has to be spelled out here too, same as QPushButton:disabled/
+   QLineEdit:disabled above, or a disabled combo/spinbox reads as fully
+   active. */
+QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {
+    background-color: ${bg_disabled};
+    border-color: ${border_disabled};
+    color: ${text_disabled};
+}
+
+QComboBox QAbstractItemView {
+    background-color: ${bg_input};
+    color: ${text_bright};
+    selection-background-color: ${accent};
+    border: 1px solid ${border};
+}
+
+QComboBox QAbstractItemView::item {
+  padding: 4px 6px;
+}
+
+QComboBox QAbstractItemView::item:selected {
+  background-color: ${accent};
+  color: ${text_on_accent};
+}
+
+QComboBox::drop-down {
+  subcontrol-origin: padding;
+  subcontrol-position: top right;
+  width: 22px;
+  border: none;
+  background: transparent;
+}
+
+QComboBox::down-arrow {
+  image: url(${down_arrow_icon});
+  width: 10px;
+  height: 10px;
+}
+
+QComboBox::down-arrow:disabled {
+  image: url(${down_arrow_icon_disabled})
+}
+
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+  subcontrol-origin: border;
+  width: 16px;
+  border: none;
+  background: transparent;
+}
+
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+  image: url(${up_arrow_icon});
+  width: 8px;
+  height: 8px;
+}
+
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+  image: url(${down_arrow_icon});
+  width: 8px;
+  height: 8px;
+}
+
+/* ------------------TABS (MIDI SETTINGS dialog) ---------------------------*/
+/* The tab row reads as a single bordered strip - flush against the content
+   pane below it, no gaps between tabs - with the whole strip's outer
+   corners rounded to match the app's usual 4px radius (bottom corners stay
+   square since that edge meets the pane). The selected tab uses the app's
+   "selected" tint (bg_selected, also used for selected list rows) so it
+   visibly pops instead of blending into whatever sits behind it. */
+QTabWidget::pane {
+  border: 1px solid ${border};
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
+  top: -1px;
+  background-color: ${bg_dialog};
+}
+
+QTabBar::tab {
+    background-color: ${bg_button};
+    border: 1px solid ${border};
+    border-bottom: none;
+    padding: 7px 16px;
+    margin-left: -1px;
+    color: ${text_statusbar};
+}
+
+QTabBar::tab:first {
+    margin-left: 0;
+    border-top-left-radius: 4px;
+}
+
+QTabBar::tab:last {
+    border-top-right-radius: 4px;
+}
+
+QTabBar::tab:only-one {
+    margin-left: 0;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+}
+
+QTabBar::tab:hover {
+    background-color: ${bg_button_hover};
+    border-color: ${border_hover};
+    color: ${text};
+}
+
+QTabBar::tab:selected {
+    background-color: ${bg_selected};
+    border-color: ${border_hover};
+    color: ${text_bright};
+}
+
+/* ---------- Scrollbars ---------- */
+/* thin, flat, overlay-style bars - no arrow buttons, no 3D bevel */
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: ${border_hover};
+    border-radius: 5px;
+    min-height: 24px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: ${accent};
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+    border: none;
+    background: none;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:horizontal {
+    background: ${border_hover};
+    border-radius: 5px;
+    min-width: 24px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: ${accent};
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
+    border: none;
+    background: none;
+}
+
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+}
+
+/* ---------- Message boxes (delete confirmation) ---------- */
+QMessageBox {
+    background-color: ${bg_dialog};
+}
+
+
+/* ============================================================
+   akaiutil-gui additions (widgets AKAISDS doesn't use)
+   ============================================================ */
+
+/* ---------- Tree / table views ---------- */
+QTreeView, QTableView {
+    background-color: ${bg_panel};
+    alternate-background-color: ${bg_zebra};
+    border: 1px solid ${border_list};
+    border-radius: 4px;
+    outline: none;
+    gridline-color: ${border_item};
+    selection-background-color: ${bg_selected};
+    selection-color: ${text_bright};
+}
+
+QTreeView::item, QTableView::item {
+    padding: 3px 4px;
+}
+
+QTreeView::item:selected, QTableView::item:selected {
+    background-color: ${bg_selected};
+    color: ${text_bright};
+}
+
+QTreeView::item:hover:!selected, QTableView::item:hover:!selected {
+    background-color: ${bg_button_hover};
+}
+
+/* Expand/collapse chevrons are painted by DiskTree.drawBranches() (see there
+   for why this can't be done with QTreeView::branch rules). */
+
+QHeaderView::section {
+    background-color: ${bg_button};
+    color: ${text_statusbar};
+    border: none;
+    border-right: 1px solid ${border};
+    border-bottom: 1px solid ${border};
+    padding: 4px 8px;
+}
+
+QHeaderView::section:hover {
+    background-color: ${bg_button_hover};
+    color: ${text};
+}
+
+QTableCornerButton::section {
+    background-color: ${bg_button};
+    border: none;
+}
+
+/* ---------- Text panes (info, console) ---------- */
+QPlainTextEdit, QTextEdit {
+    background-color: ${bg_panel};
+    color: ${text};
+    border: 1px solid ${border_list};
+    border-radius: 4px;
+    padding: 4px;
+    selection-background-color: ${accent};
+    selection-color: ${text_on_accent};
+}
+
+/* ---------- Menus ---------- */
+QMenuBar {
+    background-color: ${bg};
+    color: ${text};
+}
+
+QMenuBar::item {
+    background: transparent;
+    padding: 4px 10px;
+}
+
+QMenuBar::item:selected {
+    background-color: ${bg_button_hover};
+    border-radius: 3px;
+}
+
+QMenu {
+    background-color: ${bg_dialog};
+    color: ${text};
+    border: 1px solid ${border};
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 5px 24px 5px 20px;
+    border-radius: 3px;
+}
+
+QMenu::item:selected {
+    background-color: ${accent};
+    color: ${text_on_accent};
+}
+
+QMenu::item:disabled {
+    color: ${text_disabled};
+    background: transparent;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: ${border};
+    margin: 4px 8px;
+}
+
+/* ---------- Splitters / docks ---------- */
+QSplitter::handle {
+    background: transparent;
+}
+
+QSplitter::handle:horizontal {
+    width: 6px;
+}
+
+QSplitter::handle:vertical {
+    height: 6px;
+}
+
+QDockWidget {
+    color: ${text_statusbar};
+}
+
+QDockWidget::title {
+    background-color: ${bg_statusbar};
+    padding: 5px 8px;
+    text-align: left;
+}
+
+/* ---------- App-specific labels ---------- */
+QLabel#panelTitle {
+    color: ${text_bright};
+    font-weight: 600;
+    background: transparent;
+}
+
+QLabel#usageLabel {
+    color: ${text_disabled};
+    background: transparent;
+}
+
+QLabel#usageLabel[level="warning"] {
+    color: ${warning};
+}
+
+QLabel#usageLabel[level="critical"] {
+    color: ${critical};
+}
+
+QLabel#emptyState {
+    color: ${text_disabled};
+    font-size: 15px;
+    background: transparent;
+}

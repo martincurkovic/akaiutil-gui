@@ -1,0 +1,35 @@
+# --- Python / uv ---------------------------------------------------------
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# --- test, lint and type-check output -------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- this project ----------------------------------------------------------
+# akaiutil binary, downloaded source, and the synthetic test images
+# (scripts/get_akaiutil.py and tests/imagegen.py regenerate all of it)
+build/
+
+# A local copy of akaiutil's source (scripts/get_akaiutil.py and the app fetch the pinned release
+# from SourceForge themselves; we don't redistribute it)
+/akaiutil-*/
+
+# Real disk images: hundreds of MB each, and other people's samples.
+# testing_images/ is where the real ones live; *.img catches strays anywhere else.
+testing_images/
+*.img
+
+# --- editors and OS --------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
+.claude/settings.local.json
