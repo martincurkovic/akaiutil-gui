@@ -166,11 +166,13 @@ def test_the_help_menu_opens_one_reused_manual_window(qt_app, window):
 
 
 # -------------------------------------------------------------------------------- about
-def test_the_logo_is_the_users_file_byte_for_byte():
-    source = REPO_ROOT / "akaiutil-gui.txt"
-    if not source.exists():
-        pytest.skip("akaiutil-gui.txt isn't in this checkout")
-    assert LOGO.strip("\n") == source.read_text(encoding="utf-8").rstrip("\n")
+def test_the_logo_is_the_art_in_the_users_file_byte_for_byte():
+    """The art is the block of lines at the top of akaiutil-gui.txt (credits and links can follow it after a blank line)."""
+    source = next((p for p in (REPO_ROOT / "akaiutil-gui.txt", REPO_ROOT.parent / "akaiutil-gui.txt") if p.exists()), None)
+    if source is None:
+        pytest.skip("akaiutil-gui.txt isn't in this checkout (it lives next to the repo)")
+    art = source.read_text(encoding="utf-8").lstrip("\n").split("\n\n")[0].rstrip("\n")
+    assert LOGO.strip("\n") == art
 
 
 def test_the_about_window_has_the_logo_version_and_buttons(qt_app, window):
@@ -230,3 +232,18 @@ def test_the_sort_dialog_without_programs_is_just_as_tidy(qt_app):
     d = edit_dialogs.SortDialog(None, Volume(0, "A", 1, "DRUMS", "-", "", "", "S3000"), [FileEntry(1, "A.S3", 1, "0x1", "17")])
     d.show()
     assert d.minimumSize() == d.maximumSize() and len(d.findChildren(QLabel)) == 1
+
+
+def test_every_picture_the_manual_shows_exists_and_is_at_twice_the_on_screen_size():
+    import re
+
+    from PySide6.QtGui import QImage
+
+    folder = REPO_ROOT / "src" / "akaiutil_gui" / "ui" / "help"
+    text = (folder / "manual.md").read_text(encoding="utf-8")
+    names = re.findall(r"!\[[^\]]*\]\((screenshots/[^)\s]+)", text)
+    assert {"screenshots/start-screen.png", "screenshots/sample-settings.png", "screenshots/backup-question.png"} <= set(names)
+    for name in names:
+        image = QImage(str(folder / name))
+        assert not image.isNull(), f"{name} is missing or isn't a picture"
+        assert image.width() >= 400 and image.height() >= 100, name

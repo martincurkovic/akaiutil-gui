@@ -1309,3 +1309,58 @@ def test_the_scroll_bars_room_is_kept_so_zooming_doesnt_move_anything(qt_app):
     after = (d.sizeHint(), d.wave.geometry(), d.zoom_in_button.geometry().top() - d.wave.geometry().bottom())
     assert before == after  # (the layout is the same with the bar showing or not)
     d.deleteLater()
+
+
+# ------------------------------------------------------------------- dialog layout and styling
+def import_dialog_for(window_or_none=None, sources=3):
+    import numpy as np
+    import soundfile
+
+    from akaiutil_gui import importing
+    from akaiutil_gui.engine.models import Volume
+    from akaiutil_gui.ui import edit_dialogs
+
+    import tempfile
+    from pathlib import Path
+
+    folder = Path(tempfile.mkdtemp())
+    paths = []
+    for n in ("BASS_LOW", "CLAP", "HAT_CLOSED")[:sources]:
+        p = folder / f"{n}.wav"
+        soundfile.write(str(p), np.sin(np.arange(4410) / 10).astype("float32") * 0.5, 44100, subtype="PCM_16")
+        paths.append(p)
+    vol = Volume(0, "A", 1, "DRUMS", "-", "0x3", "17.00", "S3000")
+    return edit_dialogs.ImportDialog(None, vol, [importing.inspect(p) for p in paths])
+
+
+def test_the_import_dialogs_widgets_never_overlap_even_when_shown_at_its_smallest(qt_app):
+    from PySide6.QtWidgets import QWidget
+
+    d = import_dialog_for()
+    d.show()
+    qt_app.processEvents()
+    d.resize(d.minimumWidth(), d.minimumHeight())  # (as small as it can be made)
+    qt_app.processEvents()
+    holder = d.type_combo.parentWidget()
+    list_bottom = d.files.mapTo(d, d.files.rect().bottomLeft()).y()
+    row_top = holder.mapTo(d, holder.rect().topLeft()).y()
+    assert row_top > list_bottom  # (the list ends before the "Sample type" row begins)
+    last = d.buttons.mapTo(d, d.buttons.rect().bottomLeft()).y()
+    assert last <= d.height()
+    assert d.minimumHeight() >= d.layout().minimumHeightForWidth(max(d.minimumWidth(), d.sizeHint().width()))
+    d.deleteLater()
+
+
+def test_the_combo_boxs_holder_doesnt_paint_a_box_of_its_own(qt_app):
+    d = import_dialog_for()
+    assert d.type_combo.parentWidget().objectName() == "transparentContainer"
+    d.deleteLater()
+
+
+def test_the_radio_button_strips_in_the_sort_dialog_have_rounded_ends_in_both_themes(qt_app):
+    from akaiutil_gui.ui import theme
+
+    for palette in (theme.DARK_PALETTE, theme.LIGHT_PALETTE):
+        css = theme.render_stylesheet(palette)
+        rule = css[css.index("QRadioButton {") :].split("}")[0]
+        assert "border-radius: 11px" in rule and palette["bg"] in rule

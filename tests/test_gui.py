@@ -1476,3 +1476,18 @@ def test_the_recent_list_sits_on_a_card_whose_colours_come_from_the_theme(app, w
         rule = css[css.index("QWidget#recentCard {") :].split("}")[0]
         assert palette["bg_dialog"] in rule and palette["border_progress"] in rule  # (the card's shade and edge, per theme)
         assert palette["bg_dialog"] != palette["bg"]  # (a different background from the window's)
+
+
+def test_the_recent_list_sits_halfway_between_the_hint_and_the_links_below_it(app, window, images):
+    settings.add_recent_image(str(images["fl1"]))
+    window.resize(1000, 800)
+    window._refresh_recent()
+    assert pump(app, lambda: window.recent_box.isVisible())
+    for _ in range(5):
+        app.processEvents()
+    def top(w):
+        return w.mapTo(window, w.rect().topLeft()).y()
+    hint_bottom = top(window.new_btn) + window.new_btn.height() + 40  # (below the buttons: the "drop files" line)
+    above = top(window.recent_box) - hint_bottom
+    below = top(window.help_btn) - (top(window.recent_box) + window.recent_box.height())
+    assert above > 20 and below > 20 and abs(above - below) <= 40  # (about the same room above and below)
