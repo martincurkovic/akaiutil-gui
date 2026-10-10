@@ -24,6 +24,14 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   (`importing.akai_file_problem`).
 - `put` of a `.S9C` into a non-S900 volume writes a wrong OS version; refused. Into an S900 volume it keeps the "uncompr" value.
 - `put` doesn't carry a file's **tags**; `reni` (a move inside one partition) does. A cross-partition move is copy + delete.
+- **`settagi`, `clrtagi`, `settagall` and `clrtagall` crash akaiutil 4.6.7 and 4.6.8** (exit 139): they call
+  `akai_rename_file(..., vp=NULL, ...)`, which then reads `vp->type` in its tags section. Nothing is written first. The GUI never
+  uses them. A fix would be `voldstp->type` there.
+- What does carry tags is **tar**: `tarc` writes a file's tags into the entry's link-name field (`\0T` + the 4 tag bytes) and `tarx`
+  reads them back, for S3000/CD3000 volumes only (the OS version rides in the `devmajor` field, in octal). `tags.tagged_file_tar`
+  builds a one-file tar, and `engine.copy_file(tags=...)` imports it. The tar entry's name is the plain file name (spaces and all).
+- Tags are numbers (1-26) into the **partition's** 26 tag names (`lstags`, which lists the partition of wherever the prompt is, even
+  inside a volume). Another partition can use other names, so a copy maps tags by name (`tags.map_tags`). Floppies have none.
 - A format of a disk makes other blank images in the session print "invalid format" every restart: don't read that as failure.
 
 ## Importing audio
