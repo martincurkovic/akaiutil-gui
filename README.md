@@ -1,10 +1,16 @@
 # akaiutil-gui
 
+[![Build](https://github.com/martincurkovic/akaiutil-gui/actions/workflows/build.yml/badge.svg)](https://github.com/martincurkovic/akaiutil-gui/actions/workflows/build.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Qt 6.12 LTS](https://img.shields.io/badge/Qt-6.12%20LTS-41CD52?logo=qt&logoColor=white)](https://doc.qt.io/qtforpython-6/)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Platforms: macOS, Windows, Linux](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#download--installation)
+[![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
+
 A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil/)
 (Klaus Michael Indlekofer's tool for Akai S900/S1000/S3000 disk images).
 
-**Status: early.** Disk images open read-only. Nothing is written to one until you switch on **Edit > Allow Editing**, and
-there is no undo (see [Editing](#editing)).
+**Status: early.** Disk images open read-only by default. Make backups of any important data, there is no undo (see [Editing](#editing)).
 
 - **Browse** disks, partitions, volumes and files, across as many disk images as you like at once (File > Add Disk Image,
   or drop files on the window; right-click a disk to close it or show its file). Adding or closing an image restarts akaiutil
