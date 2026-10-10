@@ -124,6 +124,52 @@ def test_icons_are_square_and_the_right_size():
     assert w == h and w >= 1024
 
 
+def icns_entries(path: Path) -> dict[str, bytes]:
+    """The entries of an .icns file: four-letter type -> payload (a PNG for the Retina-era sizes)."""
+    import struct
+
+    data = path.read_bytes()
+    assert data[:4] == b"icns" and struct.unpack(">I", data[4:8])[0] == len(data), "not a well-formed .icns"
+    entries, pos = {}, 8
+    while pos < len(data):
+        kind, size = data[pos : pos + 4].decode("latin1"), struct.unpack(">I", data[pos + 4 : pos + 8])[0]
+        entries[kind] = data[pos + 8 : pos + size]
+        pos += size
+    return entries
+
+
+def test_the_macos_icon_has_all_ten_sizes():
+    entries = icns_entries(ROOT / "assets" / "icon" / "akaiutil-GUI-macos.icns")
+    # 16, 32, 128, 256, 512 points at 1x and 2x. 1x 16/32 px are ic04/ic05 (iconutil's older encoding)
+    expected = {"ic04": 16, "ic05": 32, "ic11": 32, "ic12": 64, "ic07": 128, "ic13": 256, "ic08": 256, "ic14": 512, "ic09": 512, "ic10": 1024}
+    assert expected.keys() <= entries.keys(), f"missing sizes: {sorted(expected.keys() - entries.keys())}"
+    import struct
+
+    for kind, pixels in expected.items():
+        payload = entries[kind]
+        if payload[:8] == b"\x89PNG\r\n\x1a\n":  # the PNG-encoded ones state their own size
+            assert struct.unpack(">II", payload[16:24]) == (pixels, pixels), f"{kind} should be {pixels}px"
+
+
+def test_the_macos_icon_master_is_in_the_apple_template_form():
+    import struct
+
+    master = (ROOT / "assets" / "icon" / "AppIcon1024.png").read_bytes()
+    assert master[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", master[16:24]) == (1024, 1024)
+    assert master[25] == 6, "needs an alpha channel (RGBA): the rounded corners are transparent"
+
+    Image = pytest.importorskip("PIL.Image")  # decoding pixels needs Pillow; the CI test job doesn't install it
+    im = Image.open(ROOT / "assets/icon/AppIcon1024.png").convert("RGBA")
+    assert all(im.getpixel(p)[3] == 0 for p in [(0, 0), (1023, 0), (0, 1023), (1023, 1023)]), "corners must be transparent"
+    solid = im.getchannel("A").point(lambda v: 255 if v > 200 else 0).getbbox()
+    assert solid == (100, 100, 924, 924), f"Apple's template is 824px centred in 1024; this is {solid}"
+
+    import io
+
+    biggest = Image.open(io.BytesIO(icns_entries(ROOT / "assets/icon/akaiutil-GUI-macos.icns")["ic10"])).convert("RGBA")
+    assert biggest.tobytes() == im.tobytes(), "the .icns is out of date: rerun scripts/make_icns.sh"
+
+
 # ------------------------------------------------- what the build bundles
 def data_args(script: str) -> list[tuple[str, str, str]]:
     return re.findall(r"--include-data-(dir|files)=([^\s=\"]+)=([^\s\"]+)", script)
