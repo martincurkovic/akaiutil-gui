@@ -18,7 +18,8 @@ there is no undo (see [Editing](#editing)).
 - **Search** every open disk at once (Ctrl+F): type words (they all have to match, in the file's or its volume's name), and
   filter by type. Double-click a result to show it in its volume. Results can be previewed and exported like any file.
 - **Export** files as they are, or samples as WAV. Files from several volumes go into one folder each.
-- **Edit** (opt-in): rename and delete files and volumes, create volumes, format a disk, and make new empty disk images.
+- **Edit** (opt-in): rename and delete files and volumes, create volumes, import samples, format a disk, and make new empty
+  disk images.
 - **Settings** (File > Settings, or Cmd/Ctrl+,): theme, audio output device and buffer size, whether samples play when
   selected, a default export folder, which akaiutil to use, and whether to check for updates.
 - **Check for updates** from the Help menu, and automatically once a day at startup (switch it off in Settings). It only ever
@@ -79,6 +80,13 @@ images again puts the app back in read-only mode.
 - **New Volume** (right-click a partition): name, volume number, type and load number.
 - **Format Disk** (right-click a disk): erases it and sets it up as an S1000, S3000, CD3000 or S900 disk, or a floppy of
   the same density; hard disks are cut into partitions of up to 60 MB.
+- **Import** (drop files on a volume, or Edit > Import Files): WAV, AIFF and FLAC (also OGG and MP3) become samples for the
+  S1000, S3000 or S900 (you're asked which, for stereo files whether to split them into left and right samples or mix them to
+  mono, and for an S900 whether to compress). Anything that isn't 16-bit or is faster than the sampler can play (44.1 kHz; 40 kHz
+  on an S900) is converted first; a 16-bit WAV that is fine is used exactly as it is, which keeps the loops of a WAV this app
+  exported. Files are added in alphabetical order (numbers in order: `kick 2` before `kick 10`), and a name already in the
+  volume gets a number rather than replacing the old file. Akai files (`KICK.S3`, `.P3`, ...) go in unchanged, but only into a
+  volume of the right sampler: an S900 volume takes only S900 files, an S1000 volume only S1000 ones.
 - **File > New Disk Image** makes a new empty image (a hard disk up to 512 MB, or a floppy), formatted and opened.
 
 ## Audio notes
