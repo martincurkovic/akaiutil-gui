@@ -17,8 +17,9 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from .. import describe
 from . import parse
-from .models import Disk, DiskUsage, ExportResult, FileEntry, Partition, Volume
+from .models import Disk, DiskUsage, ExportResult, FileEntry, Partition, SampleInfo, Volume
 from .session import EngineError, Session, TrafficCallback
 
 
@@ -77,8 +78,8 @@ class AkaiEngine:
         with self._lock:
             self._run(f"cd {disk.path}")
             text = self._run("dirrec", timeout=300).text  # every file on the disk; can be long
-            partitions, volumes = parse.parse_dirrec(text, disk.index, disk.block_size)
-            return DiskUsage(disk, partitions, volumes)
+            partitions, volumes, catalog = parse.parse_dirrec(text, disk.index, disk.block_size)
+            return DiskUsage(disk, partitions, volumes, catalog)
 
     def list_takes_text(self, part: Partition) -> str:
         """DD (direct-to-disk) partitions list takes, not files; the proof of
@@ -106,6 +107,29 @@ class AkaiEngine:
         with self._lock:
             self._enter_volume(vol)
             return self._run(f"infoi {file.index}").text.strip("\n")
+
+    def sample_info(self, vol: Volume, file: FileEntry) -> SampleInfo | None:
+        """How one sample plays (rate, loops, markers...), or None if the file isn't a sample."""
+        return describe.parse_sample_info(self.file_info(vol, file))
+
+    def volume_sample_infos(self, vol: Volume) -> dict[int, SampleInfo]:
+        """The SampleInfo of every sample in a volume, by file number, from a single `infoall`."""
+        with self._lock:
+            self._enter_volume(vol)
+            text = self._run("infoall", timeout=300).text
+        infos = {}
+        for number, block in parse.split_infoall(text).items():
+            info = describe.parse_sample_info(block)
+            if info is not None:
+                infos[number] = info
+        return infos
+
+    def export_sample_wav(self, vol: Volume, file: FileEntry, dest_dir: str | os.PathLike) -> Path:
+        """Convert one sample to a WAV file in dest_dir (replacing one that's already there)."""
+        result = self.export_files(vol, [file], dest_dir, as_wav=True, confirm_overwrite=lambda _path: True)
+        if not result.exported:
+            raise EngineError(result.failed[0] if result.failed else f"couldn't convert {file.name} to WAV")
+        return Path(result.exported[0])
 
     # --------------------------------------------------------------- export
     def export_files(

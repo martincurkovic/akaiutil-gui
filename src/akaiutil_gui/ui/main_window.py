@@ -1,16 +1,22 @@
 """The main window."""
 
 import re
+import shutil
+import tempfile
 import threading
+import time
+from collections import OrderedDict
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, Signal, Slot
-from PySide6.QtGui import QAction, QActionGroup, QFontDatabase, QKeySequence
+from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
+from PySide6.QtGui import QAction, QActionGroup, QFontDatabase, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QComboBox,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -24,22 +30,34 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QSettings, QThreadPool
 
-from akaiutil_gui import __version__, describe, settings
+from akaiutil_gui import __version__, describe, search, settings
+from akaiutil_gui.audio.sample import LoadedSample, load_wav
 from akaiutil_gui.formatting import human_size
 from akaiutil_gui.engine import fetch
 from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.locate import candidates, find_akaiutil
-from akaiutil_gui.engine.models import Disk, DiskUsage, ExportResult, FileEntry, Partition, Volume
+from akaiutil_gui.engine.models import CatalogEntry, Disk, DiskUsage, ExportResult, FileEntry, Partition, Volume
 
 from . import theme
 from .details_view import DetailsView
 from .disk_tree import DiskTree
 from .notices_dialog import NoticesDialog
+from .preview_panel import PreviewPanel
+from .settings_dialog import SettingsDialog
 from .file_table import FileTable
 from .tasks import run_async
+from .update_helper import CHECK_INTERVAL_SECONDS, UpdateCheckRunner
 from .usage_bar import UsageSummary
 
 IMAGE_FILTER = "Disk images (*.img *.iso *.bin *.dsk *.hfe *.fdi *.raw);;All files (*)"
+
+
+def export_folder_name(vol: Volume, with_disk: bool) -> str:
+    """A folder name for one volume's files when several volumes are exported together."""
+    name = f"{vol.partition} - {vol.name}"
+    if with_disk:
+        name = f"disk{vol.disk} {name}"
+    return re.sub(r'[\\/:*?"<>|]', "_", name).strip(" .") or "volume"
 
 
 class _TrafficRelay(QObject):
@@ -122,6 +140,16 @@ class MainWindow(QMainWindow):
         self._volume_details: describe.Details | None = None
         self._pending = 0
         self._setup_running = False  # akaiutil is being downloaded right now
+        self._update_runner = UpdateCheckRunner(self)
+        self._catalog: list[CatalogEntry] = []  # every file on every open disk, for searching
+        self._in_results = False  # the file table is showing search results, not a volume's files
+        self._volume_files: list[FileEntry] = []  # the selected volume's files, to put back when a search ends
+        self._files_title_text = "Files"
+        self._pending_reveal: tuple[Volume, int] | None = None  # select this file once its volume has loaded
+        self._preview_token = 0  # numbers each preview load; only the newest may show its result
+        self._preview_cache: OrderedDict[tuple, LoadedSample] = OrderedDict()  # decoded samples, so replaying is instant
+        self._preview_dir: str | None = None  # scratch folder the WAVs are converted into
+        self._theme_actions: dict[str, QAction] = {}
         # Details requests run on worker threads and can finish in any order, so each gets a number
         # and only _info_current may show its result (0: nothing in flight is wanted any more).
         self._info_seq = 0
@@ -169,20 +197,49 @@ class MainWindow(QMainWindow):
         self.export_wav_btn.clicked.connect(lambda: self._export(as_wav=True))
         self.table = FileTable()
         self.table.selectionFilesChanged.connect(self._on_files_selected)
-        # The right-hand header row is as tall as its buttons; give the left
-        # title the same height (text stays vertically centred) so the tree
-        # and the file table start at the same y.
-        self.disks_title.setMinimumHeight(self.export_btn.sizeHint().height())
         top = QWidget()
         tv = QVBoxLayout(top)
         tv.setContentsMargins(0, 0, 0, 0)
         tv.setSpacing(6)
         header = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search all files…  (Ctrl+F)")
+        self.search.setClearButtonEnabled(True)
+        self.search.setMinimumWidth(200)
+        self.search.setMaximumWidth(300)
+        self.search_kind = QComboBox()
+        for value, label in search.KINDS:
+            self.search_kind.addItem(label, value)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(150)  # so typing doesn't refilter the table on every keystroke
+        self._search_timer.timeout.connect(self._apply_search)
+        self.search.textChanged.connect(lambda _text: self._search_timer.start())
+        self.search_kind.currentIndexChanged.connect(lambda _i: self._search_timer.start())
         header.addWidget(self.files_title, 1)
+        header.addWidget(self.search)
+        header.addWidget(self.search_kind)
         header.addWidget(self.export_btn)
         header.addWidget(self.export_wav_btn)
         tv.addLayout(header)
+        # The right-hand header row is as tall as its tallest widget (the search box, filter and buttons); give the
+        # left title the same height (the text stays vertically centred) so the tree and the file table start at
+        # the same y.
+        self.disks_title.setMinimumHeight(max(w.sizeHint().height() for w in (self.export_btn, self.search, self.search_kind)))
         tv.addWidget(self.table)
+        self.preview = PreviewPanel()
+        self.preview.hide()  # appears when a single sample is selected
+        tv.addWidget(self.preview)
+        # Space plays/stops, like in a DAW or Finder's Quick Look
+        space = QShortcut(QKeySequence(Qt.Key.Key_Space), self.table)
+        space.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        space.activated.connect(self.preview.toggle)
+        self.table.itemActivated.connect(lambda _item: self._activate_result())  # double-click or Enter
+        find = QShortcut(QKeySequence.StandardKey.Find, self)
+        find.activated.connect(self._focus_search)
+        escape = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.search)
+        escape.setContext(Qt.ShortcutContext.WidgetShortcut)
+        escape.activated.connect(self._escape_search)
 
         # right bottom: details (readable by default; the raw akaiutil text on request)
         self.info = DetailsView()
@@ -286,6 +343,10 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addActions([self.act_export, self.act_export_wav])
         file_menu.addSeparator()
+        settings_action = self._action("&Settings…", self._open_settings, QKeySequence.StandardKey.Preferences)
+        settings_action.setMenuRole(QAction.MenuRole.PreferencesRole)  # macOS moves it to the app menu
+        file_menu.addAction(settings_action)
+        file_menu.addSeparator()
         file_menu.addAction(act_quit)
 
         view_menu = mb.addMenu("&View")
@@ -297,6 +358,7 @@ class MainWindow(QMainWindow):
             act = QAction(label, self, checkable=True)
             act.setChecked(value == current)
             act.triggered.connect(lambda _checked=False, v=value: self._set_theme(v))
+            self._theme_actions[value] = act
             group.addAction(act)
             theme_menu.addAction(act)
         view_menu.addSeparator()
@@ -312,6 +374,7 @@ class MainWindow(QMainWindow):
         about = self._action("&About akaiutil-gui", self._about)
         about.setMenuRole(QAction.MenuRole.AboutRole)
         help_menu.addAction(about)
+        help_menu.addAction(self._action("Check for &Updates…", lambda: self._update_runner.start(manual=True)))
         help_menu.addAction(self._action("Third-party &notices…", lambda: NoticesDialog(self).exec()))
 
     def _action(self, text, slot, shortcut=None) -> QAction:
@@ -323,10 +386,12 @@ class MainWindow(QMainWindow):
 
     def _update_actions(self) -> None:
         has_images = bool(self._images)
-        files = self.table.selected_files() if self._volume else []
-        can_export = self._volume is not None and bool(files) and self._pending == 0
-        can_wav = can_export and any(f.is_sample for f in files)
+        rows = self.table.selected_rows()
+        can_export = bool(rows) and all(v is not None for v, _ in rows) and self._pending == 0
+        can_wav = can_export and any(f.is_sample for _, f in rows)
         self.act_close.setEnabled(has_images)
+        self.search.setEnabled(has_images)
+        self.search_kind.setEnabled(has_images)
         for w in (self.act_export, self.export_btn):
             w.setEnabled(can_export)
         for w in (self.act_export_wav, self.export_wav_btn):
@@ -396,13 +461,21 @@ class MainWindow(QMainWindow):
         self._volume_details = None
         self._info_current = 0
         self._files_token += 1
+        self._catalog = []
+        self._volume_files = []
+        self._pending_reveal = None
+        self._reset_search_ui()
+        self._preview_token += 1
+        self._preview_cache.clear()
+        self.preview.clear()
+        self.preview.hide()
         self._usage_token += 1
         self._usage_cache.clear()
         self._usage_waiting.clear()
         self.usage.clear()
         self.tree.unload()
         self.table.clear_files()
-        self.files_title.setText("Files")
+        self._set_files_title("Files")
         self.info.show_details(None)
 
     # --------------------------------------------------------- binary lookup
@@ -510,6 +583,7 @@ class MainWindow(QMainWindow):
             if engine is not self._engine:
                 return  # the image was closed or replaced meanwhile
             self._usage_cache[disk.index] = usage
+            self._rebuild_catalog()
             self.tree.set_volume_order(disk.index, usage.volume_order())
             for callback in self._usage_waiting.pop(disk.index, []):
                 callback(usage)
@@ -542,22 +616,108 @@ class MainWindow(QMainWindow):
             self.usage.show_loading()
         self._ensure_usage(disk, show)
 
+    # ----------------------------------------------------------------- search
+    def _searching(self) -> bool:
+        return bool(self.search.text().strip()) or self.search_kind.currentData() != search.ALL
+
+    def _reset_search_ui(self) -> None:
+        """Clear the search box and type filter without reacting to it."""
+        self._search_timer.stop()
+        self._in_results = False
+        for widget, clear in ((self.search, lambda: self.search.clear()), (self.search_kind, lambda: self.search_kind.setCurrentIndex(0))):
+            widget.blockSignals(True)
+            clear()
+            widget.blockSignals(False)
+        self.files_title.setText(self._files_title_text)
+
+    def _rebuild_catalog(self) -> None:
+        self._catalog = [entry for index in sorted(self._usage_cache) for entry in self._usage_cache[index].catalog]
+        if self._searching():
+            self._apply_search()  # the index just grew: results may have too
+
+    def _index_ready(self) -> bool:
+        return set(self.tree.disk_indexes()) <= set(self._usage_cache)
+
+    def _focus_search(self) -> None:
+        if self.search.isEnabled():
+            self.search.setFocus()
+            self.search.selectAll()
+
+    def _escape_search(self) -> None:
+        self.search.clear()
+        self.search_kind.setCurrentIndex(0)
+        self.table.setFocus()
+
+    def _apply_search(self) -> None:
+        if self._engine is None:
+            return
+        if not self._searching():
+            self._leave_search()
+            return
+        if not self._index_ready():
+            self.files_title.setText("Indexing the disks…")
+            return
+        query = self.search.text().strip()
+        results, truncated = search.filter_catalog(self._catalog, query, self.search_kind.currentData())
+        self._in_results = True
+        self.table.set_results(results)
+        what = f"“{query}”" if query else self.search_kind.currentText().lower()
+        title = f"{len(results):,}{'+' if truncated else ''} result{'s' if len(results) != 1 else ''} for {what}"
+        self.files_title.setText(title + (f"  ·  showing the first {len(results):,}, narrow the search" if truncated else ""))
+        self._update_actions()
+
+    def _leave_search(self) -> None:
+        """Back to the selected volume's files."""
+        if not self._in_results:
+            self.files_title.setText(self._files_title_text)
+            return
+        self._in_results = False
+        self.files_title.setText(self._files_title_text)
+        self.table.set_files(self._volume_files, self._volume)
+        self._select_pending_file()
+        self._update_actions()
+
+    def _activate_result(self) -> None:
+        """Double-click or Enter on a search result: show it in its volume."""
+        if not self._in_results:
+            return
+        rows = [(v, f) for v, f in self.table.selected_rows() if v is not None]
+        if not rows:
+            return
+        vol, f = rows[0]
+        self._pending_reveal = (vol, f.index)
+        current = self._volume
+        self._search_timer.stop()
+        self.search.blockSignals(True)
+        self.search.clear()
+        self.search.blockSignals(False)
+        self.search_kind.blockSignals(True)
+        self.search_kind.setCurrentIndex(0)
+        self.search_kind.blockSignals(False)
+        if current is not None and (current.disk, current.partition, current.index) == (vol.disk, vol.partition, vol.index):
+            self._leave_search()  # already the selected volume: just put its files back and pick the file
+        else:
+            self._in_results = False  # the tree selection below loads the volume (and ends the search state)
+            self.tree.reveal_volume(vol)
+
     def _on_node_selected(self, obj) -> None:
         self._update_usage(obj)
         self._volume = obj if isinstance(obj, Volume) else None
         self._volume_details = None
         self._info_current = 0
         self._files_token += 1
+        self._volume_files = []
+        self._reset_search_ui()  # picking something in the tree ends a search
         self.table.clear_files()
         engine = self._engine
         if engine is None or obj is None:
-            self.files_title.setText("Files")
+            self._set_files_title("Files")
             self.info.show_details(None)
             self._update_actions()
             return
 
         if isinstance(obj, Volume):
-            self.files_title.setText(f"Files in {obj.path}")
+            self._set_files_title(f"Files in {obj.path}")
             token = self._files_token
             self._run(lambda: engine.list_files(obj), lambda files: self._files_loaded(token, files))
             disk = self.tree.disk(obj.disk)
@@ -569,7 +729,7 @@ class MainWindow(QMainWindow):
 
             self._show_info(lambda: engine.volume_info(obj), volume_details, remember=True)
         elif isinstance(obj, Partition):
-            self.files_title.setText("Select a volume to see its files")
+            self._set_files_title("Select a volume to see its files")
             if obj.is_dd:
                 self._show_info(
                     lambda: engine.list_takes_text(obj), lambda t: describe.describe_takes(f"Direct-to-disk area {obj.name}", t)
@@ -577,34 +737,107 @@ class MainWindow(QMainWindow):
             else:
                 self._show_info(lambda: engine.partition_info(obj), describe.describe_partition)
         elif isinstance(obj, Disk):
-            self.files_title.setText("Select a volume to see its files")
+            self._set_files_title("Select a volume to see its files")
             self._show_info(lambda: engine.disk_info(obj), describe.describe_disk)
         self._update_actions()
 
     def _files_loaded(self, token: int, files: list[FileEntry]) -> None:
         if token != self._files_token:
             return
-        self.table.set_files(files)
+        self._volume_files = files
+        if not self._in_results:  # a search that's under way keeps the table
+            self.table.set_files(files, self._volume)
         n = len(files)
         total = human_size(sum(f.size for f in files))
         self.statusBar().showMessage(f"{n} file{'s' if n != 1 else ''}, {total}", 8000)
+        self._select_pending_file()
         self._update_actions()
 
-    def _on_files_selected(self, files: list[FileEntry]) -> None:
-        engine, vol = self._engine, self._volume
-        self._update_actions()
-        if engine is None or vol is None:
+    def _select_pending_file(self) -> None:
+        """After revealing a search result: select its file once the volume's list is showing."""
+        if self._pending_reveal is None or self._in_results:
             return
-        if len(files) == 1:
-            f = files[0]
+        vol, file_index = self._pending_reveal
+        if self._volume is not None and (self._volume.disk, self._volume.partition, self._volume.index) == (vol.disk, vol.partition, vol.index):
+            self._pending_reveal = None
+            self.table.select_file(self._volume, file_index)
+
+    def _set_files_title(self, text: str) -> None:
+        self._files_title_text = text
+        if not self._in_results:
+            self.files_title.setText(text)
+
+    def _update_preview(self, rows: list[tuple[Volume | None, FileEntry]]) -> None:
+        """Show the preview panel when exactly one sample is selected, and load it."""
+        self._preview_token += 1
+        self.preview.stop()
+        engine = self._engine
+        if engine is None or len(rows) != 1 or rows[0][0] is None or not rows[0][1].is_sample:
+            self.preview.clear()
+            self.preview.hide()
+            return
+        vol, f = rows[0]
+        key = (vol.disk, vol.partition, vol.index, f.index, f.name)
+        self.preview.show()
+        cached = self._preview_cache.get(key)
+        if cached is not None:
+            self._preview_cache.move_to_end(key)
+            self._show_preview(cached)
+            return
+        self.preview.show_loading(f.name)
+        token = self._preview_token
+
+        def convert() -> LoadedSample:
+            info = engine.sample_info(vol, f)  # loops and play markers, from the header
+            wav = engine.export_sample_wav(vol, f, self._preview_directory())
+            try:
+                return load_wav(wav, f.name, info)
+            finally:
+                wav.unlink(missing_ok=True)  # the audio is in memory now
+
+        def done(sample: LoadedSample) -> None:
+            self._preview_cache[key] = sample
+            while len(self._preview_cache) > 16:
+                self._preview_cache.popitem(last=False)
+            if token == self._preview_token:
+                self._show_preview(sample)
+
+        def failed(message: str) -> None:
+            if token == self._preview_token:
+                self.preview.show_error(message)
+
+        run_async(convert, done, failed)
+
+    def _show_preview(self, sample: LoadedSample) -> None:
+        self.preview.set_sample(sample)
+        if settings.get_auto_play():
+            self.preview.play()
+
+    def _preview_directory(self) -> str:
+        if self._preview_dir is None:
+            self._preview_dir = tempfile.mkdtemp(prefix="akaiutil-gui-preview-")
+        return self._preview_dir
+
+    def _on_files_selected(self, _files: list[FileEntry]) -> None:
+        engine = self._engine
+        rows = self.table.selected_rows()
+        self._update_preview(rows)
+        self._update_actions()
+        if engine is None:
+            return
+        if len(rows) == 1 and rows[0][0] is not None:
+            vol, f = rows[0]
             self._show_info(lambda: engine.file_info(vol, f), describe.describe_file)
-        elif len(files) > 1:
+        elif len(rows) > 1:
             self._info_current = 0
-            self.info.show_details(describe.describe_selection(files))
+            self.info.show_details(describe.describe_selection([f for _, f in rows]))
+        elif self._in_results:  # a search with nothing selected: there is no volume to fall back to
+            self._info_current = 0
+            self.info.show_details(None)
         elif self._volume_details is not None:  # nothing selected: back to the volume's own details
             self._info_current = 0
             self.info.show_details(self._volume_details)
-        else:
+        elif self._volume is not None:
             # ...which are still on their way. Let that request show itself when it arrives (the file
             # list landing and clearing the selection must not cancel it), but not a file's details.
             self._info_current = self._volume_token
@@ -626,28 +859,54 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------------- export
     def _export(self, as_wav: bool) -> None:
-        engine, vol = self._engine, self._volume
-        files = self.table.selected_files()
-        if engine is None or vol is None or not files:
+        engine = self._engine
+        rows = [(v, f) for v, f in self.table.selected_rows() if v is not None]
+        if engine is None or not rows:
             return
         if as_wav:
-            samples = [f for f in files if f.is_sample]
-            if not samples:
+            rows = [(v, f) for v, f in rows if f.is_sample]
+            if not rows:
                 QMessageBox.information(self, "Export as WAV", "None of the selected files are samples.")
                 return
-            files = samples
-        start = settings.get_last_dir("export") or str(Path.home())
-        dest = QFileDialog.getExistingDirectory(self, "Export to folder", start)
+        dest = self._export_destination()
         if not dest:
             return
-        settings.set_last_dir("export", dest)
 
+        groups: dict[tuple, tuple[Volume, list[FileEntry]]] = {}
+        for vol, f in rows:
+            groups.setdefault((vol.disk, vol.partition, vol.index), (vol, []))[1].append(f)
+        several_volumes = len(groups) > 1
+        several_disks = len({k[0] for k in groups}) > 1
         asker = _OverwriteAsker(self)
-        self.statusBar().showMessage(f"Exporting {len(files)} file(s)…")
-        self._run(
-            lambda: engine.export_files(vol, files, dest, as_wav, confirm_overwrite=asker.ask),
-            lambda res: self._export_done(res, dest),
-        )
+        self.statusBar().showMessage(f"Exporting {len(rows)} file(s)…")
+
+        def work() -> ExportResult:
+            merged = ExportResult()
+            for vol, files in groups.values():
+                # files from several volumes get a folder each, so same-named files can't overwrite each other
+                target = Path(dest) / export_folder_name(vol, several_disks) if several_volumes else Path(dest)
+                target.mkdir(parents=True, exist_ok=True)
+                res = engine.export_files(vol, files, target, as_wav, confirm_overwrite=asker.ask)
+                merged.exported += res.exported
+                merged.skipped += res.skipped
+                merged.failed += res.failed
+            return merged
+
+        self._run(work, lambda res: self._export_done(res, dest))
+
+    def _export_destination(self) -> str | None:
+        """Where to export to: the default folder from Settings (without asking, if that's what's set), or a
+        folder the user picks, starting from the default folder or the last one used."""
+        default = settings.get_default_export_folder()
+        if default and not settings.get_ask_export_folder():
+            if Path(default).is_dir():
+                return default
+            self.statusBar().showMessage(f"The default export folder {default} doesn't exist; choose another.", 8000)
+        start = default if default and Path(default).is_dir() else settings.get_last_dir("export") or str(Path.home())
+        dest = QFileDialog.getExistingDirectory(self, "Export to folder", start)
+        if dest:
+            settings.set_last_dir("export", dest)
+        return dest or None
 
     def _export_done(self, res: ExportResult, dest: str) -> None:
         parts = [f"Exported {len(res.exported)} file(s) to {dest}"]
@@ -699,6 +958,20 @@ class MainWindow(QMainWindow):
     def _set_theme(self, value: str) -> None:
         settings.set_theme(value)
         theme.set_theme_preference(value)
+        action = self._theme_actions.get(value)
+        if action is not None:
+            action.setChecked(True)  # keeps View > Theme in step when the Settings dialog changed it
+
+    def _open_settings(self) -> None:
+        dialog = SettingsDialog(self, update_runner=self._update_runner, locate=self.locate_binary)
+        dialog.themeChosen.connect(self._set_theme)
+        dialog.exec()
+
+    def schedule_update_check(self) -> None:
+        """The automatic check: at most once a day, a couple of seconds after startup, and only if enabled."""
+        due = time.time() - settings.get_last_update_check() > CHECK_INTERVAL_SECONDS
+        if settings.get_check_updates_on_startup() and due:
+            QTimer.singleShot(2000, lambda: self._update_runner.start(manual=False))
 
     def _about(self) -> None:
         QMessageBox.about(
@@ -729,6 +1002,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         QSettings().setValue("window/geometry", self.saveGeometry())
+        self._update_runner.wait()
+        self.preview.stop()
+        if self._preview_dir is not None:
+            shutil.rmtree(self._preview_dir, ignore_errors=True)
         if self._engine is not None:
             self._engine.close()
         QThreadPool.globalInstance().waitForDone(3000)

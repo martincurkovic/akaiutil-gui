@@ -9,7 +9,7 @@ exact text. A ctypes/cffi engine would make this module disappear.
 import math
 import re
 
-from .models import Disk, FileEntry, Partition, Volume, VolumeUsage
+from .models import CatalogEntry, Disk, FileEntry, Partition, Volume, VolumeUsage
 
 _HEX = r"0x[0-9a-fA-F]+"
 
@@ -123,7 +123,7 @@ _PART_HEADER_RE = re.compile(r"^/disk(\d+)/([^/]+)$")
 _VOL_HEADER_RE = re.compile(r"^/disk(\d+)/([^/]+)/(.+)$")
 
 
-def parse_dirrec(text: str, disk: int, block_size: int) -> tuple[list[Partition], list[VolumeUsage]]:
+def parse_dirrec(text: str, disk: int, block_size: int) -> tuple[list[Partition], list[VolumeUsage], list[CatalogEntry]]:
     """`dirrec` at disk level: the partition table, then for every partition its
     volume table followed by one file listing per volume.
 
@@ -142,6 +142,7 @@ def parse_dirrec(text: str, disk: int, block_size: int) -> tuple[list[Partition]
 
     tables: dict[str, list[Volume]] = {}  # per partition, volumes still waiting for their file listing
     usages: list[VolumeUsage] = []
+    catalog: list[CatalogEntry] = []
     i = 0
     while i < len(lines) - 1:
         head, nxt = lines[i], lines[i + 1]
@@ -164,7 +165,22 @@ def parse_dirrec(text: str, disk: int, block_size: int) -> tuple[list[Partition]
                 bs = block.get(part) or block_size
                 used = sum(math.ceil(f.size / bs) * bs for f in files)
                 usages.append(VolumeUsage(disk, part, match.index, match.name, used, len(files), sum(f.size for f in files)))
+                catalog.extend(CatalogEntry(match, f) for f in files)
             i = end + 1
             continue
         i += 1
-    return partitions, usages
+    return partitions, usages, catalog
+
+
+def split_infoall(text: str) -> dict[int, str]:
+    """`infoall` prints each file's `infoi` block one after another. Returns {file number: its block}."""
+    lines = text.splitlines()
+    starts = [i for i in range(len(lines) - 1) if lines[i].startswith("/") and lines[i + 1].startswith("fnr:")]
+    blocks: dict[int, str] = {}
+    for n, i in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+        block = "\n".join(lines[i:end]).rstrip()
+        number = lines[i + 1].split(":", 1)[1].strip()
+        if number.isdigit():
+            blocks[int(number)] = block
+    return blocks

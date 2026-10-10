@@ -86,6 +86,43 @@ def smoke_test(report_path: str | None = None) -> int:
         assert len(disks) == 1, f"expected 1 disk, got {len(disks)}"
         return f"read {disks[0].path} ({disks[0].type})"
 
+    def audio_stack() -> str:
+        """miniaudio, soundfile (with its native libsndfile) and numpy all load, and a WAV decodes end to end.
+        These are native libraries, which a standalone build can silently leave out."""
+        import wave
+
+        import miniaudio
+        import numpy
+        import soundfile
+
+        from akaiutil_gui.audio.sample import load_wav
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.wav"
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(22050)
+                w.writeframes(numpy.array([0, 1000, -1000, 32767], dtype="<i2").tobytes())
+            sample = load_wav(path, "t", None)
+        assert list(sample.samples) == [0, 1000, -1000, 32767] and sample.rate == 22050
+        return f"miniaudio {miniaudio.__version__}, soundfile {soundfile.__version__} (libsndfile {soundfile.__libsndfile_version__}), numpy {numpy.__version__}"
+
+    def audio_devices() -> str:
+        """Informational: a CI machine has no sound card, so zero devices (or no audio system) must not fail the build.
+        What matters is that asking doesn't crash the app."""
+        from akaiutil_gui.audio import preview
+
+        return f"{len(preview.list_output_devices())} output device(s)"
+
+    def dialogs() -> str:
+        from akaiutil_gui.ui.preview_panel import PreviewPanel
+        from akaiutil_gui.ui.settings_dialog import SettingsDialog
+
+        SettingsDialog().deleteLater()
+        PreviewPanel().deleteLater()
+        return "settings dialog and preview panel build"
+
     def window() -> str:
         w = MainWindow()
         w.show()
@@ -97,6 +134,9 @@ def smoke_test(report_path: str | None = None) -> int:
     lines.append(f"app folder: {paths.app_dir()}  (executable: {sys.executable}, argv[0]: {sys.argv[0]})")
     check("stylesheets", stylesheets)
     check("svg images", svg_images)
+    check("audio libraries", audio_stack)
+    check("audio devices", audio_devices)
+    check("dialogs", dialogs)
     check("notices", notices)
     check("bundled akaiutil", bundled_akaiutil)
     check("akaiutil round trip", talks_to_akaiutil)
@@ -123,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
 
     window = MainWindow()
     window.show()
+    window.schedule_update_check()
     images = [a for a in argv[1:] if not a.startswith("-")]
     if images:
         window.open_images(images)

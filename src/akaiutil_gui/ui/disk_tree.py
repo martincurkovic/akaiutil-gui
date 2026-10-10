@@ -36,6 +36,7 @@ class DiskTree(QTreeWidget):
         self._engine: AkaiEngine | None = None
         self._disks: dict[int, Disk] = {}
         self._volume_order: dict[int, dict[tuple[str, int], int]] = {}  # disk -> DiskUsage.volume_order()
+        self._reveal: tuple[int, str, int] | None = None  # a volume to select once its levels have loaded
         self._generation = 0  # bumped on every reload so stale async results are dropped
         self.itemExpanded.connect(self._on_expanded)
         self.currentItemChanged.connect(self._on_current)
@@ -100,6 +101,44 @@ class DiskTree(QTreeWidget):
         gen = self._generation
         run_async(engine.list_disks, lambda disks: self._add_disks(gen, disks), self.failed.emit)
 
+    def disk_indexes(self) -> list[int]:
+        return sorted(self._disks)
+
+    def reveal_volume(self, vol: Volume) -> None:
+        """Expand down to a volume and select it. The tree loads lazily, so this may have to wait for a level
+        to arrive: it is re-tried each time a level finishes loading."""
+        self._reveal = (vol.disk, vol.partition, vol.index)
+        self._try_reveal()
+
+    def _try_reveal(self) -> None:
+        target = self._reveal
+        if target is None:
+            return
+        disk_index, part_name, vnr = target
+        disk_item = next(
+            (it for it in map(self.topLevelItem, range(self.topLevelItemCount())) if getattr(it.data(0, _ROLE_OBJ), "index", None) == disk_index and isinstance(it.data(0, _ROLE_OBJ), Disk)),
+            None,
+        )
+        if disk_item is None:
+            return
+        if not disk_item.isExpanded():
+            disk_item.setExpanded(True)
+        part_item = next((c for c in map(disk_item.child, range(disk_item.childCount())) if isinstance(c.data(0, _ROLE_OBJ), Partition) and c.data(0, _ROLE_OBJ).name == part_name), None)
+        if part_item is None:
+            return  # the partitions are still loading
+        if not part_item.isExpanded():
+            part_item.setExpanded(True)
+        vol_item = next(
+            (c for c in map(part_item.child, range(part_item.childCount()))
+             if isinstance(c.data(0, _ROLE_OBJ), Volume) and (c.data(0, _ROLE_OBJ).disk, c.data(0, _ROLE_OBJ).partition, c.data(0, _ROLE_OBJ).index) == (disk_index, part_name, vnr)),
+            None,
+        )
+        if vol_item is None:
+            return  # the volumes are still loading
+        self._reveal = None
+        self.setCurrentItem(vol_item)
+        self.scrollToItem(vol_item)
+
     def disk(self, index: int) -> Disk | None:
         return self._disks.get(index)
 
@@ -132,6 +171,7 @@ class DiskTree(QTreeWidget):
             if d.partitions:
                 self._mark_expandable(item)
                 item.setExpanded(True)  # triggers the partition load
+        self._try_reveal()
         self.disksLoaded.emit(disks)
         if disks:  # start with the first disk selected, so its details and space bar are showing
             self.setCurrentItem(self.topLevelItem(0))
@@ -173,6 +213,7 @@ class DiskTree(QTreeWidget):
             disk_item.addChild(item)
         if len(parts) == 1 and not parts[0].is_dd:  # a floppy: save the user a click
             disk_item.child(0).setExpanded(True)
+        self._try_reveal()
 
     def _add_volumes(self, gen: int, part_item: QTreeWidgetItem, vols: list[Volume]) -> None:
         if gen != self._generation:
@@ -186,6 +227,7 @@ class DiskTree(QTreeWidget):
             part_item.addChild(item)
         # a lone floppy image: jump straight to its files. (With several disks
         # open, which one to auto-select would be arbitrary.)
+        self._try_reveal()
         only_partition = part_item.parent() is not None and part_item.parent().childCount() == 1
         current = self.currentItem()
         nothing_deeper_chosen = current is None or current.parent() is None  # none, or just the disk

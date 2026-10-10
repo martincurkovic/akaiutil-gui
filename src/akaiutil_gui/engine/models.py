@@ -119,6 +119,59 @@ _KIND_BY_EXT = {
 
 
 @dataclass(frozen=True)
+class Loop:
+    """One sample loop. `end` is the LOOPAT marker, the loop's LAST frame, and `length` measures
+    backwards from it, so the loop is [end - length, end] (AKAISDS's AGENTS.md: "LOOPAT is the loop's
+    END"). `length` can be fractional: akaiutil prints it as whole frames plus 1/65536ths."""
+
+    slot: int  # 1..8, the loop's number on the sampler
+    end: int
+    length: float
+    time_ms: int | None  # how long the sampler dwells in it; None = HOLD (until the key is released)
+
+    @property
+    def start(self) -> int:
+        return max(0, round(self.end - self.length))
+
+
+@dataclass(frozen=True)
+class SampleInfo:
+    """What a sample header says about how it plays, in frames (not akaiutil's hex)."""
+
+    name: str
+    generation: str  # "S900" or "S1000/S3000"
+    frames: int
+    rate: int
+    root_key: int | None  # MIDI note
+    semitones: int = 0  # akaiutil's `stune`
+    cents: int = 0  # akaiutil's `ctune`
+    hold_tune_cents: int = 0  # `hltoff`: tunes the HOLD loop
+    play_mode: str = ""  # akaiutil's pmode: LOOP, LOOPNOTREL, NOLOOP, TOEND (S1000/S3000); ONESHOT, LOOP, ALTLOOP (S900)
+    start: int = 0  # the play markers
+    end: int = 0
+    loops: tuple[Loop, ...] = ()  # only the loops that actually loop (time is not 0)
+    loop_length: int = 0  # S900: a single loop, this many frames, ending at `end`
+
+    @property
+    def duration_s(self) -> float:
+        return self.frames / self.rate if self.rate else 0.0
+
+    @property
+    def has_loop_to_preview(self) -> bool:
+        """True when previewing this sample should loop. S900 loops aren't previewed (their loop
+        start isn't known to this app), nor are modes that don't loop."""
+        return self.generation == "S1000/S3000" and self.play_mode in ("LOOP", "LOOPNOTREL") and bool(self.loops)
+
+
+@dataclass(frozen=True)
+class CatalogEntry:
+    """One file on a disk with the volume it lives in, for searching across volumes."""
+
+    volume: "Volume"
+    file: FileEntry
+
+
+@dataclass(frozen=True)
 class VolumeUsage:
     """Space a volume's files take, in whole allocation blocks (as akaiutil allocates them)."""
 
@@ -136,6 +189,7 @@ class DiskUsage:
     disk: Disk
     partitions: list[Partition]
     volumes: list[VolumeUsage]
+    catalog: list[CatalogEntry] = field(default_factory=list)  # every file on the disk
 
     def volumes_in(self, partition: str) -> list[VolumeUsage]:
         return sorted((v for v in self.volumes if v.partition == partition), key=lambda v: v.index)

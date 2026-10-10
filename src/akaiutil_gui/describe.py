@@ -18,7 +18,7 @@ knowing about: in akaiutil's own names `ctune` is the *cents* (fine) tune and
 import re
 from dataclasses import dataclass, field
 
-from .engine.models import DiskUsage, FileEntry
+from .engine.models import DiskUsage, FileEntry, Loop, SampleInfo
 from .formatting import human_size, note_name, percent, plural
 
 
@@ -596,3 +596,66 @@ def describe_volume(text: str, usage: DiskUsage | None = None) -> Details:
 def describe_takes(title: str, text: str) -> Details:
     """Direct-to-disk partitions: akaiutil's list of takes, as printed."""
     return Details(title=title, blocks=[Block("Takes", text=text.strip("\n"))], raw=text)
+
+
+# ------------------------------------------------------------------ sample data
+def _loop_frames(s: str) -> float | None:
+    """'0x000000a8.0x8fdf' -> 168.56... (whole frames, then 1/65536ths)."""
+    m = re.match(r"(0x[0-9a-fA-F]+)\.(0x[0-9a-fA-F]+)$", s.strip())
+    return int(m.group(1), 16) + int(m.group(2), 16) / 65536 if m else None
+
+
+def _first_int(s: str) -> int | None:
+    m = re.search(r"-?\d+", s)
+    return int(m.group()) if m else None
+
+
+def parse_sample_info(text: str) -> SampleInfo | None:
+    """What akaiutil's info text says about how a sample plays, as numbers (frames, Hz, MIDI notes).
+    None if the text isn't a sample's info."""
+    _, root, _ = parse_info(text)
+    ftype = root.get("type")
+    if ftype in ("S1000 sample", "S3000 sample", "CD3000 CD-ROM sample parameters"):
+        generation = "S1000/S3000"
+    elif ftype == "S900 sample":
+        generation = "S900"
+    else:
+        return None
+    frames, rate = _count(root.get("scount")), _first_int(root.get("srate"))
+    if frames is None or not rate:
+        return None
+    starts = root.all("start")  # the first is the file's block, the second (if any) the play marker
+    start = _num(starts[-1].value) if len(starts) > 1 else 0
+    end = _num(root.get("end")) if root.has("end") else frames - 1
+
+    if generation == "S900":
+        try:
+            root_key = round(float(root.get("npitch")))
+        except ValueError:
+            root_key = None
+        return SampleInfo(
+            name=root.get("ramname"), generation=generation, frames=frames, rate=rate, root_key=root_key,
+            play_mode=root.get("pmode"), start=start or 0, end=end if end is not None else frames,
+            loop_length=_num(root.get("llen")) or 0,
+        )
+
+    loops = []
+    for node in root.sections("loop "):
+        slot, at, length = _first_int(node.key), _num(node.get("loopat")), _loop_frames(node.get("length"))
+        if None in (slot, at, length):
+            continue
+        ltime = node.get("ltime")
+        loops.append(Loop(slot=slot, end=at, length=length, time_ms=None if ltime.upper() == "HOLD" else _first_int(ltime) or 0))
+    return SampleInfo(
+        name=root.get("ramname"), generation=generation, frames=frames, rate=rate,
+        root_key=_num(root.get("rkey")) if root.has("rkey") else None,
+        semitones=_first_int(root.get("stune")) or 0, cents=_first_int(root.get("ctune")) or 0,
+        hold_tune_cents=_first_int(root.get("hltoff")) or 0, play_mode=root.get("pmode"),
+        start=start or 0, end=end if end is not None else frames - 1, loops=tuple(loops),
+    )
+
+
+def play_mode_label(info: SampleInfo) -> str:
+    """'Normal looping', 'One-shot'...: the sample's own play mode in words."""
+    table = _S900_PLAY_MODE if info.generation == "S900" else _SAMPLE_LOOP_MODE
+    return table.get(info.play_mode, info.play_mode)

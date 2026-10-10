@@ -33,6 +33,17 @@ Qt Company, see <https://www.qt.io/licensing/>), as unmodified shared libraries
 that are shipped alongside the app and can be replaced with other builds of the
 same version. Source code: <https://code.qt.io/> and <https://pypi.org/project/PySide6/>.
 
+## Audio preview: miniaudio, soundfile, libsndfile and NumPy
+
+- **miniaudio** (the Python package by Irmen de Jong, wrapping David Reid's C library of the same name) plays the
+  preview through the computer's own audio system. MIT licence (the C library is also available as public domain).
+- **soundfile** reads the WAV files akaiutil exports. BSD 3-Clause licence. It uses **libsndfile**
+  (Copyright Erik de Castro Lopo and contributors), licensed under the GNU Lesser General Public License 2.1 or later,
+  shipped as an unmodified shared library that can be replaced with another build of the same version.
+  Source: <https://github.com/libsndfile/libsndfile>
+- **NumPy** does the waveform and sample arithmetic. BSD 3-Clause licence, with the licences of the libraries bundled in its
+  wheels listed in the package's own `LICENSE.txt`.
+
 ## Python
 
 The app is written in Python and ships with a Python runtime, which is

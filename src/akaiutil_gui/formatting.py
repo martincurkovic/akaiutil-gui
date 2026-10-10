@@ -26,3 +26,13 @@ def percent(fraction: float) -> str:
     """'73%', but '99.8%' / '0.4%' near the ends so "almost full" never reads as "full"."""
     pct = fraction * 100
     return f"{pct:.1f}%" if 0 < pct < 1 or 99 < pct < 100 else f"{pct:.0f}%"
+
+
+def human_duration(seconds: float) -> str:
+    """'5.8 ms', '500 ms', '2.50 s', '1 min 12.3 s'."""
+    ms = seconds * 1000
+    if ms < 1000:
+        return f"{ms:.1f} ms" if ms < 100 else f"{ms:.0f} ms"
+    if seconds < 60:
+        return f"{seconds:.2f} s"
+    return f"{int(seconds // 60)} min {seconds % 60:.1f} s"

@@ -3,13 +3,15 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableWidget, QTableWidgetItem
 
-from akaiutil_gui.engine.models import FileEntry
+from akaiutil_gui.engine.models import CatalogEntry, FileEntry, Volume
 from akaiutil_gui.formatting import human_size
 
 _ROLE_FILE = Qt.ItemDataRole.UserRole
 _ROLE_SORT = Qt.ItemDataRole.UserRole + 1
+_ROLE_VOLUME = Qt.ItemDataRole.UserRole + 2
 
-COLUMNS = ["#", "Name", "Type", "Size", "Start block", "OS ver"]
+COLUMNS = ["#", "Name", "Type", "Size", "Start block", "OS ver", "Location"]
+LOCATION = COLUMNS.index("Location")  # only shown for search results, which span volumes
 
 
 class _SortItem(QTableWidgetItem):
@@ -40,15 +42,26 @@ class FileTable(QTableWidget):
         hdr.setStretchLastSection(False)
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Name takes the slack
-        for col, width in {0: 48, 2: 130, 3: 90, 4: 100, 5: 80}.items():
+        self.setColumnHidden(LOCATION, True)
+        for col, width in {0: 48, 2: 130, 3: 90, 4: 100, 5: 80, LOCATION: 180}.items():
             self.setColumnWidth(col, width)
         self.itemSelectionChanged.connect(lambda: self.selectionFilesChanged.emit(self.selected_files()))
 
-    def set_files(self, files: list[FileEntry]) -> None:
+    def set_files(self, files: list[FileEntry], volume: Volume | None = None) -> None:
+        """Show one volume's files."""
+        self._fill([(volume, f) for f in files], results=False)
+
+    def set_results(self, entries: list[CatalogEntry]) -> None:
+        """Show search results: files from any number of volumes, with where each one lives."""
+        self._fill([(e.volume, e.file) for e in entries], results=True)
+
+    def _fill(self, rows: list[tuple[Volume | None, FileEntry]], results: bool) -> None:
         self.setSortingEnabled(False)  # otherwise rows move while we fill them
-        self.setRowCount(len(files))
+        self.setRowCount(len(rows))
+        self.setColumnHidden(LOCATION, not results)
         right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        for row, f in enumerate(files):
+        for row, (vol, f) in enumerate(rows):
+            where = f"disk{vol.disk} / {vol.partition} / {vol.name}" if vol is not None else ""
             cells = [
                 (str(f.index), f.index, right),
                 (f.name, f.name.lower(), None),
@@ -56,6 +69,7 @@ class FileTable(QTableWidget):
                 (human_size(f.size), f.size, right),
                 (f.start_block, int(f.start_block, 16), right),
                 (f.os_version or "—", f.os_version, right),
+                (where, where.lower(), None),
             ]
             for col, (text, key, align) in enumerate(cells):
                 item = _SortItem(text)
@@ -64,15 +78,32 @@ class FileTable(QTableWidget):
                     item.setTextAlignment(align)
                 if col == 0:
                     item.setData(_ROLE_FILE, f)
+                    item.setData(_ROLE_VOLUME, vol)
                 self.setItem(row, col, item)
         self.setSortingEnabled(True)
-        self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+        self.sortByColumn(1 if results else 0, Qt.SortOrder.AscendingOrder)  # results by name, a volume by file number
         self.selectionFilesChanged.emit([])
 
     def clear_files(self) -> None:
         self.set_files([])
 
-    def selected_files(self) -> list[FileEntry]:
+    def selected_rows(self) -> list[tuple[Volume | None, FileEntry]]:
+        """The selected rows as (volume, file), the volume being where that file lives (None if unknown)."""
         rows = sorted({i.row() for i in self.selectedItems()})
-        files = [self.item(r, 0).data(_ROLE_FILE) for r in rows]
-        return sorted(files, key=lambda f: f.index)
+        pairs = [(self.item(r, 0).data(_ROLE_VOLUME), self.item(r, 0).data(_ROLE_FILE)) for r in rows]
+        return sorted(pairs, key=lambda p: ((p[0].disk, p[0].partition, p[0].index) if p[0] else (0, "", 0), p[1].index))
+
+    def selected_files(self) -> list[FileEntry]:
+        return [f for _, f in self.selected_rows()]
+
+    def select_file(self, volume: Volume | None, file_index: int) -> bool:
+        """Select (and scroll to) the row for a file; False if it isn't in the table."""
+        for row in range(self.rowCount()):
+            item = self.item(row, 0)
+            vol, f = item.data(_ROLE_VOLUME), item.data(_ROLE_FILE)
+            same_volume = volume is None or vol is None or (vol.disk, vol.partition, vol.index) == (volume.disk, volume.partition, volume.index)
+            if f.index == file_index and same_volume:
+                self.selectRow(row)
+                self.scrollToItem(item)
+                return True
+        return False
