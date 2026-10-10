@@ -130,6 +130,17 @@ def _fetch_windows_prebuilt(work: Path, report: Progress) -> Path:
     return out
 
 
+def download_source(dest_dir: str | os.PathLike, progress: Progress | None = None) -> Path:
+    """Download the pinned source tarball into dest_dir (checked against its SHA-256).
+
+    Releases attach this next to the built apps, because the apps contain a compiled copy of
+    akaiutil, which is GPL-2 and so comes with an obligation to offer its source.
+    """
+    dest = Path(dest_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    return _download(SOURCE_ARCHIVE, SOURCE_SHA256, dest, progress or (lambda _msg: None))
+
+
 def install(
     dest_dir: str | os.PathLike | None = None,
     build_from_source: bool | None = None,

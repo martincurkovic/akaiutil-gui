@@ -34,6 +34,7 @@ from akaiutil_gui.engine.models import Disk, DiskUsage, ExportResult, FileEntry,
 from . import theme
 from .details_view import DetailsView
 from .disk_tree import DiskTree
+from .notices_dialog import NoticesDialog
 from .file_table import FileTable
 from .tasks import run_async
 from .usage_bar import UsageSummary
@@ -311,6 +312,7 @@ class MainWindow(QMainWindow):
         about = self._action("&About akaiutil-gui", self._about)
         about.setMenuRole(QAction.MenuRole.AboutRole)
         help_menu.addAction(about)
+        help_menu.addAction(self._action("Third-party &notices…", lambda: NoticesDialog(self).exec()))
 
     def _action(self, text, slot, shortcut=None) -> QAction:
         act = QAction(text, self)
@@ -706,7 +708,7 @@ class MainWindow(QMainWindow):
             "A cross-platform Qt front end for akaiutil. Proof of concept.<br><br>"
             "Does its work by running <b>akaiutil</b> by Klaus Michael Indlekofer, "
             "which is licensed under the GNU GPL v2 or later.<br><br>"
-            "akaiutil-gui is licensed under the GNU GPL v2 or later.",
+            "akaiutil-gui is licensed under the GNU GPL v2 or later (see Help ▸ Third-party notices).",
         )
 
     def _restore_geometry(self) -> None:
