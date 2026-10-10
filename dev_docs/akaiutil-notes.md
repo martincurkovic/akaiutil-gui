@@ -37,6 +37,16 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
 - A loop's `at` is its **last frame** and `len` how far back it starts, so a WAV `smpl` loop (start, last frame) maps directly.
   Time 9999 is HOLD.
 
+## Slots and sorting
+- A sampler lists a volume's files in slot order (the `fnr` column) and has no way to reorder them. `reni <slot> <name> <new slot>`
+  moves a file to a *free* slot inside the same volume (it copies the whole directory entry, so tags and OS version come along).
+  `sorting.plan_moves` turns "sorted order" into such moves, taking each cycle of files that must trade places through one spare slot.
+- `reni` re-encodes the name it is given (and derives the type from the extension), so a name that doesn't survive that exactly would
+  be altered by moving it. `engine.sort_files` refuses to start if any name that has to move wouldn't, then re-lists the volume
+  and checks that every (name, size, start block, OS version, tags) is still there.
+- Programs are numbered by their place among a volume's programs (that's what a MIDI program change picks), and a multi refers to
+  its programs by name. So sorting only samples is always safe; sorting everything can change which program a number selects.
+
 ## Other
 - `dir` of a volume has a `(max. N)` volume limit; a floppy holds one volume.
 - `reni <idx> /disk0/A/VOL_NAME/NEW_NAME.S3` moves between volumes of one partition.
