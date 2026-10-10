@@ -28,6 +28,8 @@ jobs:
         # most of the tests drive the real akaiutil; without it they would be skipped, not run
         run: uv run python scripts/get_akaiutil.py
       - name: Run tests
+        env:
+          AKAIUTIL_GUI_NO_AUDIO: "1" # the runner has no sound card; tests that need a device use a fake one
         run: uv run pytest tests/ -v
 
   build-macos-arm:
@@ -51,7 +53,7 @@ jobs:
         run: |
           BIN=$(find "src/$APP_NAME.app/Contents/MacOS" -maxdepth 1 -type f -perm -u+x -name 'main*' | head -1)
           echo "Running $BIN"
-          QT_QPA_PLATFORM=offscreen "$BIN" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
+          QT_QPA_PLATFORM=offscreen AKAIUTIL_GUI_NO_AUDIO=1 "$BIN" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
           cat smoke.txt
       - name: Build DMG
         run: |
@@ -85,7 +87,7 @@ jobs:
         run: |
           BIN=$(find "src/$APP_NAME.app/Contents/MacOS" -maxdepth 1 -type f -perm -u+x -name 'main*' | head -1)
           echo "Running $BIN"
-          QT_QPA_PLATFORM=offscreen "$BIN" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
+          QT_QPA_PLATFORM=offscreen AKAIUTIL_GUI_NO_AUDIO=1 "$BIN" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
           cat smoke.txt
       - name: Build DMG
         run: |
@@ -120,7 +122,7 @@ jobs:
       - name: Smoke-test the built app
         run: |
           echo "Running src/$APP_NAME.dist/main.bin"
-          QT_QPA_PLATFORM=offscreen "src/$APP_NAME.dist/main.bin" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
+          QT_QPA_PLATFORM=offscreen AKAIUTIL_GUI_NO_AUDIO=1 "src/$APP_NAME.dist/main.bin" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
           cat smoke.txt
       - name: Build AppImage
         run: |
@@ -164,6 +166,7 @@ jobs:
         # the built app has no console, so Start-Process waits for it and the report comes from a file
         run: |
           $env:QT_QPA_PLATFORM = "offscreen"
+          $env:AKAIUTIL_GUI_NO_AUDIO = "1"
           $p = Start-Process -FilePath "src\$env:APP_NAME.dist\main.exe" -ArgumentList "--smoke-test=smoke.txt" -Wait -PassThru
           if (Test-Path smoke.txt) { Get-Content smoke.txt } else { Write-Host "no smoke test report was written" }
           if ($p.ExitCode -ne 0) { throw "smoke test failed (exit code $($p.ExitCode))" }
