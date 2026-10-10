@@ -249,6 +249,41 @@ are told. Tags are copied by number, so if the other partition names its tags di
 can't be finished, what was started is removed again, so no half-copied volume is left behind. An S900 volume only goes to an S900
 hard disk, and the other kinds only to the other hard disks.
 
+### Changing a sample's settings
+
+Select one S1000 or S3000 sample and choose **Edit > Sample Settings…** (or right-click it). The dialog shows and changes:
+
+- **Root key** (shown as a note name, middle C being C3), **tuning** in semitones and **fine tuning** in cents (each up to 50
+  either way).
+- **Play mode:** normal looping, loop until release, no looping, or play to the sample's end.
+- **Start and end markers** (the first and last frame that plays).
+- **Up to 8 loops:** switch each on, give its start and end frames, and either a time in milliseconds or **Hold** (until the key
+  is released).
+
+The sample's waveform sits at the top of the dialog with the markers on it: the **start and end markers** in grey (the part
+outside them is dimmed) and each loop's **in and out markers** in the colour of that loop's number in the list below.
+
+- **Drag a marker** to move it, and the numbers follow. Hold **Shift** while dragging for fine control. A marker dragged past its
+  partner pushes it along, so a loop or the start/end pair can never end up backwards. A marker can be grabbed anywhere along its
+  line. Where the sample's start or end and a loop's marker overlap, the height decides: the **top half** takes the sample's
+  marker and the **bottom half** the loop's (each has its little handle on that side). Where several loop markers sit on top of one
+  another, clicking again takes the next one.
+- **Zoom** with Ctrl (Cmd on a Mac) + scroll, a trackpad pinch, or the **+** / **−** buttons (**Fit** shows the whole sample),
+  and **pan** with Shift + scroll, a sideways swipe or the scroll bar that appears under the waveform. Zoom right in to put a
+  marker on an exact frame.
+- **Click the waveform** (away from the markers) to hear the sample as it is set in the dialog: from the start
+  marker, through the selected loop (the one whose marker you last touched, otherwise the first that is on) for its time or until
+  you click again if it is on Hold, then to the end marker. Click again at any time to stop. While a loop plays, moving its markers changes it at its next pass,
+  so edits can be heard as you make them. The preview plays at the sample's original pitch; root key and tuning aren't applied.
+
+**Save** is only available when the settings make sense (a start before its end, everything inside the sample). The audio itself
+is never changed.
+
+The samplers can't edit a header in place, and neither can akaiutil, so the app writes the sample again with the new settings and
+puts it back in the same place: same name, same slot in the volume, same tags and OS version. The old copy is deleted only after
+the new one has been checked, and if anything goes wrong the old one is put back and nothing changes. Still, **this changes the
+sample inside the image and can't be undone** except from a backup. S900 samples aren't supported (their headers are different).
+
 ---
 
 ## Sorting a volume
@@ -274,7 +309,7 @@ A volume with every slot in use (510 files, or 64 on an S900) has no room to shu
 
 - **File > New Disk Image…** makes a new, empty, formatted image file and opens it next to the others. Choose the kind:
   an S3000, S1000 or CD3000 hard disk (1 to 512 MB, split into partitions of up to 60 MB), an S900 hard disk (up to 64 MB), or
-  a floppy (S900, S1000 or S3000, at 800 KB or 1.6 MB).
+  a floppy (S900, S1000 or S3000, DD at 800 KB or HD at 1.6 MB).
 - **Format Disk…** (right-click a disk, or Edit > Format Disk…) **erases everything** on a disk and sets it up as an empty one of
   the kind you choose. A floppy keeps its size, so only formats of the same density are offered. It tells you how many files
   and volumes will be lost, and asks first.
@@ -368,7 +403,7 @@ details. It contains file paths and Akai file names, but never audio. It is limi
 ## Good to know
 
 - **No undo,** and changes are written at once. Say yes to the backup when editing is switched on, and use **File > Revert to Backup…** to go back.
-- The app can't change a sample's loop points, tuning or other settings yet; it only sets them when importing.
+- A sample's loops, root key, tuning, play mode and markers can be changed with **Edit > Sample Settings…** (S1000 and S3000 samples only).
 - S900 samples are previewed as one-shots, and get no loops on import.
 - Direct-to-disk recordings (takes) are listed as text only.
 - Adding or closing a disk image restarts akaiutil, so disk numbers can change and the search index is rebuilt.

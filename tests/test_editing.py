@@ -378,9 +378,9 @@ def test_a_floppy_keeps_its_density_when_reformatted(binary, tmp_path):
     try:
         floppy = eng.list_disks()[0]
         assert floppy.type == "FLL"
-        with pytest.raises(EngineError, match="low-density floppy can't be formatted as “S3000 floppy \\(1.6 MB\\)”"):
+        with pytest.raises(EngineError, match="DD floppy can't be formatted as “S3000 floppy \\(HD, 1.6 MB\\)”"):
             eng.format_disk(floppy, formats.by_key("fl3h"))
-        with pytest.raises(EngineError, match="low-density floppy can't be formatted as “S3000 hard disk”"):
+        with pytest.raises(EngineError, match="DD floppy can't be formatted as “S3000 hard disk”"):
             eng.format_disk(floppy, formats.by_key("hd3"))
         eng.format_disk(floppy, formats.by_key("fl3l"))  # same density, a different sampler
         (vol,) = eng.list_volumes(eng.list_partitions(eng.list_disks()[0])[0])

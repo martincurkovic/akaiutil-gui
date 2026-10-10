@@ -79,6 +79,7 @@ def answers(monkeypatch):
         new_volume = None
         copy_volume = None
         revert = None
+        sample_settings = None
         format = None
         new_image = None
         save_path = None
@@ -102,6 +103,7 @@ def answers(monkeypatch):
     monkeypatch.setattr(MainWindow, "_ask_new_volume", lambda self, *args: (a.asked.append(("new", args)), a.new_volume)[1])
     monkeypatch.setattr(MainWindow, "_ask_copy_volume", lambda self, vol, count, need, targets: (a.asked.append(("copy", vol.name, count, [t.label for t in targets])), a.copy_volume(targets) if callable(a.copy_volume) else None)[1])
     monkeypatch.setattr(MainWindow, "_ask_revert", lambda self, entries: (a.asked.append(("revert", [(p.name, b.created) for p, b in entries])), a.revert(entries) if callable(a.revert) else None)[1])
+    monkeypatch.setattr(MainWindow, "_ask_sample_settings", lambda self, f, current, audio=None: (a.asked.append(("settings", f.name, None if audio is None else len(audio))), a.sample_settings(current) if callable(a.sample_settings) else None)[1])
     monkeypatch.setattr(MainWindow, "_ask_format", lambda self, disk: (a.asked.append(("format", disk.index, disk.type)), a.format)[1])
     monkeypatch.setattr(MainWindow, "_ask_new_image", lambda self: (a.asked.append(("newimage",)), a.new_image)[1])
     monkeypatch.setattr(MainWindow, "_ask_save_path", lambda self, suggestion: (a.asked.append(("save", suggestion)), a.save_path)[1])
@@ -378,7 +380,7 @@ def test_context_menus_offer_what_fits_what_was_clicked(qt_app, window, editable
     window.table.selectRow(0)
     rows = window._selected_rows()
     menu = window._file_menu(rows)
-    assert texts(menu) == ["Export…", "Export as WAV…", "Copy", "Cut", "Rename…", "Delete…"]
+    assert texts(menu) == ["Export…", "Export as WAV…", "Copy", "Cut", "Rename…", "Sample Settings…", "Delete…"]
     window.table.selectAll()
     menu = window._file_menu(window._selected_rows())
     rename = next(a for a in menu.actions() if a.text() == "Rename…")
@@ -920,3 +922,390 @@ def test_the_details_stay_hidden_until_asked_for_and_can_be_hidden_again(qt_app)
     assert d.details.isHidden()
     d.deleteLater()
     assert three_way(lines=()).details_button.isHidden()  # nothing to show: no button
+
+
+# ------------------------------------------------------------------- a sample's settings
+def sample_dialog(root=60, loops=((3000, 4000),), frames=22050, audio=None):
+    import struct
+
+    from akaiutil_gui import akai_header
+    from akaiutil_gui.ui import edit_dialogs
+
+    h = bytearray(akai_header.build_header("S3000", 44100, frames, root=root, loops=list(loops)))
+    h[26:30] = struct.pack("<I", frames)
+    h[34:38] = struct.pack("<I", frames - 1)
+    return edit_dialogs.SampleSettingsDialog(None, "KICK.S3", akai_header.read_settings(bytes(h)), audio)
+
+
+def test_the_sample_dialog_shows_the_settings_and_gives_them_back_unchanged(qt_app):
+    from akaiutil_gui import akai_header
+
+    d = sample_dialog(root=60)
+    assert (d.root.value(), d.root_name.text(), d.semitone.value(), d.cents.value()) == (60, "C3", 0, 0)
+    assert (d.start.value(), d.end.value()) == (0, 22049)
+    on = [row[0].isChecked() for row in d.loop_rows]
+    assert on == [True] + [False] * 7
+    assert d.result_settings == d._current and d.save_button.isEnabled()
+    d.deleteLater()
+
+
+def test_editing_in_the_sample_dialog_changes_the_result(qt_app):
+    from akaiutil_gui import akai_header
+
+    d = sample_dialog()
+    d.root.setValue(72)
+    assert d.root_name.text() == "C4"
+    d.semitone.setValue(-3)
+    d.cents.setValue(20)
+    d.play_mode.setCurrentIndex(d.play_mode.findData(2))
+    d.start.setValue(100)
+    on, start, end, time, hold = d.loop_rows[1]
+    on.setChecked(True)
+    assert start.isEnabled() and not time.isEnabled()  # (hold is on, so the time is fixed)
+    hold.setChecked(False)
+    assert time.isEnabled()
+    start.setValue(500)
+    end.setValue(900)
+    time.setValue(250)
+    r = d.result_settings
+    assert (r.root, r.semitone, r.cents, r.play_mode, r.start) == (72, -3, 20, 2, 100)
+    assert [(l.start, l.end, l.time) for l in r.loops[:2]] == [(3000, 4000, akai_header.LOOP_HOLD), (500, 900, 250)]
+    d.deleteLater()
+
+
+def test_the_sample_dialog_wont_save_settings_that_cant_be_written(qt_app):
+    d = sample_dialog()
+    d.start.setValue(5000)
+    d.end.setValue(100)  # the end before the start
+    assert not d.save_button.isEnabled() and "start marker" in d.problem.text()
+    d.end.setValue(9000)
+    assert d.save_button.isEnabled() and d.problem.text() == ""
+    on, start, end, time, hold = d.loop_rows[0]
+    start.setValue(4000)
+    end.setValue(3000)
+    assert not d.save_button.isEnabled() and "Loop 1" in d.problem.text()
+    on.setChecked(False)  # (a loop that is off isn't checked)
+    assert d.save_button.isEnabled()
+    d.deleteLater()
+
+
+def test_a_loop_that_was_off_with_junk_in_it_comes_back_untouched(qt_app):
+    import dataclasses
+
+    from akaiutil_gui import akai_header
+
+    d = sample_dialog()
+    junk = akai_header.LoopSetting(1473175, 1, 0, 0, bytes(range(1, 11)) + b"\x00\x00")
+    d._current = dataclasses.replace(d._current, loops=(d._current.loops[0], junk, *d._current.loops[2:]))
+    assert d.result_settings.loops[1] == junk
+    d.deleteLater()
+
+
+def test_sample_settings_are_edited_from_the_edit_menu_and_the_file_menu(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    window._update_edit_actions()
+    assert window.act_sample_settings.isEnabled()
+    menu = window._file_menu(window._selected_rows())
+    entry = next(a for a in menu.actions() if a.text() == "Sample Settings…")
+    assert entry.isEnabled()
+    window.table.selectAll()
+    window._update_edit_actions()
+    assert not window.act_sample_settings.isEnabled()  # (one sample at a time)
+
+
+def test_changing_a_samples_settings_through_the_window(qt_app, window, editable_hd, answers):
+    import dataclasses
+
+    open_and_show(qt_app, window, editable_hd)
+    kick = next(f for f in window._volume_files if f.name == "KICK.S3")
+    answers.confirm = True
+    answers.sample_settings = lambda current: dataclasses.replace(current, root=40)
+    window._sample_settings(window._volume, kick)
+    assert pump(qt_app, lambda: window._writable and "Changed the settings of “KICK.S3”" in window.statusBar().currentMessage())
+    assert pump(qt_app, lambda: [f.name for _, f in window.table.selected_rows()] == ["KICK.S3"])
+    assert pump(qt_app, lambda: window._engine.read_sample_settings(window._volume, kick).root == 40)
+    assert answers.warnings == []
+    asked = next(a for a in answers.asked if a[0] == "settings")
+    assert asked[2] == 22050  # (the dialog was given the sample's audio for its waveform)
+
+
+def test_cancelling_or_changing_nothing_in_the_sample_dialog_writes_nothing(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    kick = next(f for f in window._volume_files if f.name == "KICK.S3")
+    answers.confirm = True
+    answers.sample_settings = None  # cancelled
+    window._sample_settings(window._volume, kick)
+    assert pump(qt_app, lambda: any(a[0] == "settings" for a in answers.asked))
+    before = editable_hd.read_bytes()
+    answers.asked.clear()
+    answers.sample_settings = lambda current: current  # nothing changed
+    window._sample_settings(window._volume, kick)
+    assert pump(qt_app, lambda: any(a[0] == "settings" for a in answers.asked))
+    assert editable_hd.read_bytes() == before
+
+
+def test_s900_samples_have_no_settings_entry(qt_app, window, images):
+    window.open_images([str(images["fl9"])])
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1)
+    window.tree.reveal_volume(vol(1))
+    assert pump(qt_app, lambda: window._volume is not None and window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    assert window._editable_sample(window._selected_rows()) is None
+
+
+# ------------------------------------------------------------ the waveform in the sample dialog
+def waveform_dialog(loops=((3000, 4000),)):
+    import numpy as np
+
+    d = sample_dialog(loops=loops, audio=np.zeros(22050, dtype=np.int16))
+    d.resize(700, 900)
+    d.show()
+    return d
+
+
+def test_the_dialogs_waveform_shows_the_markers_of_the_samples_start_end_and_loops_that_are_on(qt_app):
+    from akaiutil_gui.ui import marker_waveform as mw
+
+    d = waveform_dialog(loops=((3000, 4000), (5000, 6000)))
+    assert d.wave.markers == {mw.START: 0, mw.END: 22049, mw.loop_in(0): 3000, mw.loop_out(0): 4000, mw.loop_in(1): 5000, mw.loop_out(1): 6000}
+    on, *_ = d.loop_rows[1]
+    on.setChecked(False)  # (loop 2 off: its markers go)
+    assert mw.loop_in(1) not in d.wave.markers
+    d.loop_rows[3][0].setChecked(True)
+    assert mw.loop_in(3) in d.wave.markers and mw.loop_out(3) in d.wave.markers
+    d.deleteLater()
+
+
+def test_dragging_a_marker_on_the_waveform_changes_the_numbers_beside_it(qt_app):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from akaiutil_gui.ui import marker_waveform as mw
+
+    d = waveform_dialog()
+    w = d.wave
+    x = lambda frame: round(mw.x_for_frame(frame, w.width(), *w.view_state()))  # noqa: E731
+    QTest.mousePress(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x(4000), 60))
+    QTest.mouseMove(w, QPoint(x(7000), 60))
+    QTest.mouseRelease(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x(7000), 60))
+    on, start, end, time, hold = d.loop_rows[0]
+    assert abs(end.value() - 7000) <= 25 and start.value() == 3000
+    assert abs(d.result_settings.loops[0].end - 7000) <= 25
+    assert d.save_button.isEnabled()
+    d.deleteLater()
+
+
+def test_a_marker_pushing_its_partner_on_the_waveform_updates_both_numbers(qt_app):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from akaiutil_gui import akai_header
+    from akaiutil_gui.ui import marker_waveform as mw
+
+    d = waveform_dialog()
+    w = d.wave
+    x = lambda frame: round(mw.x_for_frame(frame, w.width(), *w.view_state()))  # noqa: E731
+    QTest.mousePress(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x(4000), 60))
+    QTest.mouseMove(w, QPoint(x(1000), 60))  # the loop's end dragged to before its start
+    QTest.mouseRelease(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x(1000), 60))
+    on, start, end, time, hold = d.loop_rows[0]
+    assert start.value() < end.value() and abs(end.value() - 1000) <= 25
+    assert not akai_header.problems(d.result_settings)  # (a drag can't make an invalid loop)
+    d.deleteLater()
+
+
+def test_typing_a_marker_number_moves_it_on_the_waveform(qt_app):
+    from akaiutil_gui.ui import marker_waveform as mw
+
+    d = waveform_dialog()
+    d.start.setValue(1234)
+    d.loop_rows[0][2].setValue(9876)
+    assert d.wave.markers[mw.START] == 1234 and d.wave.markers[mw.loop_out(0)] == 9876
+    d.deleteLater()
+
+
+def test_grabbing_a_loop_marker_emphasises_that_loops_row(qt_app):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from akaiutil_gui.ui import marker_waveform as mw
+
+    d = waveform_dialog(loops=((3000, 4000), (8000, 9000)))
+    w = d.wave
+    x = round(mw.x_for_frame(9000, w.width(), *w.view_state()))
+    QTest.mousePress(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, 60))
+    QTest.mouseRelease(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, 60))
+    assert [label.font().bold() for label in d.loop_labels[:3]] == [False, True, False]
+    d.deleteLater()
+
+
+def test_each_loop_row_is_numbered_in_its_markers_colour(qt_app):
+    from akaiutil_gui.ui.volume_colors import volume_color
+
+    d = waveform_dialog()
+    for i, label in enumerate(d.loop_labels):
+        assert volume_color(i).name() in label.styleSheet()
+    d.deleteLater()
+
+
+def test_the_scroll_bar_and_zoom_buttons_appear_with_zoom_and_go_with_fit(qt_app):
+    d = waveform_dialog()
+    assert d.view_scroll.isHidden()
+    d.zoom_in_button.click()
+    d.zoom_in_button.click()
+    assert not d.view_scroll.isHidden() and d.wave.zoom > 1
+    d.view_scroll.setValue(d.view_scroll.maximum())
+    assert d.wave.view_state()[0] == d.view_scroll.maximum()
+    d.zoom_out_button.click()
+    d.fit_button.click()
+    assert d.wave.zoom == 1 and d.view_scroll.isHidden()
+    d.deleteLater()
+
+
+def test_the_dialog_works_without_audio_and_still_has_draggable_markers(qt_app):
+    from akaiutil_gui.ui import marker_waveform as mw
+
+    d = sample_dialog(audio=None)
+    d.show()
+    assert d.wave.frames == 22050 and mw.START in d.wave.markers
+    d.wave.grab()
+    d.deleteLater()
+
+
+# ------------------------------------------------------------ preview from the sample dialog
+def preview_dialog(loops=((3000, 4000),), play_mode=0, audio=True):
+    import dataclasses
+
+    import numpy as np
+
+    from akaiutil_gui import akai_header
+    from akaiutil_gui.ui import edit_dialogs
+
+    base = sample_dialog(loops=loops)
+    current = dataclasses.replace(base._current, play_mode=play_mode)
+    base.deleteLater()
+    ramp = (np.arange(22050) % 20000).astype(np.int16) if audio else None
+    d = edit_dialogs.SampleSettingsDialog(None, "KICK.S3", current, ramp)
+    d.resize(700, 900)
+    d.show()
+    return d
+
+
+def click_empty_waveform(d, frame=8000):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from akaiutil_gui.ui import marker_waveform as mw
+
+    x = round(mw.x_for_frame(frame, d.wave.width(), *d.wave.view_state()))
+    QTest.mousePress(d.wave, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, 60))
+    QTest.mouseRelease(d.wave, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, 60))
+
+
+def test_clicking_the_waveform_plays_the_sample_and_clicking_again_stops_it(qt_app, fake_audio):
+    d = preview_dialog(loops=(), play_mode=2)  # (no looping)
+    assert not hasattr(d, "play_button")  # (a click on the waveform is the only control: no button that changes width)
+    click_empty_waveform(d)
+    assert d.player.is_playing()
+    assert fake_audio.opened[-1].sample_rate == 44100
+    click_empty_waveform(d)
+    assert not d.player.is_playing() and d.wave._playhead is None
+    d.deleteLater()
+
+
+def test_a_click_on_a_marker_drags_it_and_does_not_play(qt_app, fake_audio):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from akaiutil_gui.ui import marker_waveform as mw
+
+    d = preview_dialog()
+    x = round(mw.x_for_frame(3000, d.wave.width(), *d.wave.view_state()))
+    QTest.mousePress(d.wave, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, 60))
+    QTest.mouseRelease(d.wave, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, 60))
+    assert not d.player.is_playing()
+    d.deleteLater()
+
+
+def test_the_preview_plays_what_the_dialog_says_the_loop_and_the_markers(qt_app, fake_audio):
+    d = preview_dialog(loops=((3000, 4000),), play_mode=0)
+    d.start.setValue(1000)
+    d.end.setValue(8000)
+    plan, slot = d._preview_plan()
+    assert (plan.start, plan.end, plan.loop_start, plan.loop_end, plan.looping, slot) == (1000, 8000, 3000, 4000, True, 0)
+    assert plan.dwell_ms is None  # (hold: until stopped)
+    d.loop_rows[0][4].setChecked(False)  # not hold: 500 ms
+    assert d._preview_plan()[0].dwell_ms == 500
+    d.play_mode.setCurrentIndex(d.play_mode.findData(2))  # no looping: plays once, start to end
+    plan, slot = d._preview_plan()
+    assert (plan.looping, slot, plan.start, plan.end) == (False, None, 1000, 8000)
+    d.deleteLater()
+
+
+def test_a_loop_that_is_grabbed_is_the_one_that_plays(qt_app, fake_audio):
+    d = preview_dialog(loops=((3000, 4000), (8000, 9000)))
+    assert d._preview_plan()[1] == 0
+    d._select_loop(1)
+    plan, slot = d._preview_plan()
+    assert slot == 1 and (plan.loop_start, plan.loop_end) == (8000, 9000)
+    d.deleteLater()
+
+
+def test_dragging_the_playing_loops_marker_changes_the_loop_while_it_plays(qt_app, fake_audio):
+    d = preview_dialog(loops=((3000, 4000),))
+    click_empty_waveform(d)
+    assert d.player.is_playing()
+    seen = []
+    d.player.update_loop_points = lambda a, b: seen.append((a, b))
+    d.loop_rows[0][2].setValue(4500)  # the loop's end typed in while it plays
+    assert seen and seen[-1] == (3000, 4500)
+    d.player.stop()
+    d.deleteLater()
+
+
+def test_playback_stops_when_the_dialog_closes(qt_app, fake_audio):
+    d = preview_dialog()
+    click_empty_waveform(d)
+    assert d.player.is_playing()
+    d.reject()
+    assert not d.player.is_playing()
+    d.deleteLater()
+
+
+def test_the_playhead_follows_the_player_and_goes_when_it_finishes(qt_app, fake_audio):
+    d = preview_dialog(loops=(), play_mode=2)
+    click_empty_waveform(d)
+    d.player.position_changed.emit(5000)
+    assert d.wave._playhead == 5000
+    d.player.stop()
+    assert d.wave._playhead is None
+    d.deleteLater()
+
+
+def test_nothing_plays_without_audio_or_with_audio_turned_off(qt_app, fake_audio):
+    no_audio = preview_dialog(audio=False)
+    click_empty_waveform(no_audio)
+    assert not no_audio.player.is_playing()
+    no_audio.deleteLater()
+
+
+def test_a_click_plays_nothing_when_audio_is_disabled(qt_app):
+    d = preview_dialog()  # (the tests run with audio disabled unless they ask for the fake device)
+    click_empty_waveform(d)
+    assert not d.player.is_playing()
+    d.deleteLater()
+
+
+def test_the_scroll_bars_room_is_kept_so_zooming_doesnt_move_anything(qt_app):
+    d = waveform_dialog()
+    assert d.view_scroll.sizePolicy().retainSizeWhenHidden() and d.view_scroll.isHidden()
+    before = (d.sizeHint(), d.wave.geometry(), d.zoom_in_button.geometry().top() - d.wave.geometry().bottom())
+    d.zoom_in_button.click()
+    d.zoom_in_button.click()
+    assert not d.view_scroll.isHidden()
+    after = (d.sizeHint(), d.wave.geometry(), d.zoom_in_button.geometry().top() - d.wave.geometry().bottom())
+    assert before == after  # (the layout is the same with the bar showing or not)
+    d.deleteLater()

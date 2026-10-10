@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from .. import akai_names, describe, sorting, tags as filetags
+from .. import akai_header, akai_names, describe, sorting, tags as filetags
 from ..audio import wavfile
 from . import formats, parse
 from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, SampleInfo, Volume, VolumeCopy
@@ -331,6 +331,137 @@ class AkaiEngine:
                                  + " (" + ", ".join(f"{n}: “{here.get(n, '')}” became “{there.get(n, '')}”" for n in differing[:5]) + ").")
             return VolumeCopy(created, notes)
 
+    # ---------------------------------------------------------- a sample's own settings
+    def _header_size(self, vol: Volume, f: FileEntry) -> int:
+        if not f.is_sample or vol.type == "S900" or f.name.upper().endswith((".S9", ".S9C")):
+            raise EngineError("Only S1000 and S3000 samples have settings that can be edited here (not S900 samples).")
+        return akai_header.HEADER_SIZES["S3000" if f.name.upper().endswith(".S3") else "S1000"]
+
+    def read_sample_settings(self, vol: Volume, f: FileEntry) -> akai_header.SampleSettings:
+        """The loops, root key, tuning, play mode and markers stored in a sample's header."""
+        size = self._header_size(vol, f)
+        with self._lock:
+            session = self._need_session()
+            self._enter_volume(vol)
+            self._check_file_is_there(vol, f)
+            _clear_dir(session.staging_dir)
+            self._run(f"geti {f.index} 0 {size}")
+            produced = [p for p in session.staging_dir.iterdir() if p.is_file()]
+            raw = produced[0].read_bytes() if produced else b""
+            _clear_dir(session.staging_dir)
+        settings = akai_header.read_settings(raw)
+        if settings is None:
+            raise EngineError(f"“{f.name}” doesn't have a sample header akaiutil-gui understands.")
+        return settings
+
+    def _check_file_is_there(self, vol: Volume, f: FileEntry) -> None:
+        present = {x.index: x.name for x in parse.parse_files(self._run("dir").text)}
+        if present.get(f.index) != f.name:
+            raise EngineError(f"“{f.name}” isn't file {f.index} of {vol.name} any more.")
+
+    def edit_sample_settings(self, vol: Volume, f: FileEntry, new: akai_header.SampleSettings) -> FileEntry:
+        """Change a sample's loops, root key, tuning, play mode or markers. akaiutil can't edit a header in place, so the sample
+        is written again with the new header (its audio untouched) and put where the old one was, with the same name, tags and
+        OS version. The old copy is only deleted once the new one is in place, and every step is checked."""
+        size = self._header_size(vol, f)
+        with self._lock:
+            log.info("edit settings of %s in %s", f.name, vol.name)
+            self._need_writable()
+            session = self._need_session()
+            self._enter_volume(vol)
+            text = self._run("dir").text
+            files = parse.parse_files(text)
+            if not any(x.index == f.index and x.name == f.name for x in files):
+                raise EngineError(f"“{f.name}” isn't file {f.index} of {vol.name} any more.")
+            osver = filetags.osver_value(f.os_version)
+            if osver is None:
+                raise EngineError(f"Can't read the OS version of “{f.name}”.")
+            base, ext = akai_names.split_extension(f.name)
+            clean, problem = akai_names.check_name(base, vol.type)
+            if problem or clean.casefold() != base.casefold():
+                raise EngineError(f"“{f.name}” has a name akaiutil can't move safely, so it can't be edited.")
+            _clear_dir(session.staging_dir)
+            self._run(f"geti {f.index}")
+            produced = [p for p in session.staging_dir.iterdir() if p.is_file()]
+            if len(produced) != 1:
+                raise EngineError(f"akaiutil couldn't read “{f.name}”.")
+            original = produced[0].read_bytes()
+            _clear_dir(session.staging_dir)
+            if len(original) < size:
+                raise EngineError(f"“{f.name}” is too short to be a sample.")
+            try:
+                header = akai_header.write_settings(original[:size], new)
+            except ValueError as e:
+                raise EngineError(str(e)) from None
+            if header == original[:size]:
+                return f  # nothing was changed
+            patched = header + original[size:]
+
+            taken = {x.name.casefold() for x in files}
+            limit = parse.parse_volume_limit(text) or 510
+            free = [i for i in range(1, limit + 1) if i not in {x.index for x in files}]
+            if len(free) < 2:
+                raise EngineError(f"{vol.name} has no free file slots left to work in. Delete a file first.")
+            temp = next(n for n in (f"#EDIT{i or ''}{ext}" for i in range(100)) if n.casefold() not in taken)
+            old = next(n for n in (f"#OLD{i or ''}{ext}" for i in range(100)) if n.casefold() not in taken | {temp.casefold()})
+
+            # 1. the new copy, under a temporary name
+            (session.staging_dir / "edit.tar").write_bytes(filetags.tagged_file_tar(temp, patched, osver, f.tag_numbers))
+            said = self._run("tarx edit.tar", timeout=600).text
+            _clear_dir(session.staging_dir)
+            after = parse.parse_files(self._run("dir").text)
+            made = next((x for x in after if akai_names.same_name(x.name, temp)), None)
+            if made is None or made.size != f.size:
+                if made is not None:
+                    self._write(f"deli {made.index}")
+                reason = " ".join(ln.strip() for ln in said.splitlines() if ln.strip())
+                raise EngineError(f"akaiutil couldn't write the new copy of “{f.name}”{': ' + reason if reason else ''}. Nothing was changed.")
+            moved_old = False
+            try:
+                # 2. the old one steps aside, 3. the new one takes its name and place
+                spare = next(i for i in free if i != made.index)
+                self._write(f"reni {f.index} {akai_names.command_token(old)} {spare}")
+                moved_old = True
+                self._write(f"reni {made.index} {akai_names.command_token(f.name)} {f.index}")
+                self._write(f"fixramnamei {f.index}")  # (the name inside the header is the temporary one)
+                # 4. check it before the old one goes
+                now = next((x for x in parse.parse_files(self._run("dir").text) if x.index == f.index), None)
+                if now is None or not akai_names.same_name(now.name, f.name) or (now.size, now.os_version, now.tags) != (f.size, f.os_version, f.tags):
+                    raise EngineError("the new copy didn't come out the same size, OS version and tags as the original")
+                if self._read_whole(f.index, session)[size:] != original[size:]:
+                    raise EngineError("the audio of the new copy isn't the same as the original's")
+            except EngineError as e:
+                self._undo_sample_edit(f, old, temp, made.index, spare if moved_old else None)
+                raise EngineError(f"“{f.name}” wasn't changed: {e}.") from None
+            self._write(f"deli {spare}")  # (the old copy, now in the spare slot)
+            final = next((x for x in parse.parse_files(self._run("dir").text) if x.index == f.index), None)
+            if final is None:
+                raise EngineError(f"“{f.name}” is missing after the edit: check {vol.name}.")
+            return final
+
+    def _read_whole(self, index: int, session) -> bytes:
+        _clear_dir(session.staging_dir)
+        self._run(f"geti {index}")
+        produced = [p for p in session.staging_dir.iterdir() if p.is_file()]
+        data = produced[0].read_bytes() if produced else b""
+        _clear_dir(session.staging_dir)
+        return data
+
+    def _undo_sample_edit(self, f: FileEntry, old: str, temp: str, temp_index: int, spare: int | None) -> None:
+        """Put things back as they were after a step of edit_sample_settings failed (best effort, and logged)."""
+        try:
+            files = {x.index: x.name for x in parse.parse_files(self._run("dir").text)}
+            if spare is not None and akai_names.same_name(files.get(spare, ""), old):
+                for index, name in list(files.items()):  # whatever is in the original's slot (the new copy, if it got there) goes
+                    if index == f.index and not akai_names.same_name(name, old):
+                        self._write(f"deli {index}")
+                self._write(f"reni {spare} {akai_names.command_token(f.name)} {f.index}")
+            files = {x.index: x.name for x in parse.parse_files(self._run("dir").text)}
+            if akai_names.same_name(files.get(temp_index, ""), temp):
+                self._write(f"deli {temp_index}")
+        except EngineError as e:
+            log.error("couldn't fully undo a failed sample edit of %s: %s", f.name, e)
+
     def delete_volume(self, vol: Volume) -> None:
         """Delete a volume and every file in it."""
         with self._lock:
@@ -522,7 +653,7 @@ class AkaiEngine:
         A floppy keeps its size, so only a kind of the same density fits; a hard disk is formatted over its
         whole image (up to 512 MB), cut into partitions of `partition_mb`."""
         if disk.type == "FLL" and fmt.floppy_kb != 800 or disk.type == "FLH" and fmt.floppy_kb != 1600:
-            raise EngineError(f"A {'low' if disk.type == 'FLL' else 'high'}-density floppy can't be formatted as “{fmt.label}”.")
+            raise EngineError(f"A {'DD' if disk.type == 'FLL' else 'HD'} floppy can't be formatted as “{fmt.label}”.")
         if not disk.type.startswith("FL") and fmt.is_floppy:
             raise EngineError(f"A hard disk image can't be formatted as “{fmt.label}”.")
         with self._lock:

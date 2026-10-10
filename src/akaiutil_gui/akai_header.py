@@ -73,3 +73,131 @@ def parse_header(data: bytes) -> HeaderInfo | None:
         looping=data[19] in (PMODE_LOOP, PMODE_LOOP_UNTIL_RELEASE),
         loops=tuple(loops),
     )
+
+
+# ---------------------------------------------------------------------------- reading and editing a header
+PLAY_MODES = {0: "LOOP", 1: "LOOPNOTREL", 2: "NOLOOP", 3: "TOEND"}  # pmode, as akaiutil names them
+HEADER_SIZES = {"S1000": 150, "S3000": 192}
+MAX_TUNE = 50  # the samplers' own range for the semitone and cent tuning
+LOOP_ENTRY = 12
+LOOP_AT = 38  # where the 8 loops start
+MAX_LOOP_TIME = LOOP_HOLD - 1
+
+
+@dataclass(frozen=True)
+class LoopSetting:
+    start: int  # first frame of the loop
+    end: int  # last frame of the loop
+    time: int  # ms; 0 means the loop is off, LOOP_HOLD means "until the key is released"
+    fine: int = 0  # the fraction of a frame the loop's length has (kept as it was)
+    raw: bytes = b""  # the 12 bytes it was read from: an entry that isn't changed is written back exactly as it was
+
+    @property
+    def enabled(self) -> bool:
+        return self.time != 0
+
+    @property
+    def hold(self) -> bool:
+        return self.time == LOOP_HOLD
+
+
+@dataclass(frozen=True)
+class SampleSettings:
+    """The parts of an S1000/S3000 sample header a person edits (everything else in the header is left alone)."""
+
+    root: int
+    semitone: int  # tuning, -50..50
+    cents: int  # fine tuning, -50..50
+    play_mode: int  # a key of PLAY_MODES
+    start: int  # the start marker (a frame)
+    end: int  # the end marker (the last frame played)
+    first_loop: int  # which loop is "first": 0-7
+    loops: tuple[LoopSetting, ...]  # always MAX_LOOPS of them, off ones included
+    rate: int = 0  # (read only, for the dialog)
+    frames: int = 0  # (read only)
+
+
+def _signed(b: int) -> int:
+    return b - 256 if b > 127 else b
+
+
+def read_settings(header: bytes) -> SampleSettings | None:
+    """The editable settings of an S1000/S3000 sample header, or None if the bytes aren't one."""
+    if len(header) < 150 or header[0] != 3:
+        return None
+    frames, start, end = struct.unpack_from("<III", header, 26)
+    loops = []
+    for i in range(MAX_LOOPS):
+        raw = bytes(header[LOOP_AT + LOOP_ENTRY * i : LOOP_AT + LOOP_ENTRY * (i + 1)])
+        at, fine, length, time = struct.unpack("<IHIH", raw)
+        loops.append(LoopSetting(max(0, at - length) if length <= at else 0, at, time, fine, raw))
+    return SampleSettings(
+        root=header[2],
+        semitone=_signed(header[21]),
+        cents=_signed(header[20]),
+        play_mode=header[19],
+        start=start,
+        end=end,
+        first_loop=min(header[17], MAX_LOOPS - 1),
+        loops=tuple(loops),
+        rate=struct.unpack_from("<H", header, 138)[0],
+        frames=frames,
+    )
+
+
+def problems(s: SampleSettings) -> list[str]:
+    """What is wrong with these settings (empty if they can be written)."""
+    found = []
+    if not 0 <= s.root <= 127:
+        found.append("The root key is 0 to 127.")
+    if not -MAX_TUNE <= s.semitone <= MAX_TUNE or not -MAX_TUNE <= s.cents <= MAX_TUNE:
+        found.append(f"Tuning is {-MAX_TUNE} to {MAX_TUNE}.")
+    if s.play_mode not in PLAY_MODES:
+        found.append("Unknown play mode.")
+    last = max(s.frames - 1, 0)
+    if not 0 <= s.start < s.end <= last:
+        found.append(f"The start marker must come before the end marker, and both lie within the sample (0 to {last}).")
+    for i, loop in enumerate(s.loops, 1):
+        if not loop.enabled:
+            continue
+        if not 0 <= loop.start < loop.end <= last:
+            found.append(f"Loop {i}: the start must come before the end, and both lie within the sample (0 to {last}).")
+        if not 0 < loop.time <= LOOP_HOLD:
+            found.append(f"Loop {i}: the time is 1 to {MAX_LOOP_TIME} ms, or hold.")
+    return found
+
+
+def write_settings(header: bytes, s: SampleSettings) -> bytes:
+    """`header` with these settings written into it. Only the fields a person edits change; a loop that wasn't touched keeps its
+    exact bytes (including whatever the sampler left in it)."""
+    bad = problems(s)
+    if bad:
+        raise ValueError(" ".join(bad))
+    out = bytearray(header)
+    out[2] = s.root
+    out[19] = s.play_mode
+    out[20] = s.cents & 0xFF
+    out[21] = s.semitone & 0xFF
+    out[30:34] = struct.pack("<I", s.start)
+    out[34:38] = struct.pack("<I", s.end)
+    original = read_settings(header)
+    enabled = []
+    changed = False
+    for i, loop in enumerate(s.loops[:MAX_LOOPS]):
+        at = LOOP_AT + LOOP_ENTRY * i
+        was = original.loops[i] if original else None
+        if was is not None and (loop.start, loop.end, loop.time) == (was.start, was.end, was.time):
+            out[at : at + LOOP_ENTRY] = was.raw  # (untouched: exactly as it was)
+        elif loop.enabled:
+            changed = True
+            fine = loop.fine if was is not None and (loop.start, loop.end) == (was.start, was.end) else 0
+            out[at : at + LOOP_ENTRY] = struct.pack("<IHIH", loop.end, fine, loop.end - loop.start, loop.time)
+        else:
+            changed = True
+            out[at : at + LOOP_ENTRY] = struct.pack("<IHIH", 0, 0, 0, 0)
+        if loop.enabled:
+            enabled.append(i)
+    if changed:  # (leave the counts as the sampler wrote them if no loop was touched)
+        out[16] = (max(enabled) + 1) if enabled else 0  # lnum: how many loop entries are in use
+        out[17] = s.first_loop if s.first_loop in enabled else (enabled[0] if enabled else 0)
+    return bytes(out)

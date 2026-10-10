@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QCheckBox,
     QLabel,
@@ -19,12 +20,23 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
+    QScrollBar,
     QSpinBox,
     QStyle,
     QVBoxLayout,
+    QWidget,
 )
 
-from akaiutil_gui import akai_names, backup, importing, settings, sorting
+import dataclasses
+
+from akaiutil_gui import akai_header, akai_names, backup, importing, settings, sorting
+from akaiutil_gui.audio import preview
+from akaiutil_gui.audio.preview import PreviewPlayer
+from akaiutil_gui.audio.sample import PlaybackPlan
+from akaiutil_gui.engine.models import Loop
+from akaiutil_gui.audio.markers import note_name
+from .marker_waveform import END, START, MarkerWaveform, loop_in, loop_out
+from .volume_colors import volume_color
 from akaiutil_gui.engine import formats
 from akaiutil_gui.engine.models import Disk, Partition, Volume
 
@@ -203,6 +215,287 @@ class NewVolumeDialog(QDialog):
                 problem, ok = f"There is already a volume called “{name}”.", False
         self.problem.setText(problem or "")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
+
+
+class SampleSettingsDialog(QDialog):
+    """A sample's root key, tuning, play mode, markers and loops. Save is only offered when the settings can be written."""
+
+    PLAY_MODE_NAMES = {0: "Normal looping", 1: "Loop until release", 2: "No looping", 3: "Play to sample end"}  # (as in the details pane)
+
+    def __init__(self, parent, name: str, current: akai_header.SampleSettings, audio=None):
+        super().__init__(parent)
+        self.setWindowTitle("Sample Settings")
+        self.setMinimumWidth(560)
+        self._current = current
+        self._syncing = False
+        self._selected_loop: int | None = None
+        last = max(current.frames - 1, 0)
+        seconds = current.frames / current.rate if current.rate else 0
+        summary = QLabel(f"{name}  ·  {current.rate} Hz  ·  {current.frames} frames ({seconds:.2f} s)")
+        warning = QLabel("This changes the sample inside the disk image itself. There is no undo.")
+        warning.setObjectName("mutedLabel")
+        warning.setWordWrap(True)
+
+        def spin(low, high, value, marker=False):
+            box = QSpinBox()
+            box.setRange(low, high)
+            box.setValue(min(max(value, low), high))
+            box.valueChanged.connect(self._edited if marker else self._validate)
+            return box
+
+        self.wave = MarkerWaveform()
+        self.wave.set_audio(audio, current.frames)
+        self.zoom_out_button, self.zoom_in_button, self.fit_button = QPushButton("−"), QPushButton("+"), QPushButton("Fit")
+        for button, tip in ((self.zoom_out_button, "Zoom out"), (self.zoom_in_button, "Zoom in"), (self.fit_button, "Show the whole sample")):
+            button.setToolTip(tip)
+            button.setAutoDefault(False)
+        self.zoom_out_button.clicked.connect(lambda: self.wave.zoom_out())
+        self.zoom_in_button.clicked.connect(lambda: self.wave.zoom_in())
+        self.fit_button.clicked.connect(self.wave.reset_zoom)
+        self.view_scroll = QScrollBar(Qt.Orientation.Horizontal)
+        policy = self.view_scroll.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)  # (its room is kept while the waveform isn't zoomed, so zooming doesn't move the dialog)
+        self.view_scroll.setSizePolicy(policy)
+        self.view_scroll.setVisible(False)
+        self.view_scroll.valueChanged.connect(self.wave.set_view_start)
+        self.wave.viewChanged.connect(self._view_changed)
+        self.wave.markersChanged.connect(self._from_waveform)
+        self.wave.loopGrabbed.connect(self._select_loop)
+        self.player = PreviewPlayer(self)
+        self.player.position_changed.connect(self.wave.set_playhead)
+        self.player.finished.connect(self._preview_finished)
+        self.wave.previewRequested.connect(self._toggle_preview)
+        self._playing_loop: int | None = None
+        hint = QLabel("Click the waveform to play it (click again to stop). Drag a marker to move it (hold Shift for fine control). Ctrl/Cmd + scroll zooms, Shift + scroll pans.")
+        hint.setObjectName("mutedLabel")
+        hint.setWordWrap(True)
+        zoom_row = QHBoxLayout()
+        zoom_row.addWidget(hint, 1)
+        for button in (self.zoom_out_button, self.zoom_in_button, self.fit_button):
+            zoom_row.addWidget(button)
+
+        self.root = spin(0, 127, current.root)
+        self.root_name = QLabel()
+        self.root.valueChanged.connect(lambda v: self.root_name.setText(note_name(v)))
+        self.root_name.setText(note_name(self.root.value()))
+        root_row = QHBoxLayout()
+        root_row.addWidget(self.root)
+        root_row.addWidget(self.root_name)
+        root_row.addStretch(1)
+        self.semitone = spin(min(-akai_header.MAX_TUNE, current.semitone), max(akai_header.MAX_TUNE, current.semitone), current.semitone)
+        self.cents = spin(min(-akai_header.MAX_TUNE, current.cents), max(akai_header.MAX_TUNE, current.cents), current.cents)
+        self.cents.setSuffix(" cents")
+        self.semitone.setSuffix(" semitones")
+        self.play_mode = QComboBox()
+        for mode, label in self.PLAY_MODE_NAMES.items():
+            self.play_mode.addItem(label, mode)
+        self.play_mode.setCurrentIndex(max(0, self.play_mode.findData(current.play_mode)))
+        self.play_mode.currentIndexChanged.connect(self._validate)
+        self.start = spin(0, last, current.start, marker=True)
+        self.end = spin(0, last, current.end, marker=True)
+        form = QGridLayout()  # two columns of label and field, to keep the dialog short
+        for row, (left, right) in enumerate(
+            (
+                (("Root key", root_row), ("Tuning", self.semitone)),
+                (("Fine tuning", self.cents), ("Play mode", self.play_mode)),
+                (("Start marker", self.start), ("End marker", self.end)),
+            )
+        ):
+            for col, (label, widget) in enumerate((left, right)):
+                form.addWidget(QLabel(label), row, col * 2)
+                if isinstance(widget, QWidget):
+                    form.addWidget(widget, row, col * 2 + 1)
+                else:
+                    form.addLayout(widget, row, col * 2 + 1)
+        form.setColumnStretch(1, 1)
+        form.setColumnStretch(3, 1)
+
+        grid = QGridLayout()
+        for col, title in enumerate(("Loop", "On", "Start", "End", "Time (ms)", "Hold")):
+            head = QLabel(title)
+            head.setObjectName("mutedLabel")
+            grid.addWidget(head, 0, col)
+        self.loop_rows = []
+        self.loop_labels: list[QLabel] = []
+        for i, loop in enumerate(current.loops):
+            on = QCheckBox()
+            on.setChecked(loop.enabled)
+            start = spin(0, last, loop.start if loop.enabled else current.start, marker=True)
+            end = spin(0, last, loop.end if loop.enabled else current.end, marker=True)
+            hold = QCheckBox()
+            hold.setChecked(loop.hold or not loop.enabled)
+            time = spin(1, akai_header.MAX_LOOP_TIME, loop.time if loop.enabled and not loop.hold else 500)
+            for widget in (on, hold):
+                widget.toggled.connect(self._loop_changed)
+            self.loop_rows.append((on, start, end, time, hold))
+            number = QLabel(str(i + 1))
+            number.setStyleSheet(f"color: {volume_color(i).name()};")  # (the colour of this loop's markers on the waveform)
+            self.loop_labels.append(number)
+            grid.addWidget(number, i + 1, 0)
+            for col, widget in enumerate((on, start, end, time, hold), 1):
+                grid.addWidget(widget, i + 1, col)
+        self._loop_changed()
+
+        self.problem = _problem_label()
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.save_button = self.buttons.addButton("Save", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(summary)
+        layout.addWidget(warning)
+        layout.addWidget(self.wave)
+        layout.addWidget(self.view_scroll)
+        layout.addLayout(zoom_row)
+        layout.addLayout(form)
+        layout.addWidget(QLabel("Loops"))
+        layout.addLayout(grid)
+        layout.addWidget(self.problem)
+        layout.addWidget(self.buttons)
+        self._push_markers()
+        self._validate()
+
+    # --------------------------------------------------- the waveform and the numbers
+    def _marker_values(self) -> dict[str, int]:
+        values = {START: self.start.value(), END: self.end.value()}
+        for i, (on, start, end, _time, _hold) in enumerate(self.loop_rows):
+            if on.isChecked():
+                values[loop_in(i)], values[loop_out(i)] = start.value(), end.value()
+        return values
+
+    def _push_markers(self) -> None:
+        self.wave.set_markers(self._marker_values())
+
+    def _edited(self) -> None:
+        """A marker's number was typed or stepped: the waveform follows."""
+        if not self._syncing and hasattr(self, "wave"):
+            self._push_markers()
+        self._validate()
+        if hasattr(self, "player"):
+            self._update_playing_loop()
+
+    def _from_waveform(self, markers: dict) -> None:
+        """A marker was dragged (and maybe pushed another): the numbers follow."""
+        self._syncing = True
+        try:
+            self.start.setValue(markers.get(START, self.start.value()))
+            self.end.setValue(markers.get(END, self.end.value()))
+            for i, (_on, start, end, _time, _hold) in enumerate(self.loop_rows):
+                if loop_in(i) in markers:
+                    start.setValue(markers[loop_in(i)])
+                    end.setValue(markers[loop_out(i)])
+        finally:
+            self._syncing = False
+        self._validate()
+        self._update_playing_loop()
+
+    # ------------------------------------------------------------------- preview
+    def _preview_plan(self) -> tuple[PlaybackPlan, int | None] | None:
+        """How the sample plays with the settings as they are now (and which loop that is, 0-7, if it loops)."""
+        audio = self.wave._samples
+        if audio is None:
+            return None
+        s = self.result_settings
+        last = len(audio) - 1
+        start = min(max(0, s.start), last)
+        end = min(max(start, s.end), last)
+        on = [i for i, loop in enumerate(s.loops) if loop.enabled]
+        if s.play_mode in (0, 1) and on:  # a looping play mode, with a loop that is on
+            slot = self._selected_loop if self._selected_loop in on else on[0]
+            loop = s.loops[slot]
+            loop_end = min(max(start, loop.end), end)
+            loop_start = min(max(start, loop.start), loop_end)
+            if loop_end > loop_start:
+                dwell = None if loop.hold else loop.time
+                shown = Loop(slot + 1, loop_end, float(loop_end - loop_start), dwell)
+                return PlaybackPlan(start, end, shown, loop_start, loop_end, dwell, 0), slot
+        return PlaybackPlan(start, end), None
+
+    def _toggle_preview(self) -> None:
+        if self.player.is_playing():
+            self.player.stop()
+            return
+        planned = self._preview_plan()
+        if planned is None or preview.audio_disabled():
+            return
+        plan, slot = planned
+        rate = self._current.rate or 44100
+        audio = self.wave._samples
+        if plan.looping:
+            self.player.play_loop(audio, plan.start, plan.loop_start, plan.loop_end, plan.end, rate, dwell_ms=plan.dwell_ms, loop_tune_cents=0)
+        else:
+            self.player.play(audio, plan.start, plan.end, rate)
+        if self.player.is_playing():
+            self._playing_loop = slot
+
+    def _preview_finished(self) -> None:
+        self._playing_loop = None
+        self.wave.set_playhead(None)
+
+    def _update_playing_loop(self) -> None:
+        """A loop's markers changed while it plays: the loop follows (at the start of its next pass), so edits can be heard."""
+        if self.player.is_playing() and self._playing_loop is not None:
+            planned = self._preview_plan()
+            if planned is not None and planned[1] == self._playing_loop:
+                self.player.update_loop_points(planned[0].loop_start, planned[0].loop_end)
+
+    def done(self, result) -> None:
+        self.player.stop()  # (nothing keeps playing after the dialog is gone)
+        super().done(result)
+
+    def _select_loop(self, loop: int) -> None:
+        self._selected_loop = loop
+        for i, label in enumerate(self.loop_labels):
+            font = label.font()
+            font.setBold(i == loop)
+            label.setFont(font)
+        self.wave.set_selected_loop(loop)
+
+    def _view_changed(self, start: int, length: int, frames: int) -> None:
+        zoomed = frames > length
+        self.view_scroll.setVisible(zoomed)
+        self.view_scroll.blockSignals(True)
+        self.view_scroll.setRange(0, max(0, frames - length))
+        self.view_scroll.setPageStep(length)
+        self.view_scroll.setValue(start)
+        self.view_scroll.blockSignals(False)
+
+    def _loop_changed(self) -> None:
+        for on, start, end, time, hold in self.loop_rows:
+            for widget in (start, end, hold):
+                widget.setEnabled(on.isChecked())
+            time.setEnabled(on.isChecked() and not hold.isChecked())
+        if hasattr(self, "wave"):
+            self._push_markers()
+        self._validate()
+
+    @property
+    def result_settings(self) -> akai_header.SampleSettings:
+        """The settings as they are in the dialog now (a loop that was left alone comes back exactly as it was)."""
+        loops = []
+        for was, (on, start, end, time, hold) in zip(self._current.loops, self.loop_rows):
+            if not on.isChecked():
+                loops.append(dataclasses.replace(was, time=0))
+            else:
+                loops.append(dataclasses.replace(was, start=start.value(), end=end.value(), time=akai_header.LOOP_HOLD if hold.isChecked() else time.value()))
+        return dataclasses.replace(
+            self._current,
+            root=self.root.value(),
+            semitone=self.semitone.value(),
+            cents=self.cents.value(),
+            play_mode=self.play_mode.currentData(),
+            start=self.start.value(),
+            end=self.end.value(),
+            loops=tuple(loops),
+        )
+
+    def _validate(self) -> None:
+        if not hasattr(self, "save_button"):
+            return  # (still being built)
+        found = akai_header.problems(self.result_settings)
+        self.problem.setText(found[0] if found else "")
+        self.save_button.setEnabled(not found)
 
 
 class RevertDialog(QDialog):

@@ -513,6 +513,7 @@ class MainWindow(QMainWindow):
         self.act_allow_edit.triggered.connect(self._toggle_editing)
         self.act_new_volume = self._action("New &Volume…", self._new_volume)
         self.act_rename = self._action("&Rename…", self._rename_focused)
+        self.act_sample_settings = self._action("Sample Se&ttings…", self._sample_settings_selected)
         self.act_delete = self._action("&Delete…", self._delete_focused)
         self.act_copy = self._action(
             "&Copy Files",
@@ -541,6 +542,7 @@ class MainWindow(QMainWindow):
                 self.act_new_volume,
                 self.act_import,
                 self.act_sort,
+                self.act_sample_settings,
                 self.act_rename,
                 self.act_delete,
             ]
@@ -1733,6 +1735,7 @@ class MainWindow(QMainWindow):
         self.act_import.setEnabled(has and self._selected_volume() is not None)
         self.act_sort.setEnabled(has and self._selected_volume() is not None)
         rows = self._selected_rows() if has else []
+        self.act_sample_settings.setEnabled(self._editable_sample(rows) is not None)
         self.act_copy.setEnabled(bool(rows))
         self.act_cut.setEnabled(bool(rows))
         self.act_paste.setEnabled(
@@ -1829,6 +1832,69 @@ class MainWindow(QMainWindow):
             done,
             lambda message: self._edit_failed(vol.disk, message),
         )
+
+    @staticmethod
+    def _editable_sample(rows: list[tuple[Volume, FileEntry]]) -> tuple[Volume, FileEntry] | None:
+        """The one selected file whose settings can be edited: an S1000 or S3000 sample (not an S900 one)."""
+        if len(rows) != 1:
+            return None
+        vol, f = rows[0]
+        ok = f.is_sample and vol.type != "S900" and not f.name.upper().endswith((".S9", ".S9C"))
+        return (vol, f) if ok else None
+
+    def _sample_settings_selected(self) -> None:
+        picked = self._editable_sample(self._selected_rows())
+        if picked is not None:
+            self._sample_settings(*picked)
+
+    def _sample_settings(self, vol: Volume, f: FileEntry) -> None:
+        """Edit > Sample Settings: change a sample's root key, tuning, play mode, markers and loops."""
+        if self._engine is None or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_sample_settings(vol, f))
+
+    def _ask_sample_settings(self, f: FileEntry, current, audio=None):
+        dialog = edit_dialogs.SampleSettingsDialog(self, f.name, current, audio)
+        return dialog.result_settings if dialog.exec() == dialog.DialogCode.Accepted else None
+
+    def _do_sample_settings(self, vol: Volume, f: FileEntry) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+
+        cached = self._preview_cache.get((vol.disk, vol.partition, vol.index, f.index, f.name))  # (the preview may have it already)
+
+        def load():
+            current = engine.read_sample_settings(vol, f)
+            if cached is not None:
+                return current, cached.samples
+            try:  # the waveform is a help: if the audio can't be read, the markers still work without it
+                wav = engine.export_sample_wav(vol, f, self._preview_directory())
+                try:
+                    return current, load_wav(wav, f.name, None).samples
+                finally:
+                    wav.unlink(missing_ok=True)
+            except Exception as e:  # noqa: BLE001
+                log.warning("no waveform for the settings dialog of %s: %s", f.name, e)
+                return current, None
+
+        def show(loaded) -> None:
+            current, audio = loaded
+            new = self._ask_sample_settings(f, current, audio)
+            if new is None or new == current:
+                return
+
+            def done(after: FileEntry) -> None:
+                self._pending_reveal = (vol, after.index) if not self._in_results else None
+                self._edited(vol.disk, message=f"Changed the settings of “{f.name}”.")
+
+            self._run_edit(
+                lambda: engine.edit_sample_settings(vol, f, new),
+                done,
+                lambda message: self._edit_failed(vol.disk, message),
+            )
+
+        self._run(load, show)
 
     def _delete_files(self, rows: list[tuple[Volume, FileEntry]]) -> None:
         if self._engine is None or not rows or self._busy():
@@ -2576,6 +2642,8 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         rename = menu.addAction("Rename…", lambda: self._rename_file(*rows[0]))
         rename.setEnabled(len(rows) == 1)
+        settings_action = menu.addAction("Sample Settings…", lambda: self._sample_settings(*rows[0]))
+        settings_action.setEnabled(self._editable_sample(rows) is not None)
         menu.addAction(
             "Delete…" if len(rows) == 1 else f"Delete {len(rows)} Files…",
             lambda: self._delete_files(rows),

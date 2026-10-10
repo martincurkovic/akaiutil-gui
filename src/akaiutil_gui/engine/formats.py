@@ -46,12 +46,12 @@ FORMATS: tuple[DiskFormat, ...] = (
     DiskFormat("hd1", "S1000 hard disk", "formatharddisk1"),
     DiskFormat("hd3cd", "CD3000 CD-ROM", "formatharddisk3cd"),
     DiskFormat("hd9", "S900 hard disk", "formatharddisk9", partitions=False),
-    DiskFormat("fl3h", "S3000 floppy (1.6 MB)", "formatfloppyh3", floppy_kb=1600, partitions=False),
-    DiskFormat("fl3l", "S3000 floppy (800 KB)", "formatfloppyl3", floppy_kb=800, partitions=False),
-    DiskFormat("fl1h", "S1000 floppy (1.6 MB)", "formatfloppyh1", floppy_kb=1600, partitions=False),
-    DiskFormat("fl1l", "S1000 floppy (800 KB)", "formatfloppyl1", floppy_kb=800, partitions=False),
-    DiskFormat("fl9h", "S900 floppy (1.6 MB)", "formatfloppyh9", floppy_kb=1600, partitions=False),
-    DiskFormat("fl9l", "S900 floppy (800 KB)", "formatfloppyl9", floppy_kb=800, partitions=False),
+    DiskFormat("fl3h", "S3000 floppy (HD, 1.6 MB)", "formatfloppyh3", floppy_kb=1600, partitions=False),
+    DiskFormat("fl3l", "S3000 floppy (DD, 800 KB)", "formatfloppyl3", floppy_kb=800, partitions=False),
+    DiskFormat("fl1h", "S1000 floppy (HD, 1.6 MB)", "formatfloppyh1", floppy_kb=1600, partitions=False),
+    DiskFormat("fl1l", "S1000 floppy (DD, 800 KB)", "formatfloppyl1", floppy_kb=800, partitions=False),
+    DiskFormat("fl9h", "S900 floppy (HD, 1.6 MB)", "formatfloppyh9", floppy_kb=1600, partitions=False),
+    DiskFormat("fl9l", "S900 floppy (DD, 800 KB)", "formatfloppyl9", floppy_kb=800, partitions=False),
 )
 
 _BY_KEY = {f.key: f for f in FORMATS}
