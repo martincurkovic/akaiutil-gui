@@ -6,7 +6,9 @@ A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil
 **Status: early.** Disk images open read-only. Nothing is written to one until you switch on **Edit > Allow Editing**, and
 there is no undo (see [Editing](#editing)).
 
-- **Browse** disks, partitions, volumes and files. A space bar under the tree shows what each volume uses (coloured to
+- **Browse** disks, partitions, volumes and files, across as many disk images as you like at once (File > Add Disk Image,
+  or drop files on the window; right-click a disk to close it or show its file). Adding or closing an image restarts akaiutil
+  on the new set, so the disk numbers can change; what you had selected and the editing mode carry over. A space bar under the tree shows what each volume uses (coloured to
   match the swatch beside it) and what's free; the Details pane turns akaiutil's terminal output into readable labels and
   values ("Raw output" shows the original).
 - **Preview samples.** Select a sample to see its waveform and play it, with its loop: the attack once, then the loop
