@@ -1,17 +1,30 @@
 #!/usr/bin/env bash
 set -e
 
-# make_icons.sh - turns assets/icon/icon_source.png (a square PNG, 1024x1024 or larger) into the
-# two files the builds actually use:
+# make_icons.sh - FALLBACK: makes plain (full-bleed, square) versions of the two derived icons from
+# assets/icon/icon_source.png (a square PNG, 1024x1024 or larger):
 #   assets/icon/icon_512x512.png        Linux AppImage + Windows installer
 #   assets/icon/akaiutil-GUI-macos.icns macOS app
-# Needs macOS (uses sips and iconutil, which ship with it). Commit the results with the source.
+# If you export those two from a design tool instead (rounded macOS-style corners, shadow, margin), keep
+# those files and don't run this: it refuses to overwrite existing ones unless you pass --force.
+# Needs macOS (uses sips and iconutil, which ship with it).
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ICON_DIR="$ROOT_DIR/assets/icon"
 SOURCE="$ICON_DIR/icon_source.png"
 
 [ -f "$SOURCE" ] || { echo "Missing $SOURCE"; exit 1; }
+
+if [ "$1" != "--force" ]; then
+    for OUT in "$ICON_DIR/icon_512x512.png" "$ICON_DIR/akaiutil-GUI-macos.icns"; do
+        if [ -e "$OUT" ]; then
+            echo "$(basename "$OUT") already exists - not overwriting it."
+            echo "If it was exported from a design tool, keep it. To replace it with a plain version made from"
+            echo "icon_source.png, run:  scripts/make_icons.sh --force"
+            exit 1
+        fi
+    done
+fi
 WIDTH=$(sips -g pixelWidth "$SOURCE" | awk '/pixelWidth/ {print $2}')
 HEIGHT=$(sips -g pixelHeight "$SOURCE" | awk '/pixelHeight/ {print $2}')
 if [ "$WIDTH" != "$HEIGHT" ] || [ "$WIDTH" -lt 1024 ]; then
