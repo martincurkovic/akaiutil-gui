@@ -1,7 +1,7 @@
 [project]
 name = "akaiutil-gui"
 version = "0.0.0" # placeholder: the real version comes from the git tag at build time (see scripts/build_*)
-description = "A cross-platform Qt GUI for akaiutil (Akai S900/S1000/S3000 filesystem tool). Proof of concept: drives the akaiutil CLI as a subprocess."
+description = "A cross-platform Qt GUI for akaiutil, the Akai S900/S1000/S3000 filesystem tool: browse, preview, edit and export disk images. Drives the akaiutil CLI as a subprocess."
 readme = "README.md"
 license = "GPL-2.0-or-later"
 license-files = ["LICENSE"]
