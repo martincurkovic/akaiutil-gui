@@ -34,6 +34,17 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   inside a volume). Another partition can use other names, so a copy maps tags by name (`tags.map_tags`). Floppies have none.
 - A format of a disk makes other blank images in the session print "invalid format" every restart: don't read that as failure.
 
+## Copying volumes
+- `copyvoli <n> <dst-path>` (run from the source partition) copies a volume across partitions and disks with everything: the files
+  with their OS versions and tags (raw tag numbers, not remapped), volume parameters, load number. `copypart` does a partition.
+- It **merges silently** into a volume that already has the destination's name, replacing same-named files; **copies the load
+  number as it is** (two volumes can end up with load number 5); and when the partition fills up it prints
+  `not enough space left` / `cannot create file` / `copy error` and **leaves the half-made volume behind**.
+  `engine.copy_volume` checks the name and the room first, clears a clashing load number (`setlnumi <n> OFF`), and deletes the
+  copy (`delvoli`) if the output says it failed or the file counts differ.
+- A destination is a path like `/disk1/B/NEW_NAME`: an underscore for a space, as everywhere.
+- Native `copyi` also keeps tags (by number), so the tar route in `tags.py` is only needed to map tags by name.
+
 ## Exporting audio
 - `sample2wav*` writes fmt, data and the `S1H `/`S3H ` header chunk, and **no `smpl` chunk**, so a DAW sees no loops or root note.
   `audio/wavfile.add_loop_info` reads the header (`akai_header.parse_header`) and appends one: root key, and the loops that are
