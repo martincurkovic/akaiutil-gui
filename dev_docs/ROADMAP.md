@@ -14,6 +14,7 @@ Last updated 2026-10-10. Items are in the order I'd do them; nothing here is pro
 | Smart import | Loop points and root note from a WAV `smpl` chunk (and an AIFF root note), root note from a name like `Piano_C3`, trim silence, normalise |
 | Sorting | Sort a volume's files by name (all, or samples only) by moving them between slots; optional automatic sort after import/paste |
 | Moving files | Copy / Cut / Paste and drag onto a volume (Shift/Cmd to move); drag files out to Finder/Explorer as WAV (Option for raw Akai) |
+| Tags | A Tags column with the partition's names for them; copies keep an S3000 file's tags (matched by name, through a tar import) |
 | App | Settings, update check against GitHub releases, CI builds mirroring AKAISDS |
 
 ## Verification debt (do this before trusting any of it)
@@ -42,8 +43,9 @@ akaiutil reading its own output back:
    and "samples no program uses" for library cleanup.
 4. **Copy a whole volume or partition** to another disk (new volume + copy of every file; `pget`/`pput` for partitions).
 5. **Export a volume/disk** as a folder of WAVs with loop points written into the WAV `smpl` chunk so DAWs see them.
-6. **Tags.** Copies currently lose a file's tags (`put` doesn't carry them; `reni` moves do). Preserve or let the user edit
-   them (`puttags`, `copytags`).
+6. **Editing tags** (setting, clearing, renaming a partition's tag names). Showing them and keeping them on copy are done.
+   akaiutil's `settagi` & co crash (see akaiutil-notes.md), so editing means either patching akaiutil or rewriting a file's tags
+   with the same tar trick (delete + import, which moves the file's slot), or `rentag` for the names.
 7. **Import polish:** AIFF loop points (INST + MARK chunks: the end-marker convention needs checking), fade in/out, a pitch
    fraction from `smpl`, per-file overrides in the import dialog, a progress dialog for big batches.
 8. **Safety net:** optional "snapshot the image before the first edit" and a revert. Decided against for now.
