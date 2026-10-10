@@ -21,6 +21,8 @@ there is no undo (see [Editing](#editing)).
   Right-click a volume, partition or disk to export all its samples at once. Files from several volumes go into one folder each.
 - **Edit** (opt-in): rename and delete files and volumes, create volumes, import samples, format a disk, and make new empty
   disk images.
+- **Sample settings** (Edit > Sample Settings…): change an S1000/S3000 sample's root key, tuning, play mode, markers and its 8
+  loops, on a waveform with draggable markers, zoom and click-to-preview (the same mechanism as AKAISDS). The sample is rewritten with the new header and put back in the same slot, with its name, tags and OS version.
 - **Settings** (File > Settings, or Cmd/Ctrl+,): theme, audio output device and buffer size, whether samples play when
   selected, a default export folder, which akaiutil to use, and whether to check for updates.
 - **A log file** (Help > Show Log File) of what the app did and every error, with an option to record every akaiutil command,
