@@ -14,11 +14,12 @@ from PySide6.QtWidgets import (
     QListWidget,
     QLineEdit,
     QMessageBox,
+    QRadioButton,
     QSpinBox,
     QVBoxLayout,
 )
 
-from akaiutil_gui import akai_names, importing, settings
+from akaiutil_gui import akai_names, importing, settings, sorting
 from akaiutil_gui.engine import formats
 from akaiutil_gui.engine.models import Disk
 
@@ -408,6 +409,42 @@ class ImportDialog(QDialog):
             self.files.addItem(f"{s.path.name}   —   {importing.describe(s, self.sample_type, self.stereo, self.options)}")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(self.importable > 0)
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Import")
+
+
+class SortDialog(QDialog):
+    """Which files of a volume to put in alphabetical order."""
+
+    def __init__(self, parent, volume, files: list):
+        super().__init__(parent)
+        self.setWindowTitle("Sort Files by Name")
+        self.setMinimumWidth(460)
+        samples = sum(1 for f in files if f.is_sample)
+        others = len(files) - samples
+        self.everything = QRadioButton(f"All {len(files)} files")
+        self.only_samples = QRadioButton(f"Only the {samples} sample{'s' if samples != 1 else ''}: leave the programs and other files where they are")
+        (self.only_samples if others else self.everything).setChecked(True)
+        note = QLabel(
+            "A program's number (what a MIDI program change picks) is its place among the volume's programs, so sorting "
+            "everything can change which program a number selects. Nothing else about a file changes."
+        )
+        note.setObjectName("mutedLabel")
+        note.setWordWrap(True)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Sort")
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Put the files of “{volume.name}” in alphabetical order (numbers in order, ignoring case):"))
+        if others:  # nothing to choose between when every file is a sample
+            layout.addWidget(self.only_samples)
+            layout.addWidget(self.everything)
+            layout.addWidget(note)
+        layout.addWidget(self.buttons)
+
+    @property
+    def scope(self) -> str:
+        return sorting.SAMPLES if self.only_samples.isChecked() else sorting.ALL
 
 
 def confirm(parent, title: str, text: str, detail: str = "", action: str = "Delete", details_lines: Iterable[str] = ()) -> bool:

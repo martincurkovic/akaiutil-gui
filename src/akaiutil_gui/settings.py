@@ -154,3 +154,12 @@ def get_import_stereo_mix() -> bool:
 
 def set_import_stereo_mix(mix: bool) -> None:
     _qs().setValue(IMPORT_STEREO_MIX, bool(mix))
+
+
+def get_sort_after_adding() -> bool:
+    """Put a volume in alphabetical order after files are imported or pasted into it."""
+    return _bool("edit/sort_after_adding", False)
+
+
+def set_sort_after_adding(on: bool) -> None:
+    _qs().setValue("edit/sort_after_adding", bool(on))

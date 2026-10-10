@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QSettings, QThreadPool
 
-from akaiutil_gui import __version__, akai_names, describe, importing, search, settings, transfer
+from akaiutil_gui import __version__, akai_names, describe, importing, search, settings, sorting, transfer
 from akaiutil_gui.audio.sample import LoadedSample, load_wav
 from akaiutil_gui.formatting import human_size
 from akaiutil_gui.engine import fetch, formats
@@ -390,12 +390,13 @@ class MainWindow(QMainWindow):
         self.act_cut = self._action("Cu&t Files", lambda: self._copy_selection("cut"), QKeySequence.StandardKey.Cut)
         self.act_paste = self._action("&Paste Files", self._paste, QKeySequence.StandardKey.Paste)
         self.act_import = self._action("&Import Files…", self._import_dialog, QKeySequence("Ctrl+I"))
+        self.act_sort = self._action("&Sort Files by Name…", self._sort_volume)
         self.act_format = self._action("&Format Disk…", self._format_disk)
         self.edit_menu.addAction(self.act_allow_edit)
         self.edit_menu.addSeparator()
         self.edit_menu.addActions([self.act_copy, self.act_cut, self.act_paste])
         self.edit_menu.addSeparator()
-        self.edit_menu.addActions([self.act_new_volume, self.act_import, self.act_rename, self.act_delete])
+        self.edit_menu.addActions([self.act_new_volume, self.act_import, self.act_sort, self.act_rename, self.act_delete])
         self.edit_menu.addSeparator()
         self.edit_menu.addAction(self.act_format)
         self.edit_menu.aboutToShow.connect(self._update_edit_actions)
@@ -1224,6 +1225,7 @@ class MainWindow(QMainWindow):
         self.act_new_volume.setEnabled(has and self._partition_for_new_volume() is not None)
         self.act_format.setEnabled(has and self._selected_disk() is not None)
         self.act_import.setEnabled(has and self._selected_volume() is not None)
+        self.act_sort.setEnabled(has and self._selected_volume() is not None)
         rows = self._selected_rows() if has else []
         self.act_copy.setEnabled(bool(rows))
         self.act_cut.setEnabled(bool(rows))
@@ -1517,14 +1519,18 @@ class MainWindow(QMainWindow):
         relay.message.connect(lambda text: self.statusBar().showMessage(text))
         verb = "Moving" if move else "Copying"
 
-        def work() -> transfer.TransferResult:
-            return transfer.transfer_files(
+        sort_after = settings.get_sort_after_adding()
+
+        def work() -> tuple[transfer.TransferResult, str]:
+            result = transfer.transfer_files(
                 engine, rows, dst, move, progress=lambda i, n, name: relay.message.emit(f"{verb} {i + 1} of {n}: {name}…")
             )
+            return result, (self._sort_after(engine, dst) if sort_after and result.done else "")
 
         disks = sorted({dst.disk} | ({src.disk for src, _ in rows} if move else set()))
 
-        def done(result: transfer.TransferResult) -> None:
+        def done(answer: tuple[transfer.TransferResult, str]) -> None:
+            result, sort_problem = answer
             relay.deleteLater()
             n = len(result.done)
             what = f"{'Moved' if move else 'Copied'} {n} file{'s' if n != 1 else ''} to “{dst.name}”."
@@ -1534,6 +1540,8 @@ class MainWindow(QMainWindow):
                 self._edited(disk, message=what)
             if move and result.done:
                 self._clip = None  # what was cut is where it is now
+            if sort_problem:
+                self._warn("Couldn't sort the volume", sort_problem)
             problems = result.failed + result.skipped
             if problems:
                 self._warn("Some files weren't transferred", f"{len(problems)} of {len(rows)} files weren't {'moved' if move else 'copied'}.", problems)
@@ -1578,6 +1586,50 @@ class MainWindow(QMainWindow):
                     if len(groups) == 1:
                         paths += res.exported
         return paths
+
+    # ----------------------------------------------------------------- sorting
+    @staticmethod
+    def _sort_after(engine, volume: Volume) -> str:
+        """Sort a volume after files were added to it (on a worker thread). Returns what went wrong, or ""."""
+        try:
+            files = engine.list_files(volume)
+            engine.sort_files(volume, sorting.ALL if all(f.is_sample for f in files) else sorting.SAMPLES)
+        except Exception as e:
+            return str(e)
+        return ""
+
+    def _ask_sort(self, volume: Volume, files: list[FileEntry]) -> str | None:
+        dialog = edit_dialogs.SortDialog(self, volume, files)
+        return dialog.scope if dialog.exec() == dialog.DialogCode.Accepted else None
+
+    def _sort_volume(self, volume: Volume | None = None) -> None:
+        """Edit > Sort Files by Name: put a volume's files in alphabetical order (the order a sampler lists them in)."""
+        volume = volume if isinstance(volume, Volume) else self._selected_volume()
+        engine = self._engine
+        if engine is None or volume is None or self._busy():
+            return
+
+        def ask() -> None:
+            self._run(lambda: engine.list_files(volume), lambda files: self._do_sort(volume, files))
+
+        self._ensure_editing(ask)
+
+    def _do_sort(self, volume: Volume, files: list[FileEntry]) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+        if not files:
+            self.statusBar().showMessage(f"“{volume.name}” has no files to sort.", 6000)
+            return
+        scope = self._ask_sort(volume, files)
+        if scope is None:
+            return
+
+        def done(moved: int) -> None:
+            text = f"Sorted “{volume.name}”: {moved} file{'s' if moved != 1 else ''} moved." if moved else f"“{volume.name}” was already in order."
+            self._edited(volume.disk, select=volume, announce=True, message=text)
+
+        self._run_edit(lambda: engine.sort_files(volume, scope), done, lambda message: self._edit_failed(volume.disk, message))
 
     # --------------------------------------------------------------- importing
     def _ask_import_files(self) -> list[str]:
@@ -1628,24 +1680,30 @@ class MainWindow(QMainWindow):
         relay = _ProgressRelay(self)
         relay.message.connect(lambda text: self.statusBar().showMessage(text))
 
-        def work() -> importing.ImportResult:
+        sort_after = settings.get_sort_after_adding()
+
+        def work() -> tuple[importing.ImportResult, str]:
             work_dir = Path(tempfile.mkdtemp(prefix="akaiutil-gui-import-"))
             try:
-                return importing.run_import(
+                result = importing.run_import(
                     engine, volume, sources, work_dir, sample_type, compress, stereo,
                     progress=lambda i, n, name: relay.message.emit(f"Importing {i + 1} of {n}: {name}…"),
                     options=options,
                 )
             finally:
                 shutil.rmtree(work_dir, ignore_errors=True)
+            return result, (self._sort_after(engine, volume) if sort_after and result.imported else "")
 
-        def done(result: importing.ImportResult) -> None:
+        def done(answer: tuple[importing.ImportResult, str]) -> None:
+            result, sort_problem = answer
             relay.deleteLater()
             n = result.count
             text = f"Imported {n} sample{'s' if n != 1 else ''} into “{volume.name}”."
             if result.failed:
                 text += f"  {len(result.failed)} failed."
             self._edited(volume.disk, select=volume, announce=True, message=text)
+            if sort_problem:
+                self._warn("Couldn't sort the volume", sort_problem)
             if result.failed:
                 self._warn("Some files weren't imported", f"{len(result.failed)} of {len(sources)} files couldn't be imported.", result.failed)
 
@@ -1710,6 +1768,7 @@ class MainWindow(QMainWindow):
             menu.addAction("Import Files…", lambda: self._import_dialog(obj))
             paste = menu.addAction("Paste Files", lambda: self._paste(obj))
             paste.setEnabled(self._clip is not None)
+            menu.addAction("Sort Files by Name…", lambda: self._sort_volume(obj))
             menu.addSeparator()
             menu.addAction("Rename…", lambda: self._rename_volume(obj))
             menu.addAction("Delete…", lambda: self._delete_volume(obj))

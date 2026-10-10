@@ -17,7 +17,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import akai_names, describe
+from .. import akai_names, describe, sorting
 from . import formats, parse
 from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, SampleInfo, Volume
 from .session import EngineError, Session, TrafficCallback
@@ -298,6 +298,39 @@ class AkaiEngine:
                 except EngineError as e:
                     failed.append(f"{f.name}: {e}")
         return failed
+
+    def sort_files(self, vol: Volume, scope: str = sorting.ALL) -> int:
+        """Put the files of a volume in alphabetical order by moving them between slots (the order a sampler lists them in).
+        `scope` is sorting.ALL, or sorting.SAMPLES to leave everything but the samples where it is. Returns how many moved.
+        Nothing about a file changes but its slot: the data isn't touched, and tags and all stay."""
+        with self._lock:
+            self._need_writable()
+            self._enter_volume(vol)
+            text = self._run("dir").text
+            files = parse.parse_files(text)
+            limit = parse.parse_volume_limit(text) or 510
+            moving = [f for f in files if sorting.takes_part(f, scope) and f.index in sorting.target_slots(files, scope)]
+            for f in moving:  # akaiutil re-encodes a name when it moves a file: only move names that survive that
+                base, ext = akai_names.split_extension(f.name)
+                clean, problem = akai_names.check_name(base, vol.type)
+                if problem or clean.casefold() != base.casefold():
+                    raise EngineError(f"“{f.name}” has a name akaiutil can't move safely, so nothing was sorted.")
+            used = {f.index for f in files}
+            free = next((i for i in range(1, limit + 1) if i not in used), None)
+            try:
+                moves = sorting.plan_moves(files, scope, free)
+            except ValueError:
+                raise EngineError(f"Every slot of {vol.name} is in use, so there is no room to shuffle the files. Delete one file first.") from None
+            names = {f.index: f.name for f in files}
+            for src, dst in moves:
+                name = names.pop(src)
+                self._write(f"reni {src} {akai_names.command_token(name)} {dst}")
+                names[dst] = name
+            after = parse.parse_files(self._run("dir").text)
+            fingerprint = lambda fs: sorted((f.name, f.size, f.start_block, f.os_version, f.tags) for f in fs)  # noqa: E731
+            if fingerprint(after) != fingerprint(files):
+                raise EngineError("The files changed while being sorted: check the volume before using it.")
+            return len(moving)
 
     def import_job(self, vol: Volume, job: ImportJob) -> list[str]:
         """Put one file into a volume. Returns the names of the files that appeared (two for a stereo sample)."""

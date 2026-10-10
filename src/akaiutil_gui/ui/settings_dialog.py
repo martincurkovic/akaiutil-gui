@@ -133,6 +133,17 @@ class SettingsDialog(QDialog):
         form.addRow(self.check_ask_folder)
         export = section_card("Export", form)
 
+        # ---------------------------------------------------------------- editing
+        form = QFormLayout()
+        self.check_sort_after = QCheckBox("Sort a volume by name after importing or pasting files into it")
+        self.check_sort_after.setToolTip(
+            "Files are otherwise listed on the sampler in the order they were added.\n"
+            "Programs and other files stay where they are; only the samples are put in order."
+        )
+        self.check_sort_after.setChecked(settings.get_sort_after_adding())
+        form.addRow(self.check_sort_after)
+        editing = section_card("Editing", form)
+
         # --------------------------------------------------------------- akaiutil
         form = QFormLayout()
         self.label_akaiutil = QLabel()
@@ -172,7 +183,7 @@ class SettingsDialog(QDialog):
         page = QWidget()
         page_layout = QVBoxLayout(page)
         page_layout.setSpacing(12)
-        for card in (appearance, audio, export, akaiutil, updates_card):
+        for card in (appearance, audio, export, editing, akaiutil, updates_card):
             page_layout.addWidget(card)
         page_layout.addStretch(1)
         scroll = QScrollArea()
@@ -235,4 +246,5 @@ class SettingsDialog(QDialog):
         settings.set_default_export_folder(self.edit_export_folder.text() or None)
         settings.set_ask_export_folder(self.check_ask_folder.isChecked())
         settings.set_check_updates_on_startup(self.check_updates.isChecked())
+        settings.set_sort_after_adding(self.check_sort_after.isChecked())
         super().accept()

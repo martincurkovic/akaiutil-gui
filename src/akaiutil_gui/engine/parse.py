@@ -98,8 +98,8 @@ def parse_volumes(text: str, disk: int, partition: str) -> list[Volume]:
 
 
 def parse_volume_limit(text: str) -> int | None:
-    """The most volumes the partition can hold: "total:   3 volume(s) (max. 100)"."""
-    m = re.search(r"\(max\. (\d+)\)", text)
+    """The most volumes (or files) the listing's container can hold: "total:   3 volume(s) (max. 100)"."""
+    m = re.search(r"\(max\.\s+(\d+)\)", text)
     return int(m.group(1)) if m else None
 
 
