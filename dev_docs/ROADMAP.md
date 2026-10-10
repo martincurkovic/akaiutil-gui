@@ -14,6 +14,7 @@ Last updated 2026-10-10. Items are in the order I'd do them; nothing here is pro
 | Smart import | Loop points and root note from a WAV `smpl` chunk (and an AIFF root note), root note from a name like `Piano_C3`, trim silence, normalise |
 | Sorting | Sort a volume's files by name (all, or samples only) by moving them between slots; optional automatic sort after import/paste |
 | Moving files | Copy / Cut / Paste and drag onto a volume (Shift/Cmd to move); drag files out to Finder/Explorer as WAV (Option for raw Akai) |
+| Volumes | Copy a whole volume to any hard disk partition on any open disk (right-click > Copy Volume To…): room checked first, load-number clash fixed, no half copies |
 | Export | Files as they are, or samples as WAV with the root note and loops in a `smpl` chunk; right-click a volume, partition or disk to export all its samples |
 | Tags | A Tags column with the partition's names for them; copies keep an S3000 file's tags (matched by name, through a tar import) |
 | App | Settings, update check against GitHub releases, CI builds mirroring AKAISDS |
@@ -42,7 +43,7 @@ akaiutil reading its own output back:
    rails against picking the wrong disk; start read-only, add editing later.
 3. **Programs and multis.** Today akaiutil's raw info text. A readable keygroup view, "which samples does this program use?",
    and "samples no program uses" for library cleanup.
-4. **Copy a whole volume or partition** to another disk (new volume + copy of every file; `pget`/`pput` for partitions).
+4. **Copy a whole partition** (`copypart`, or `pget`/`pput` to a file): volume copy is done and `copypart` would reuse it.
 5. **Editing tags** (setting, clearing, renaming a partition's tag names). Showing them and keeping them on copy are done.
    akaiutil's `settagi` & co crash (see akaiutil-notes.md), so editing means either patching akaiutil or rewriting a file's tags
    with the same tar trick (delete + import, which moves the file's slot), or `rentag` for the names.
