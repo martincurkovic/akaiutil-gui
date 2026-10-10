@@ -6,7 +6,7 @@
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-AppId={{7FABFE9F-1F73-44A3-AB3A-05D357BAE9C5}
+AppId={{283FC58B-AB1F-48BC-8713-AA844EA758B8}
 ArchitecturesInstallIn64BitMode=x64compatible
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
