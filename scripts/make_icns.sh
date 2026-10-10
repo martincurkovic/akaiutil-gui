@@ -4,7 +4,7 @@ set -e
 # make_icns.sh - builds the macOS icon, assets/icon/akaiutil-GUI-macos.icns, with all ten sizes
 # (16, 32, 128, 256 and 512 points, each at 1x and 2x) from assets/icon/AppIcon1024.png.
 #
-# AppIcon1024.png is the master: 1024x1024, already in macOS icon form (rounded square about 824px wide,
+# AppIcon1024.png is the master (not kept in the repo: save your export there first): 1024x1024, already in macOS icon form (rounded square about 824px wide,
 # centred, soft shadow, transparent corners), as exported by IconKitchen or similar. The sizes are scaled
 # down from it, never up, which is why it has to be the 1024px version and not the 512px one.
 # Needs macOS (sips and iconutil ship with it).
@@ -16,7 +16,7 @@ ICON_DIR="$ROOT_DIR/assets/icon"
 MASTER="$ICON_DIR/AppIcon1024.png"
 OUTPUT="${1:-$ICON_DIR/akaiutil-GUI-macos.icns}"
 
-[ -f "$MASTER" ] || { echo "Missing $MASTER"; exit 1; }
+[ -f "$MASTER" ] || { echo "Missing $MASTER - export a 1024x1024 macOS-style icon (rounded square, transparent corners) and save it there."; exit 1; }
 WIDTH=$(sips -g pixelWidth "$MASTER" | awk '/pixelWidth/ {print $2}')
 HEIGHT=$(sips -g pixelHeight "$MASTER" | awk '/pixelHeight/ {print $2}')
 if [ "$WIDTH" != "1024" ] || [ "$HEIGHT" != "1024" ]; then
