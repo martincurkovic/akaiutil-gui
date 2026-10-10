@@ -257,7 +257,7 @@ def test_new_volume_is_only_offered_where_a_volume_can_go(qt_app, window, images
     assert window._can_hold_volumes(hd_part) and not window._can_hold_volumes(floppy_part)
     assert window._tree_menu(hd_part) is not None
     assert window._tree_menu(floppy_part) is None
-    assert [a.text() for a in window._tree_menu(window.tree.disk(0)).actions()] == ["Format Disk…"]
+    assert [a.text() for a in window._tree_menu(window.tree.disk(0)).actions() if not a.isSeparator()][-1] == "Format Disk…"
 
 
 # ----------------------------------------------------------------------- files

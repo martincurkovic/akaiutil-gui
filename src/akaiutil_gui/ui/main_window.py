@@ -41,7 +41,7 @@ from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.locate import candidates, find_akaiutil
 from akaiutil_gui.engine.models import CatalogEntry, Disk, DiskUsage, ExportResult, FileEntry, Partition, Volume
 
-from . import edit_dialogs, theme
+from . import edit_dialogs, reveal, theme
 from .details_view import DetailsView
 from .disk_tree import DiskTree
 from .notices_dialog import NoticesDialog
@@ -139,6 +139,8 @@ class MainWindow(QMainWindow):
         self._engine: AkaiEngine | None = None
         self._engine_binary: Path | None = None
         self._images: list[str] = []
+        self._disk_files: dict[int, str] = {}  # disk number -> the image file akaiutil says it came from
+        self._open_select: tuple[int, str | None, int | None] | None = None  # where to land once a reopen has loaded
         self._volume: Volume | None = None
         self._volume_details: describe.Details | None = None
         self._pending = 0
@@ -352,13 +354,17 @@ class MainWindow(QMainWindow):
 
         file_menu = mb.addMenu("&File")
         self.act_open = self._action("&Open Disk Image…", self.open_dialog, QKeySequence.StandardKey.Open)
-        self.act_close = self._action("&Close Images", self.close_images, QKeySequence("Ctrl+W"))
+        self.act_add = self._action("&Add Disk Image…", self.add_dialog, QKeySequence("Ctrl+Shift+O"))
+        self.act_close_disk = self._action("Close &Disk Image", self._close_selected_disk, QKeySequence("Ctrl+Shift+W"))
+        self.act_close = self._action("Close All &Images", self.close_images, QKeySequence("Ctrl+W"))
         self.act_export = self._action("&Export…", lambda: self._export(False), QKeySequence("Ctrl+E"))
         self.act_export_wav = self._action("Export as &WAV…", lambda: self._export(True), QKeySequence("Ctrl+Shift+E"))
         self.act_new_image = self._action("&New Disk Image…", self._new_image, QKeySequence.StandardKey.New)
         act_quit = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
         act_quit.setMenuRole(QAction.MenuRole.QuitRole)
-        file_menu.addActions([self.act_new_image, self.act_open, self.act_close])
+        file_menu.addActions([self.act_new_image, self.act_open, self.act_add])
+        file_menu.addSeparator()
+        file_menu.addActions([self.act_close_disk, self.act_close])
         file_menu.addSeparator()
         file_menu.addActions([self.act_export, self.act_export_wav])
         file_menu.addSeparator()
@@ -424,6 +430,8 @@ class MainWindow(QMainWindow):
         can_export = bool(rows) and all(v is not None for v, _ in rows) and self._pending == 0
         can_wav = can_export and any(f.is_sample for _, f in rows)
         self.act_close.setEnabled(has_images)
+        self.act_add.setEnabled(True)
+        self.act_close_disk.setEnabled(has_images and self._selected_disk() is not None and self._writing == 0)
         self.search.setEnabled(has_images)
         self.search_kind.setEnabled(has_images)
         for w in (self.act_export, self.export_btn):
@@ -441,30 +449,39 @@ class MainWindow(QMainWindow):
             settings.set_last_dir("open", str(Path(paths[0]).parent))
             self.open_images(paths)
 
-    def open_images(self, paths: list[str]) -> None:
+    def open_images(self, paths: list[str], writable: bool = False, select: tuple[int, str | None, int | None] | None = None) -> None:
+        """Open these disk images (replacing whatever is open). Read-only unless `writable` and every file allows it.
+        `select` is a (disk, partition, volume number) to land on instead of the first disk."""
         binary = find_akaiutil(settings.get_akaiutil_path())
         if binary is None:
             # first run: offer to get akaiutil, then carry on with what the user asked for
-            self._set_up_akaiutil(then=lambda: self.open_images(paths))
+            self._set_up_akaiutil(then=lambda: self.open_images(paths, writable, select))
             return
         if self._engine is not None:
             self._engine.close()
         self._engine = AkaiEngine(binary, on_traffic=self._traffic.feed)
         self._engine_binary = binary
-        self._writable = False  # every image opens read-only; editing is something to switch on deliberately
+        self._writable = False  # until akaiutil says otherwise (see _opened)
         self._reset_views()
         self._images = [str(p) for p in paths]
+        self._open_select = select
+        note = ""
+        if writable:
+            locked = [Path(p).name for p in self._images if not os.access(p, os.W_OK)]
+            if locked:
+                writable, note = False, f"Editing is off: {', '.join(locked)} can't be written to."
         engine = self._engine
         self.statusBar().showMessage("Opening…")
         self._run(
-            lambda: engine.open(self._images),
-            lambda banner: self._opened(engine, banner),
+            lambda: engine.open(self._images, writable=writable),
+            lambda banner: self._opened(engine, banner, note),
             self._open_failed,
         )
 
-    def _opened(self, engine: AkaiEngine, banner: str) -> None:
+    def _opened(self, engine: AkaiEngine, banner: str, note: str = "") -> None:
         if engine is not self._engine:
             return  # superseded by a newer open
+        self._writable = engine.is_writable
         m = re.search(r"Rev\.\s*([\w.]+)", banner)
         names = ", ".join(Path(p).name for p in self._images)
         self.setWindowTitle(f"{names} — akaiutil-gui")
@@ -473,10 +490,82 @@ class MainWindow(QMainWindow):
         problems = [ln.strip() for ln in banner.splitlines() if re.search(r"invalid format|cannot|error", ln, re.I)]
         if problems:
             message = f"⚠ {problems[0]}  ·  {message}"
+        if note:
+            message = f"{note}  ·  {message}"
         self.statusBar().showMessage(message)
+        self._disk_files = {int(n): path for n, path in re.findall(r'^disk(\d+): "(.*)"$', banner, re.M)}
+        if not self._disk_files:  # (akaiutil numbers them in the order they were given)
+            self._disk_files = {i: str(Path(p).resolve()) for i, p in enumerate(self._images)}
         self.stack.setCurrentIndex(1)
-        self.tree.load(engine)
+        select, self._open_select = self._open_select, None
+        self.tree.load(engine, select=select, files=self._disk_files)
         self._update_actions()
+
+    # ----------------------------------------------- adding and closing single disks
+    def add_dialog(self) -> None:
+        start = settings.get_last_dir("open") or str(Path.home())
+        paths, _ = QFileDialog.getOpenFileNames(self, "Add disk image(s)", start, IMAGE_FILTER)
+        if paths:
+            settings.set_last_dir("open", str(Path(paths[0]).parent))
+            self.add_images(paths)
+
+    def add_images(self, paths: list[str]) -> None:
+        """Open more disk images next to the ones already open. (akaiutil takes its images when it starts, so this restarts it
+        on all of them; what you were looking at, and the editing mode, carry over.)"""
+        if not self._images:
+            self.open_images(paths)
+            return
+        have = {Path(p).resolve() for p in self._images}
+        new: list[str] = []
+        for p in paths:
+            resolved = Path(p).resolve()
+            if resolved not in have:
+                have.add(resolved)
+                new.append(str(p))
+        if not new:
+            self.statusBar().showMessage("That image is already open.", 6000)
+            return
+        if self._busy():
+            return
+        self._reopen([*self._images, *new])
+
+    def _reopen(self, paths: list[str], disk_map=None) -> None:
+        """Restart on another set of images, keeping the editing mode and the selection (`disk_map` says what number the
+        selected disk has now, or None if it is gone)."""
+        obj = self.tree.current_object()
+        select = None
+        if obj is not None:
+            old = obj.index if isinstance(obj, Disk) else obj.disk
+            new = disk_map(old) if disk_map is not None else old
+            if new is not None:
+                partition = None if isinstance(obj, Disk) else obj.name if isinstance(obj, Partition) else obj.partition
+                select = (new, partition, obj.index if isinstance(obj, Volume) else None)
+        self.open_images(paths, writable=self._writable, select=select)
+
+    def _close_selected_disk(self) -> None:
+        disk = self._selected_disk()
+        if disk is not None:
+            self.close_disk(disk)
+
+    def close_disk(self, disk: Disk) -> None:
+        """Close one image and keep the others open. The disks after it get new numbers, since akaiutil numbers them in order."""
+        if self._engine is None or self._busy():
+            return
+        path = self._disk_files.get(disk.index)
+        if path is not None:
+            remaining = [p for p in self._images if Path(p).resolve() != Path(path).resolve()]
+        else:
+            remaining = [p for i, p in enumerate(self._images) if i != disk.index]
+        if not remaining:
+            self.close_images()
+            return
+        gone = disk.index
+        self._reopen(remaining, disk_map=lambda old: None if old == gone else old - (old > gone))
+
+    def _reveal_disk(self, disk: Disk) -> None:
+        path = self.tree.disk_path(disk.index)
+        if path is not None and not reveal.reveal(path):
+            self.statusBar().showMessage(f"Couldn't open the folder of {Path(path).name}.", 6000)
 
     def _open_failed(self, message: str) -> None:
         self.close_images()
@@ -487,6 +576,7 @@ class MainWindow(QMainWindow):
         if engine is not None:
             run_async(engine.close)  # can take a moment; keep the GUI responsive
         self._images = []
+        self._disk_files = {}
         self._writable = False
         self._reset_views()
         self.stack.setCurrentIndex(0)
@@ -1365,7 +1455,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Creating {Path(path).name}…")
         self._run(
             lambda: engine.create_image(path, fmt, size_mb, partition_mb),
-            lambda made: self.open_images([*self._images, str(made)]),
+            lambda made: self.add_images([str(made)]),
             lambda message: QMessageBox.critical(self, "Couldn't create the disk image", message),
         )
 
@@ -1426,6 +1516,10 @@ class MainWindow(QMainWindow):
         elif isinstance(obj, Partition) and self._can_hold_volumes(obj):
             menu.addAction("New Volume…", lambda: self._new_volume(obj))
         elif isinstance(obj, Disk):
+            if self.tree.disk_path(obj.index):
+                menu.addAction(reveal.label(), lambda: self._reveal_disk(obj))
+            menu.addAction("Close Disk Image", lambda: self.close_disk(obj))
+            menu.addSeparator()
             menu.addAction("Format Disk…", lambda: self._format_disk(obj))
         return None if menu.isEmpty() else menu
 
@@ -1528,7 +1622,7 @@ class MainWindow(QMainWindow):
         paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
         paths = [p for p in paths if Path(p).is_file()]
         if paths:
-            self.open_images(paths)
+            self.add_images(paths)  # opens them if nothing is open yet
 
     def closeEvent(self, event) -> None:
         QSettings().setValue("window/geometry", self.saveGeometry())

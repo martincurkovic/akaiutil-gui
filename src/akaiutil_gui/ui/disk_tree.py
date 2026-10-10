@@ -1,5 +1,7 @@
 """Disks -> partitions -> volumes, loaded lazily as nodes are expanded."""
 
+from pathlib import Path
+
 from PySide6.QtCore import QPointF, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QStyle, QTreeWidget, QTreeWidgetItem
@@ -23,8 +25,9 @@ _DISK_LABELS = {
 }
 
 
-def _disk_text(d: Disk) -> str:
-    text = f"disk{d.index}  ·  {_DISK_LABELS.get(d.type, d.type)}  ·  {d.total_mb:g} MB"
+def _disk_text(d: Disk, path: str | None = None) -> str:
+    name = f"  ·  {Path(path).name}" if path else ""
+    text = f"disk{d.index}{name}  ·  {_DISK_LABELS.get(d.type, d.type)}  ·  {d.total_mb:g} MB"
     if d.partitions == 0:
         text += "  ·  no Akai filesystem found"
     return text
@@ -49,6 +52,7 @@ class DiskTree(QTreeWidget):
         self._reveal: tuple[int, str | None, int | None] | None = None
         self._expand_after_load: set[tuple[int, str]] = set()  # partitions to open again when a disk is reloaded
         self._refreshing = False  # a disk's children are being thrown away: the selection jumping about is noise
+        self._files: dict[int, str] = {}  # disk number -> the image file it came from
         self._announce = True  # False: the next selection made by a reload is silent (nodeSelected isn't emitted)
         self._load_seq = 0
         self._generation = 0  # bumped on every reload so stale async results are dropped
@@ -108,11 +112,15 @@ class DiskTree(QTreeWidget):
         painter.restore()
 
     # ------------------------------------------------------------------ API
-    def load(self, engine: AkaiEngine) -> None:
+    def load(self, engine: AkaiEngine, select: tuple[int, str | None, int | None] | None = None, files: dict[int, str] | None = None) -> None:
+        """Show the disks of an engine. `select` is a (disk, partition, volume number) to land on once loaded (default:
+        the first disk); `files` says which image file each disk came from."""
         self._engine = engine
         self._generation += 1
         self._disks = {}
         self._volume_order = {}
+        self._files = dict(files or {})
+        self._reveal = select
         self.clear()
         gen = self._generation
         run_async(engine.list_disks, lambda disks: self._add_disks(gen, disks), self.failed.emit)
@@ -233,8 +241,15 @@ class DiskTree(QTreeWidget):
             if item is not None:
                 self._disks[d.index] = d
                 item.setData(0, _ROLE_OBJ, d)
-                item.setText(0, _disk_text(d))
-                item.setToolTip(0, f"{d.partitions} partition(s), {d.free_mb:g} MB free ({d.free_pct:g}%)")
+                item.setText(0, _disk_text(d, self._files.get(d.index)))
+                item.setToolTip(0, self._disk_tooltip(d))
+
+    def _disk_tooltip(self, d: Disk) -> str:
+        path = self._files.get(d.index)
+        return (f"{path}\n" if path else "") + f"{d.partitions} partition(s), {d.free_mb:g} MB free ({d.free_pct:g}%)"
+
+    def disk_path(self, index: int) -> str | None:
+        return self._files.get(index)
 
     def current_object(self):
         item = self.currentItem()
@@ -284,17 +299,18 @@ class DiskTree(QTreeWidget):
         for d in disks:
             self._disks[d.index] = d
             floppy = d.type.startswith("FL")
-            item = QTreeWidgetItem([_disk_text(d)])
+            item = QTreeWidgetItem([_disk_text(d, self._files.get(d.index))])
             item.setIcon(0, self._icon(QStyle.StandardPixmap.SP_DriveFDIcon if floppy else QStyle.StandardPixmap.SP_DriveHDIcon))
-            item.setToolTip(0, f"{d.partitions} partition(s), {d.free_mb:g} MB free ({d.free_pct:g}%)")
+            item.setToolTip(0, self._disk_tooltip(d))
             item.setData(0, _ROLE_OBJ, d)
             self.addTopLevelItem(item)
             if d.partitions:
                 self._mark_expandable(item)
                 item.setExpanded(True)  # triggers the partition load
+        wanted = self._reveal is not None
         self._try_reveal()
         self.disksLoaded.emit(disks)
-        if disks:  # start with the first disk selected, so its details and space bar are showing
+        if disks and not wanted:  # start with the first disk selected, so its details and space bar are showing
             self.setCurrentItem(self.topLevelItem(0))
 
     def _mark_expandable(self, item: QTreeWidgetItem) -> None:
