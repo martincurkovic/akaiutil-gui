@@ -3,7 +3,8 @@
 A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil/)
 (Klaus Michael Indlekofer's tool for Akai S900/S1000/S3000 disk images).
 
-**Status: early.** It opens Akai disk images read-only and never writes to them.
+**Status: early.** Disk images open read-only. Nothing is written to one until you switch on **Edit > Allow Editing**, and
+there is no undo (see [Editing](#editing)).
 
 - **Browse** disks, partitions, volumes and files. A space bar under the tree shows what each volume uses (coloured to
   match the swatch beside it) and what's free; the Details pane turns akaiutil's terminal output into readable labels and
@@ -15,6 +16,7 @@ A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil
 - **Search** every open disk at once (Ctrl+F): type words (they all have to match, in the file's or its volume's name), and
   filter by type. Double-click a result to show it in its volume. Results can be previewed and exported like any file.
 - **Export** files as they are, or samples as WAV. Files from several volumes go into one folder each.
+- **Edit** (opt-in): rename and delete files and volumes, create volumes, format a disk, and make new empty disk images.
 - **Settings** (File > Settings, or Cmd/Ctrl+,): theme, audio output device and buffer size, whether samples play when
   selected, a default export folder, which akaiutil to use, and whether to check for updates.
 - **Check for updates** from the Help menu, and automatically once a day at startup (switch it off in Settings). It only ever
@@ -62,6 +64,21 @@ uv run pytest
 The integration and GUI tests build real disk images with the real akaiutil binary (they skip if it isn't
 built). The GUI tests run offscreen.
 
+## Editing
+
+Every image opens read-only, and the status bar says so. **Edit > Allow Editing** (or just asking for a change from a
+right-click menu) asks first, then restarts akaiutil in read/write mode on the same images. From then on each change is
+written to the image file straight away and **can't be undone**, so work on a copy of anything that matters. Opening
+images again puts the app back in read-only mode.
+
+- **Rename** (F2, or right-click): volumes and files. A file's type (`.S3`, `.P3`...) can't be changed this way. Akai names
+  are up to 12 characters (10 on an S900) of letters, digits, space and `# + - .`, always in capitals.
+- **Delete** (Delete key, or right-click): files, or a whole volume with everything in it. Always asks first.
+- **New Volume** (right-click a partition): name, volume number, type and load number.
+- **Format Disk** (right-click a disk): erases it and sets it up as an S1000, S3000, CD3000 or S900 disk, or a floppy of
+  the same density; hard disks are cut into partitions of up to 60 MB.
+- **File > New Disk Image** makes a new empty image (a hard disk up to 512 MB, or a floppy), formatted and opened.
+
 ## Audio notes
 
 Preview plays through your system's default output, or the device chosen in Settings. If you hear clicks, raise the buffer
@@ -70,7 +87,7 @@ entirely (the test suite sets it, and so does CI).
 
 ## How it works
 
-The GUI starts `akaiutil -r <images>` as a subprocess and types commands into its prompt, using the
+The GUI starts `akaiutil -r <images>` (without the `-r` once editing is allowed) as a subprocess and types commands into its prompt, using the
 `<cwd> >` prompt as the end-of-response marker. Fixed-width listings (`dir`, `dinfo`, …) are parsed in
 `engine/parse.py`; everything above that sees typed objects (`engine/models.py`, `engine/api.py`).
 
@@ -89,7 +106,7 @@ Things worth knowing:
   scratch dir and Python moves the results to your chosen folder (asking before overwriting).
 - Names with spaces: akaiutil accepts `_` for ` ` on its command line, but the GUI avoids that ambiguity by
   addressing volumes and files by index (`cdi`, `geti`, …).
-- Not yet: importing into images, writing/formatting, DD takes (listed as text only), real floppy/physical-drive access.
+- Not yet: importing samples (WAV) into images, copying files between volumes, DD takes (listed as text only), real floppy/physical-drive access.
 
 ## Licence
 
