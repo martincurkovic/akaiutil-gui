@@ -1,6 +1,6 @@
 [project]
 name = "akaiutil-gui"
-version = "0.0.1"
+version = "0.0.0" # placeholder: the real version comes from the git tag at build time (see scripts/build_*)
 description = "A cross-platform Qt GUI for akaiutil (Akai S900/S1000/S3000 filesystem tool). Proof of concept: drives the akaiutil CLI as a subprocess."
 readme = "README.md"
 license = "GPL-2.0-or-later"
@@ -19,7 +19,16 @@ dependencies = [
 akaiutil-gui = "akaiutil_gui.main:main"
 
 [dependency-groups]
-dev = ["pytest>=9"]
+dev = ["pytest>=9", "pyyaml>=6"]
+# Only needed to make the standalone apps (scripts/build_*): Nuitka does the compiling, and
+# imageio lets it turn the PNG icon into a Windows .ico. Same Nuitka pin as AKAISDS.
+# PySide6-Addons: Nuitka's PySide6 plugin refuses to run without it, even though the app only uses
+# Essentials modules (the standalone build still bundles just the Qt modules the app imports).
+build = ["Nuitka==4.1.3", "imageio>=2.37.4", "PySide6-Addons>=6.12,<6.13"]
+
+[tool.uv]
+# plain `uv sync` (which the build scripts and CI run) installs both groups
+default-groups = ["dev", "build"]
 
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]
