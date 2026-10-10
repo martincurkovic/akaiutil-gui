@@ -13,7 +13,7 @@ _ROLE_FILE = Qt.ItemDataRole.UserRole
 _ROLE_SORT = Qt.ItemDataRole.UserRole + 1
 _ROLE_VOLUME = Qt.ItemDataRole.UserRole + 2
 
-COLUMNS = ["#", "Name", "Type", "Size", "Start block", "OS ver", "Location"]
+COLUMNS = ["#", "Name", "Type", "Size", "Start block", "OS ver", "Tags", "Location"]
 LOCATION = COLUMNS.index("Location")  # only shown for search results, which span volumes
 
 
@@ -46,7 +46,7 @@ class FileTable(QTableWidget):
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Name takes the slack
         self.setColumnHidden(LOCATION, True)
-        for col, width in {0: 48, 2: 130, 3: 90, 4: 100, 5: 80, LOCATION: 180}.items():
+        for col, width in {0: 48, 2: 130, 3: 90, 4: 100, 5: 80, 6: 110, LOCATION: 180}.items():
             self.setColumnWidth(col, width)
         self.itemSelectionChanged.connect(lambda: self.selectionFilesChanged.emit(self.selected_files()))
         self.setDragEnabled(True)
@@ -75,6 +75,7 @@ class FileTable(QTableWidget):
                 (human_size(f.size), f.size, right),
                 (f.start_block, int(f.start_block, 16), right),
                 (f.os_version or "—", f.os_version, right),
+                (", ".join(f.tag_labels), ", ".join(f.tag_labels).lower(), None),
                 (where, where.lower(), None),
             ]
             for col, (text, key, align) in enumerate(cells):

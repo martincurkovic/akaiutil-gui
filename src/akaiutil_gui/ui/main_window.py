@@ -1548,6 +1548,8 @@ class MainWindow(QMainWindow):
             problems = result.failed + result.skipped
             if problems:
                 self._warn("Some files weren't transferred", f"{len(problems)} of {len(rows)} files weren't {'moved' if move else 'copied'}.", problems)
+            if result.notes:
+                self._warn("Some tags didn't come along", "The destination has no tag with the same name for these, so they arrived without it.", result.notes)
 
         def failed(message: str) -> None:
             relay.deleteLater()

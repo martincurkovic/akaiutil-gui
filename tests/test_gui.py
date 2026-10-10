@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from akaiutil_gui import search, settings
 from akaiutil_gui.engine.models import Volume
-from akaiutil_gui.ui import theme
+from akaiutil_gui.ui import file_table, theme
 
 
 @pytest.fixture(scope="module")
@@ -916,7 +916,7 @@ def three_disks(app, window, images):
 
 
 def results(window):
-    return {(window.table.item(r, 1).text(), window.table.item(r, 6).text()) for r in range(window.table.rowCount())}
+    return {(window.table.item(r, 1).text(), window.table.item(r, file_table.LOCATION).text()) for r in range(window.table.rowCount())}
 
 
 def search_for(app, window, text, kind=None):
@@ -931,7 +931,7 @@ def test_search_finds_files_across_every_open_disk(app, three_disks):
     assert w.search.isEnabled()
     search_for(app, w, "kick")
     assert results(w) == {("KICK.S3", "disk0 / A / DRUMS"), ("KICK.S1", "disk1 / A / NOT NAMED"), ("KICK.S9", "disk2 / A / VOLUME 001")}
-    assert w.files_title.text() == "3 results for “kick”" and not w.table.isColumnHidden(6)
+    assert w.files_title.text() == "3 results for “kick”" and not w.table.isColumnHidden(file_table.LOCATION)
     search_for(app, w, "kick drums")  # the volume's name counts, words in any order
     assert results(w) == {("KICK.S3", "disk0 / A / DRUMS")} and w.files_title.text() == "1 result for “kick drums”"
     search_for(app, w, "nothing matches this")
@@ -958,7 +958,7 @@ def test_clearing_the_search_puts_the_volume_back(app, three_disks):
     assert w.table.rowCount() == 3
     w.search.clear()
     assert pump(app, lambda: not w._in_results)
-    assert w.table.rowCount() == 2 and w.files_title.text() == f"Files in {w._volume.path}" and w.table.isColumnHidden(6)
+    assert w.table.rowCount() == 2 and w.files_title.text() == f"Files in {w._volume.path}" and w.table.isColumnHidden(file_table.LOCATION)
     assert {w.table.item(r, 1).text() for r in range(2)} == {"KICK.S3", "SNARE.S3"}
 
 

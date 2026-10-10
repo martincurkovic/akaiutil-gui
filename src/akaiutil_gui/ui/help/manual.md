@@ -84,7 +84,12 @@ Select a disk, partition, volume or file and the **Details** pane describes it. 
 rate, root key, tuning, play mode, markers and loops; for a volume, its number of files, load number and space used.
 
 The list of files shows each file's number (its slot in the volume, which is the order a sampler lists them in), name, type,
-size, start block and OS version. A file's type is its extension, for example `.S3` for an S3000 sample, `.P3` for a program.
+size, start block, OS version and tags. A file's type is its extension, for example `.S3` for an S3000 sample, `.P3` for a
+program.
+
+**Tags** are the labels an S3000 hard disk lets you put on files (a partition has 26 tag names, "TAG A" to "TAG Z" unless
+they were renamed on the sampler, and a file can carry up to four). The list shows them by name. This program shows tags but
+can't set or clear them yet.
 
 Samplers don't have folders: a volume is a flat list of files.
 
@@ -206,10 +211,11 @@ afterwards; the rest still go in.
   **copies**; hold **Shift** (Cmd on a Mac) to **move** instead. If your system doesn't do what you expect, Cut and Paste always
   means move.
 
-A move inside one partition changes nothing about the file but where it lives, and keeps its tags. A copy, or a move to another
-partition or disk, reads the file out and puts it back unchanged, but **doesn't carry the file's tags** (the original is
-deleted only after the copy is safely there). A name that already exists in the target gets a number, and files of the wrong
-sampler for the target volume are refused, as for importing.
+A move inside one partition changes nothing about the file but where it lives. A copy, or a move to another partition or disk,
+reads the file out and puts it back unchanged (the original is deleted only after the copy is safely there). An S3000 file
+**keeps its tags**; another partition may name its tags differently, so a tag is matched by its *name*, and you are told about
+any tag the target doesn't have. A name that already exists in the target gets a number, and files of the wrong sampler for the
+target volume are refused, as for importing.
 
 ---
 

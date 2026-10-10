@@ -83,8 +83,8 @@ def test_real_samples_parse_into_sane_numbers(binary, image):
     assert checked > 0
 
 
-def test_a_move_keeps_a_files_tags_but_a_copy_cant(binary, tmp_path):
-    """On a real image: `reni` (a move inside a partition) carries the file's tags; `put` (a copy) doesn't."""
+def test_a_move_and_a_copy_both_keep_a_files_tags(binary, tmp_path):
+    """On a real image: `reni` (a move inside a partition) carries the file's tags, and so does a copy (through a tar import)."""
     import shutil
 
     from akaiutil_gui import transfer
@@ -105,7 +105,8 @@ def test_a_move_keeps_a_files_tags_but_a_copy_cant(binary, tmp_path):
         if tagged is None:
             pytest.skip("no tagged file in the first volume")
         copied = transfer.transfer_files(eng, [(src, tagged)], dst, move=False)
-        assert copied.done and not next(f for f in eng.list_files(dst) if f.name == copied.done[0]).tags  # copies lose tags
+        copy = next(f for f in eng.list_files(dst) if f.name == copied.done[0])
+        assert copied.done and copy.tags == tagged.tags and copy.tag_names == tagged.tag_names  # copies keep them
         moved = transfer.transfer_files(eng, [(src, tagged)], vols[3], move=True)
         assert moved.done == [tagged.name]
         assert next(f for f in eng.list_files(vols[3]) if f.name == tagged.name).tags == tagged.tags  # a move keeps them

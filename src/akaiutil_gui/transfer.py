@@ -1,15 +1,15 @@
 """Copying and moving files between volumes (Qt-free).
 
 A move inside one partition is akaiutil's own `reni`, which changes nothing but where the file is. Anything else (another
-partition, another disk, or a copy) reads the file out and puts it back byte for byte, which doesn't carry its tags; a move
-of that kind deletes the original only once the copy is there. The new file gets a numbered name if the volume already has
+partition, another disk, or a copy) reads the file out and puts it back byte for byte; a move of that kind deletes the
+original only once the copy is there. A tagged S3000 file keeps its tags (matched by name, see tags.py). The new file gets a numbered name if the volume already has
 one of that name, because akaiutil would otherwise replace the old file.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from . import akai_names, importing
+from . import akai_names, importing, tags
 from .engine.models import FileEntry, Volume
 
 
@@ -18,6 +18,7 @@ class TransferResult:
     done: list[str] = field(default_factory=list)  # the names the files have now
     failed: list[str] = field(default_factory=list)  # "NAME: reason"
     skipped: list[str] = field(default_factory=list)  # "NAME: why nothing was done"
+    notes: list[str] = field(default_factory=list)  # "NAME: tags that couldn't come along"
 
 
 def transfer_files(
@@ -48,7 +49,10 @@ def transfer_files(
             if move and (src.disk, src.partition) == (dst.disk, dst.partition):
                 final = engine.move_file(src, f, dst, new_name)
             else:
-                final = engine.copy_file(src, f, dst, new_name)
+                carried, lost = _tags_to_carry(engine, src, f, dst)
+                final = engine.copy_file(src, f, dst, new_name, tags=carried) if carried else engine.copy_file(src, f, dst, new_name)
+                if lost:
+                    result.notes.append(f"{final}: no tag called {', '.join(lost)} in the destination")
                 if move:
                     failed = engine.delete_files(src, [f])
                     if failed:
@@ -59,3 +63,10 @@ def transfer_files(
         taken.add(final.casefold())
         result.done.append(final)
     return result
+
+
+def _tags_to_carry(engine, src: Volume, f: FileEntry, dst: Volume) -> tuple[list[int], list[str]]:
+    """(the destination's numbers for the file's tags, the tag names it has no tag for). Only S3000 volumes have tags."""
+    if not f.tag_names or src.type not in ("S3000", "CD3000") or dst.type not in ("S3000", "CD3000"):
+        return [], []
+    return tags.map_tags(f.tag_names, engine.tag_names(dst))

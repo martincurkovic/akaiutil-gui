@@ -15,9 +15,10 @@ import os
 import shutil
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
-from .. import akai_names, describe, sorting
+from .. import akai_names, describe, sorting, tags as filetags
 from . import formats, parse
 from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, SampleInfo, Volume
 from .session import EngineError, Session, TrafficCallback
@@ -29,6 +30,7 @@ class AkaiEngine:
         self._on_traffic = on_traffic
         self._session: Session | None = None
         self._lock = threading.RLock()
+        self._tag_names: dict[tuple[int, str], dict[int, str]] = {}  # (disk, partition) -> its tag names; they never change under us
 
     # ------------------------------------------------------------ lifecycle
     @property
@@ -72,6 +74,7 @@ class AkaiEngine:
 
     def close(self) -> None:
         with self._lock:
+            self._tag_names.clear()
             if self._session is not None:
                 self._session.close()
                 self._session = None
@@ -93,7 +96,8 @@ class AkaiEngine:
     def list_files(self, vol: Volume) -> list[FileEntry]:
         with self._lock:
             self._enter_volume(vol)
-            return parse.parse_files(self._run("dir").text)
+            files = parse.parse_files(self._run("dir").text)
+            return self._named_tags(files, vol.disk, vol.partition)
 
     def volume_slots(self, part: Partition) -> tuple[list[int], int]:
         """(the volume numbers in use, the highest number the partition allows)."""
@@ -108,6 +112,10 @@ class AkaiEngine:
             self._run(f"cd {disk.path}")
             text = self._run("dirrec", timeout=300).text  # every file on the disk; can be long
             partitions, volumes, catalog = parse.parse_dirrec(text, disk.index, disk.block_size)
+            for part in {e.volume.partition for e in catalog if e.file.tags}:
+                self._run(f"cd /disk{disk.index}/{part}")
+                names = self._partition_tag_names(disk.index, part)
+                catalog = [replace(e, file=_with_tag_names(e.file, names)) if e.volume.partition == part else e for e in catalog]
             return DiskUsage(disk, partitions, volumes, catalog)
 
     def list_takes_text(self, part: Partition) -> str:
@@ -354,9 +362,20 @@ class AkaiEngine:
                 raise EngineError(said or "akaiutil didn't add anything.")
             return created
 
-    def copy_file(self, src: Volume, f: FileEntry, dst: Volume, new_name: str) -> str:
+    def tag_names(self, vol: Volume) -> dict[int, str]:
+        """The names of the tags of a volume's partition ({} for a floppy, or a partition without tags)."""
+        with self._lock:
+            if (vol.disk, vol.partition) not in self._tag_names:
+                self._enter_volume(vol)
+            return self._partition_tag_names(vol.disk, vol.partition)
+
+    def copy_file(self, src: Volume, f: FileEntry, dst: Volume, new_name: str, tags: list[int] | None = None) -> str:
         """Copy a file, byte for byte, into another volume (any partition, any open disk) as `new_name` (with its
-        extension). Returns the name it has there. A copy doesn't carry the file's tags: akaiutil's `put` doesn't."""
+        extension). Returns the name it has there.
+
+        akaiutil's `put` doesn't carry a file's tags. If `tags` (numbers of the destination partition's tags) are given, the
+        file goes in through a one-file tar import instead, which does (see tags.py). If that doesn't work, `put` is used
+        and the file arrives untagged."""
         with self._lock:
             self._need_writable()
             session = self._need_session()
@@ -373,9 +392,22 @@ class AkaiEngine:
             produced[0].replace(staged)
             self._enter_volume(dst)
             before = {x.name for x in parse.parse_files(self._run("dir").text)}
-            text = self._run(f"put {akai_names.command_token(new_name)}", timeout=600).text
+            text = ""
+            created: list[FileEntry] = []
+            osver = filetags.osver_value(f.os_version)
+            if tags and osver is not None and dst.type in ("S3000", "CD3000"):
+                data = staged.read_bytes()
+                staged.unlink()
+                (session.staging_dir / "tagged.tar").write_bytes(filetags.tagged_file_tar(new_name, data, osver, tags))
+                text = self._run("tarx tagged.tar", timeout=600).text
+                created = [x for x in parse.parse_files(self._run("dir").text) if x.name not in before]
+                if not created:  # the tar route failed: carry on without the tags
+                    staged.write_bytes(data)
+                (session.staging_dir / "tagged.tar").unlink(missing_ok=True)
+            if not created:
+                text = self._run(f"put {akai_names.command_token(new_name)}", timeout=600).text
+                created = [x for x in parse.parse_files(self._run("dir").text) if x.name not in before]
             _clear_dir(session.staging_dir)
-            created = [x for x in parse.parse_files(self._run("dir").text) if x.name not in before]
             if not created:
                 said = " ".join(ln.strip() for ln in text.splitlines() if ln.strip())
                 raise EngineError(said or "akaiutil didn't add the copy.")
@@ -415,6 +447,7 @@ class AkaiEngine:
             raise EngineError(f"A hard disk image can't be formatted as “{fmt.label}”.")
         with self._lock:
             self._need_writable()
+            self._tag_names.clear()  # the partitions are about to be new ones
             self._run(f"cd {disk.path}")
             command = fmt.akaiutil_command(partition_mb)
             text = self._run(command, timeout=600).text
@@ -468,6 +501,20 @@ class AkaiEngine:
     def _volumes_at(self, disk: int, partition: str) -> list[Volume]:
         return parse.parse_volumes(self._run(f"dir /disk{disk}/{partition}").text, disk, partition)
 
+    def _partition_tag_names(self, disk: int, partition: str) -> dict[int, str]:
+        """The tag names of the partition akaiutil is currently in (`lstags` lists the partition of wherever the prompt is)."""
+        key = (disk, partition)
+        if key not in self._tag_names:
+            self._tag_names[key] = parse.parse_tag_names(self._run("lstags").text)
+        return self._tag_names[key]
+
+    def _named_tags(self, files: list[FileEntry], disk: int, partition: str) -> list[FileEntry]:
+        """The files with their tags' names filled in (akaiutil must be inside the partition)."""
+        if not any(f.tags for f in files):
+            return files
+        names = self._partition_tag_names(disk, partition)
+        return [_with_tag_names(f, names) for f in files]
+
     def _find_volume(self, disk: int, partition: str, index: int) -> Volume | None:
         return next((v for v in self._volumes_at(disk, partition) if v.index == index), None)
 
@@ -494,6 +541,10 @@ _IMPORT_COMMANDS = {"wav1": "wav2sample1", "wav3": "wav2sample3", "wav9": "wav2s
 
 # akaiutil's "create volume" command for each volume type
 _MKVOL_COMMANDS = {"S900": "mkvoli9", "S1000": "mkvoli1", "S3000": "mkvoli3", "CD3000": "mkvoli3cd"}
+
+
+def _with_tag_names(f: FileEntry, names: dict[int, str]) -> FileEntry:
+    return replace(f, tag_names=tuple(names.get(n, "") for n in f.tag_numbers)) if f.tags else f
 
 
 def _clear_dir(path: Path) -> None:

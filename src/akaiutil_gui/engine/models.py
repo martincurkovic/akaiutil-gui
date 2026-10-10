@@ -86,7 +86,18 @@ class FileEntry:
     size: int  # bytes
     start_block: str
     os_version: str  # S900 volumes show "uncompr" here instead
-    tags: str = ""
+    tags: str = ""  # the tag numbers akaiutil lists ("01 05"), none on a floppy or an S900 volume
+    tag_names: tuple[str, ...] = ()  # the partition's names for those tags, in the same order (empty if it has none)
+
+    @property
+    def tag_numbers(self) -> list[int]:
+        return [int(t) for t in self.tags.split() if t.isdigit()]
+
+    @property
+    def tag_labels(self) -> list[str]:
+        """What to call each tag: the partition's name for it, or its number if the name is blank or unknown."""
+        names = list(self.tag_names) + [""] * len(self.tag_numbers)
+        return [name.strip() or f"Tag {n}" for n, name in zip(self.tag_numbers, names)]
 
     @property
     def kind(self) -> str:

@@ -125,6 +125,16 @@ def parse_files(text: str) -> list[FileEntry]:
     return files
 
 
+def parse_tag_names(text: str) -> dict[int, str]:
+    """`lstags`: the names of a partition's tags ({1: "TAG A", ...}), empty if it has none ("no tags present")."""
+    names = {}
+    for line in _table_rows(text):
+        m = re.match(r"^\s*(\d+)\s{2}(.*)$", line)
+        if m:
+            names[int(m.group(1))] = m.group(2).strip()
+    return names
+
+
 _PART_HEADER_RE = re.compile(r"^/disk(\d+)/([^/]+)$")
 _VOL_HEADER_RE = re.compile(r"^/disk(\d+)/([^/]+)/(.+)$")
 
