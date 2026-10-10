@@ -2,9 +2,11 @@
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QDrag, QFontMetrics, QPainter, QPixmap
-from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableWidget, QTableWidgetItem
+from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QMenu, QTableWidget, QTableWidgetItem
+
+from akaiutil_gui import settings
 
 from akaiutil_gui.engine.models import CatalogEntry, FileEntry, Volume
 from akaiutil_gui.formatting import human_size
@@ -15,6 +17,9 @@ _ROLE_VOLUME = Qt.ItemDataRole.UserRole + 2
 
 COLUMNS = ["#", "Name", "Type", "Size", "Start block", "OS ver", "Tags", "Location"]
 LOCATION = COLUMNS.index("Location")  # only shown for search results, which span volumes
+DEFAULT_WIDTHS = {"#": 48, "Name": 300, "Type": 130, "Size": 90, "Start block": 100, "OS ver": 80, "Tags": 110, "Location": 180}
+ALWAYS_SHOWN = {"Name"}  # the column that says what a row is can't be hidden
+MENU_LABELS = {"#": "#  (file number)"}
 
 
 class _SortItem(QTableWidgetItem):
@@ -42,16 +47,92 @@ class FileTable(QTableWidget):
         self.setSortingEnabled(True)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         hdr = self.horizontalHeader()
-        hdr.setStretchLastSection(False)
-        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Name takes the slack
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)  # every column can be dragged to any width...
+        hdr.setStretchLastSection(True)  # ...and the last one takes up the slack, so there is no empty strip at the right
+        hdr.setMinimumSectionSize(32)
+        hdr.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        hdr.customContextMenuRequested.connect(self._header_menu)
+        hdr.sectionResized.connect(self._section_resized)
+        self._widths = dict(DEFAULT_WIDTHS)
+        self._restoring = True
         self.setColumnHidden(LOCATION, True)
-        for col, width in {0: 48, 2: 130, 3: 90, 4: 100, 5: 80, 6: 110, LOCATION: 180}.items():
-            self.setColumnWidth(col, width)
+        self._apply_saved_columns()
+        self._restoring = False
+        self._save_timer = QTimer(self)  # (so dragging a column edge doesn't write the settings on every pixel)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(500)
+        self._save_timer.timeout.connect(self._save_widths)
         self.itemSelectionChanged.connect(lambda: self.selectionFilesChanged.emit(self.selected_files()))
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
         self.mime_provider: Callable[[], object | None] | None = None  # the window says what a drag carries
+
+    # ------------------------------------------------------------------ columns
+    def column_visible(self, name: str) -> bool:
+        return not self.isColumnHidden(COLUMNS.index(name))
+
+    def _apply_saved_columns(self) -> None:
+        saved = settings.get_file_column_widths()
+        hidden = settings.get_hidden_file_columns() - ALWAYS_SHOWN
+        for col, name in enumerate(COLUMNS):
+            self._widths[name] = saved.get(name, DEFAULT_WIDTHS[name])
+            self.setColumnWidth(col, self._widths[name])
+            if col != LOCATION:  # (Location comes and goes with search results, not with the user's choice)
+                self.setColumnHidden(col, name in hidden)
+
+    def set_column_visible(self, name: str, visible: bool) -> None:
+        if name in ALWAYS_SHOWN or name == COLUMNS[LOCATION]:
+            return
+        col = COLUMNS.index(name)
+        self.setColumnHidden(col, not visible)
+        if visible:
+            self._restoring = True
+            self.setColumnWidth(col, self._widths.get(name, DEFAULT_WIDTHS[name]))
+            self._restoring = False
+        settings.set_hidden_file_columns({n for n in COLUMNS if n != COLUMNS[LOCATION] and not self.column_visible(n)})
+
+    def reset_columns(self) -> None:
+        """Every column shown, at its original width."""
+        self._restoring = True
+        for col, name in enumerate(COLUMNS):
+            self._widths[name] = DEFAULT_WIDTHS[name]
+            self.setColumnWidth(col, DEFAULT_WIDTHS[name])
+            if col != LOCATION:
+                self.setColumnHidden(col, False)
+        self._restoring = False
+        settings.set_hidden_file_columns(set())
+        settings.set_file_column_widths(self._widths)
+
+    def header_menu(self) -> QMenu:
+        """The menu a right-click on a column heading shows: which columns are shown."""
+        menu = QMenu(self)
+        for name in COLUMNS:
+            if name == COLUMNS[LOCATION]:
+                continue
+            action = menu.addAction(MENU_LABELS.get(name, name))
+            action.setCheckable(True)
+            action.setChecked(self.column_visible(name))
+            action.setEnabled(name not in ALWAYS_SHOWN)
+            action.toggled.connect(lambda on, n=name: self.set_column_visible(n, on))
+        menu.addSeparator()
+        menu.addAction("Reset Columns", self.reset_columns)
+        return menu
+
+    def _header_menu(self, pos) -> None:
+        self.header_menu().exec(self.horizontalHeader().mapToGlobal(pos))
+
+    def _section_resized(self, col: int, _old: int, new: int) -> None:
+        if self._restoring or self.isColumnHidden(col) or new <= 0:
+            return
+        hdr = self.horizontalHeader()
+        last = max((c for c in range(len(COLUMNS)) if not self.isColumnHidden(c)), key=hdr.visualIndex, default=None)
+        if col == last:
+            return  # (the stretched one: its width isn't the user's choice)
+        self._widths[COLUMNS[col]] = new
+        self._save_timer.start()
+
+    def _save_widths(self) -> None:
+        settings.set_file_column_widths(self._widths)
 
     def set_files(self, files: list[FileEntry], volume: Volume | None = None) -> None:
         """Show one volume's files."""

@@ -24,7 +24,7 @@ class PreviewPanel(QWidget):
         self.play_button = QPushButton(PLAY_TEXT)
         self.play_button.setToolTip("Play or stop (Space)")
         self.play_button.setMinimumWidth(96)
-        self.loop_check = QCheckBox("Loop")
+        self.loop_check = QCheckBox("Loop Preview")
         self.loop_check.setToolTip("Play the sample's loop (the attack once, then the loop repeating)")
         self.loop_combo = QComboBox()
         self.loop_combo.setToolTip("Which of the sample's loops to play")

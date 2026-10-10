@@ -87,6 +87,10 @@ The list of files shows each file's number (its slot in the volume, which is the
 size, start block, OS version and tags. A file's type is its extension, for example `.S3` for an S3000 sample, `.P3` for a
 program.
 
+Drag the edge of a column heading to change its width (double-click the edge to fit the column to its contents); the last column
+takes up any spare room. **Right-click a column heading** to choose which columns are shown (the name always is), or to reset them.
+Which columns are hidden and how wide each one is are remembered. Click a heading to sort by it.
+
 **Tags** are the labels an S3000 hard disk lets you put on files (a partition has 26 tag names, "TAG A" to "TAG Z" unless
 they were renamed on the sampler, and a file can carry up to four). The list shows them by name. This program shows tags but
 can't set or clear them yet.
@@ -112,10 +116,10 @@ The search covers files the app has finished indexing; a message says so if you 
 
 ## Listening to samples
 
-Select a single sample and its waveform appears with a **Play** button. Press **Space** to play and stop, or click the waveform
-to play from that point.
+Select a single sample and its waveform appears under the Details, with a **Play** button (the details shrink to make room).
+Press **Space** to play and stop, or click the waveform to play from that point.
 
-- If the sample has loops (and its play mode loops), tick **Loop** to hear the attack once and then the loop repeating, until
+- If the sample has loops (and its play mode loops), tick **Loop Preview** to hear the attack once and then the loop repeating, until
   you stop it if its loop time is Hold. Untick it to hear the sample play once. S900 samples play once.
 - The preview plays through your computer's default output. **Settings** lets you pick another device, change the buffer size
   (raise it if you hear clicks), and have samples play as soon as you select them.
@@ -377,7 +381,7 @@ at most), and you can set that to a shorter time. The folder is `backups` in the
 work on a copy.
 
 **Preview is silent or clicks.** Check **Settings > Audio Preview**: pick the right output device, and raise the buffer size if it
-clicks. Samples whose play mode doesn't loop play once even with Loop ticked.
+clicks. Samples whose play mode doesn't loop play once even with Loop Preview ticked.
 
 **A file can't be imported or pasted.** The message after the import lists each file and why. The usual reasons are a file that
 isn't audio, more than two channels, or a sample for the wrong sampler (an S3000 sample can't go into an S900 volume).

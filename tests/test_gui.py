@@ -60,12 +60,12 @@ def test_browse_hd_select_volume_and_file(app, window, images):
     window.tree.setCurrentItem(part_a.child(0))
     assert pump(app, lambda: window.table.rowCount() == 2)
     assert isinstance(window._volume, Volume)
-    assert not window.export_btn.isEnabled()  # nothing selected yet
+    assert not window.act_export.isEnabled()  # nothing selected yet
 
     window.table.selectRow(0)
     assert pump(app, lambda: "Sample rate" in window.info.toPlainText())  # the readable version of the file's details
     assert "ramname" not in window.info.toPlainText() and "srate" not in window.info.toPlainText()
-    assert window.export_btn.isEnabled() and window.export_wav_btn.isEnabled()
+    assert window.act_export.isEnabled() and window.act_export_wav.isEnabled()
 
     window.table.selectAll()
     assert pump(app, lambda: "2 files selected" in window.info.toPlainText())
@@ -970,7 +970,7 @@ def test_a_result_can_be_previewed_inspected_and_exported_like_any_file(app, thr
     assert pump(app, lambda: w.preview.sample is not None and w.preview.sample.name == "KICK.S1")  # loads from ITS volume
     assert w.preview.sample.rate == 44100 and not w.preview.isHidden()
     assert pump(app, lambda: "KICK" in w.info.toPlainText() and "S1000 sample" in w.info.toPlainText())
-    assert w.export_btn.isEnabled() and w.export_wav_btn.isEnabled()
+    assert w.act_export.isEnabled() and w.act_export_wav.isEnabled()
     w.preview.play_button.click()
     assert fake_audio.opened and w.preview.is_playing()
 
@@ -1059,8 +1059,8 @@ def test_exporting_results_from_several_volumes_gives_each_its_own_folder(app, t
     settings.set_ask_export_folder(False)
     search_for(app, w, "kick")
     w.table.selectAll()
-    assert pump(app, lambda: w.export_wav_btn.isEnabled())  # export waits for the details load that selecting started
-    w.export_wav_btn.click()
+    assert pump(app, lambda: w.act_export_wav.isEnabled())  # export waits for the details load that selecting started
+    w.act_export_wav.trigger()
     assert pump(app, lambda: "Exported" in w.statusBar().currentMessage())
     found = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*.wav"))
     assert found == ["disk0 A - DRUMS/KICK.wav", "disk1 A - NOT NAMED/KICK.wav", "disk2 A - VOLUME 001/KICK.wav"], "same-named files must not collide"
@@ -1074,8 +1074,8 @@ def test_exporting_results_from_one_volume_goes_straight_into_the_folder(app, th
     settings.set_ask_export_folder(False)
     search_for(app, w, "lead")
     w.table.selectAll()
-    assert pump(app, lambda: w.export_btn.isEnabled())
-    w.export_btn.click()
+    assert pump(app, lambda: w.act_export.isEnabled())
+    w.act_export.trigger()
     assert pump(app, lambda: "Exported" in w.statusBar().currentMessage())
     assert [p.name for p in tmp_path.iterdir()] == ["LEAD.S3"]  # no sub-folder
 
@@ -1189,3 +1189,164 @@ def test_starting_up_deletes_backups_older_than_the_setting_and_help_shows_the_l
     monkeypatch.setattr(reveal, "show_log_file", lambda: shown.append(1))
     window.act_show_log.trigger()
     assert shown == [1] and window.act_show_log.text().replace("&", "") == "Show Log File"
+
+
+# ----------------------------------------------------------------- the window's layout
+def test_the_preview_sits_below_the_details_which_take_the_remaining_room(app, window, images):
+    window.open_images([str(images["fl1"])])
+    assert pump(app, lambda: window.table.rowCount() == 2)
+    window.table.selectRow(0)
+    assert pump(app, lambda: window.preview.isVisible() and "Sample rate" in window.info.toPlainText())
+    info_top = window.info.mapTo(window, window.info.rect().topLeft()).y()
+    preview_top = window.preview.mapTo(window, window.preview.rect().topLeft()).y()
+    assert info_top < preview_top  # (the details first, the waveform under them)
+    assert window.info.mapTo(window, window.info.rect().bottomLeft()).y() <= preview_top
+    assert window.info.parentWidget() is window.preview.parentWidget()  # (one column: the details give way to the waveform)
+    window.table.clearSelection()
+    assert pump(app, lambda: not window.preview.isVisible())
+
+
+def test_the_loop_checkbox_says_what_it_does(app, window):
+    assert window.preview.loop_check.text() == "Loop Preview"
+
+
+def test_a_wide_details_pane_shows_two_columns_and_a_narrow_one_shows_one(app, window, images):
+    window.resize(1500, 800)
+    window.open_images([str(images["fl1"])])
+    assert pump(app, lambda: window.table.rowCount() == 2)
+    window.table.selectRow(0)
+    assert pump(app, lambda: "Sample rate" in window.info.toPlainText())
+    assert pump(app, lambda: window.info.columns == 2)
+    assert window.info.toHtml().lower().count("<table") >= 3  # (the outer table holding the two columns, and their own)
+    window.resize(800, 800)
+    assert pump(app, lambda: window.info.columns == 1)
+    assert "Sample rate" in window.info.toPlainText()  # (the same details, one column)
+
+
+def test_two_column_details_keep_everything_in_order_and_balance_the_columns():
+    from akaiutil_gui.describe import Block, Details, Row
+    from akaiutil_gui.ui import details_view
+    from akaiutil_gui.ui.details_view import render_html, split_blocks
+
+    blocks = [Block(title=t, rows=[Row(f"{t}{i}", "x") for i in range(n)]) for t, n in (("A", 2), ("B", 8), ("C", 3), ("D", 6), ("E", 1))]
+    left, right = split_blocks(blocks)
+    assert [b.title for b in left + right] == ["A", "B", "C", "D", "E"]  # (reading order is kept)
+    weight = lambda bs: sum(details_view._weight(b) for b in bs)  # noqa: E731
+    assert abs(weight(left) - weight(right)) <= max(details_view._weight(b) for b in blocks)
+    d = Details("T", "sub", blocks)
+    html = render_html(d, theme.DARK_PALETTE, columns=2)
+    assert html.count('valign="top"') == 2 and html.index(">A<") < html.index(">E<")
+    assert 'valign="top"' not in render_html(d, theme.DARK_PALETTE)  # (one column is as it was)
+    assert split_blocks(blocks[:1]) == (blocks[:1], []) and split_blocks([]) == ([], [])
+
+
+def test_details_with_preformatted_text_stay_in_one_column():
+    from akaiutil_gui.describe import Block, Details, Row
+    from akaiutil_gui.ui.details_view import render_html
+
+    d = Details("T", "", [Block(title="A", rows=[Row("a", "1")]), Block(title="Raw", text="line one\nline two")])
+    assert 'valign="top"' not in render_html(d, theme.DARK_PALETTE, columns=2)
+
+
+# ------------------------------------------------------------------- the file list's columns
+def header(window):
+    return window.table.horizontalHeader()
+
+
+def test_every_column_can_be_dragged_to_any_width_and_the_last_one_takes_up_the_slack(app, window):
+    hdr = header(window)
+    for col in range(window.table.columnCount()):
+        assert hdr.sectionResizeMode(col) == hdr.ResizeMode.Interactive
+    assert hdr.stretchLastSection()
+    window.table.setColumnWidth(1, 450)
+    assert window.table.columnWidth(1) == 450
+
+
+def test_a_column_can_be_hidden_and_shown_again_and_name_cannot_be_hidden(app, window):
+    from akaiutil_gui.ui import file_table
+
+    table = window.table
+    assert all(table.column_visible(n) for n in file_table.COLUMNS if n != "Location")
+    table.set_column_visible("Size", False)
+    assert not table.column_visible("Size") and table.isColumnHidden(file_table.COLUMNS.index("Size"))
+    table.set_column_visible("Name", False)  # (what a row is called stays)
+    assert table.column_visible("Name")
+    table.set_column_visible("Size", True)
+    assert table.column_visible("Size")
+
+
+def test_which_columns_are_hidden_and_how_wide_they_are_is_remembered(app, window):
+    from akaiutil_gui import settings
+    from akaiutil_gui.ui import file_table
+    from akaiutil_gui.ui.file_table import FileTable
+
+    table = window.table
+    table.set_column_visible("Start block", False)
+    table.set_column_visible("Tags", False)
+    table.setColumnWidth(1, 420)
+    table._save_widths()  # (the delayed save, without waiting for it)
+    assert settings.get_hidden_file_columns() == {"Start block", "Tags"}
+    assert settings.get_file_column_widths()["Name"] == 420
+    again = FileTable()
+    assert not again.column_visible("Start block") and not again.column_visible("Tags") and again.column_visible("Size")
+    assert again.columnWidth(1) == 420
+    again.deleteLater()
+
+
+def test_the_widths_are_saved_a_moment_after_a_drag_not_on_every_pixel(app, window):
+    from akaiutil_gui import settings
+
+    window.table.setColumnWidth(2, 222)
+    assert window.table._save_timer.isActive()
+    assert pump(app, lambda: settings.get_file_column_widths().get("Type") == 222, timeout=3)
+
+
+def test_the_stretched_last_column_isnt_saved_as_the_users_width(app, window):
+    from akaiutil_gui import settings
+
+    window.resize(1300, 700)
+    window.table.horizontalHeader().resizeSection(6, 150)  # Tags: the last visible one
+    window.table._save_widths()
+    assert "Tags" not in settings.get_file_column_widths() or settings.get_file_column_widths()["Tags"] != 150
+
+
+def test_reset_columns_shows_everything_at_the_original_widths(app, window):
+    from akaiutil_gui import settings
+    from akaiutil_gui.ui import file_table
+
+    table = window.table
+    table.set_column_visible("Type", False)
+    table.setColumnWidth(1, 500)
+    table.reset_columns()
+    assert table.column_visible("Type") and table.columnWidth(1) == file_table.DEFAULT_WIDTHS["Name"]
+    assert settings.get_hidden_file_columns() == set()
+
+
+def test_right_clicking_a_heading_offers_a_checkable_entry_for_each_column(app, window):
+    menu = window.table.header_menu()
+    entries = [(a.text(), a.isCheckable(), a.isChecked(), a.isEnabled()) for a in menu.actions() if not a.isSeparator()]
+    names = [e[0] for e in entries]
+    assert names == ["#  (file number)", "Name", "Type", "Size", "Start block", "OS ver", "Tags", "Reset Columns"]  # (no Location: it goes with search results)
+    assert entries[1] == ("Name", True, True, False)  # (ticked, and can't be unticked)
+    next(a for a in menu.actions() if a.text() == "Size").toggle()  # (the user unticks Size)
+    assert not window.table.column_visible("Size")
+    next(a for a in window.table.header_menu().actions() if a.text() == "Reset Columns").trigger()
+    assert window.table.column_visible("Size")
+    menu.deleteLater()
+
+
+def test_the_heading_menu_opens_on_a_right_click_of_the_heading(app, window):
+    from PySide6.QtCore import Qt
+
+    assert window.table.horizontalHeader().contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+
+
+def test_search_results_still_show_the_location_whatever_columns_are_hidden(app, three_disks):
+    from akaiutil_gui.ui import file_table
+
+    w = three_disks
+    w.table.set_column_visible("Tags", False)
+    search_for(app, w, "kick")
+    assert not w.table.isColumnHidden(file_table.LOCATION) and not w.table.column_visible("Tags")
+    w.search.clear()
+    assert pump(app, lambda: w.table.isColumnHidden(file_table.LOCATION))

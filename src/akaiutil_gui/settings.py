@@ -180,6 +180,32 @@ def set_verbose_log(on: bool) -> None:
     _qs().setValue("log/verbose", bool(on))
 
 
+def get_hidden_file_columns() -> set[str]:
+    """The names of the file list's columns the user has hidden."""
+    return {c for c in str(_qs().value("files/hidden_columns", "") or "").split(",") if c}
+
+
+def set_hidden_file_columns(names) -> None:
+    _qs().setValue("files/hidden_columns", ",".join(sorted(names)))
+
+
+def get_file_column_widths() -> dict[str, int]:
+    """The widths (pixels) the user gave the file list's columns, by column name."""
+    import json
+
+    try:
+        data = json.loads(str(_qs().value("files/column_widths", "{}") or "{}"))
+        return {str(k): int(v) for k, v in data.items() if int(v) > 0}
+    except (ValueError, TypeError, AttributeError):
+        return {}
+
+
+def set_file_column_widths(widths: dict[str, int]) -> None:
+    import json
+
+    _qs().setValue("files/column_widths", json.dumps({k: int(v) for k, v in widths.items()}))
+
+
 def get_sort_after_adding() -> bool:
     """Put a volume in alphabetical order after files are imported or pasted into it."""
     return _bool("edit/sort_after_adding", False)

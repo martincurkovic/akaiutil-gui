@@ -249,16 +249,8 @@ class MainWindow(QMainWindow):
         self.usage = UsageSummary()
         lv.addWidget(self.usage)
 
-        # right top: file list + export buttons
+        # right top: the file list (exporting is in the File menu and the right-click menu)
         self.files_title = self._title("Files")
-        self.export_btn = QPushButton("Export…")
-        self.export_btn.setToolTip(
-            "Copy the selected files out of the disk image, unchanged"
-        )
-        self.export_btn.clicked.connect(lambda: self._export(as_wav=False))
-        self.export_wav_btn = QPushButton("Export as WAV…")
-        self.export_wav_btn.setToolTip("Convert the selected samples to WAV files")
-        self.export_wav_btn.clicked.connect(lambda: self._export(as_wav=True))
         self.table = FileTable()
         self.table.selectionFilesChanged.connect(self._on_files_selected)
         self.table.mime_provider = self._file_drag_mime
@@ -293,22 +285,16 @@ class MainWindow(QMainWindow):
         header.addWidget(self.files_title, 1)
         header.addWidget(self.search)
         header.addWidget(self.search_kind)
-        header.addWidget(self.export_btn)
-        header.addWidget(self.export_wav_btn)
         tv.addLayout(header)
-        # The right-hand header row is as tall as its tallest widget (the search box, filter and buttons); give the
+        # The right-hand header row is as tall as its tallest widget (the search box and the filter); give the
         # left title the same height (the text stays vertically centred) so the tree and the file table start at
         # the same y.
         self.disks_title.setMinimumHeight(
-            max(
-                w.sizeHint().height()
-                for w in (self.export_btn, self.search, self.search_kind)
-            )
+            max(w.sizeHint().height() for w in (self.search, self.search_kind))
         )
         tv.addWidget(self.table)
         self.preview = PreviewPanel()
-        self.preview.hide()  # appears when a single sample is selected
-        tv.addWidget(self.preview)
+        self.preview.hide()  # appears when a single sample is selected (below the details, which shrink to make room)
         # Space plays/stops, like in a DAW or Finder's Quick Look
         space = QShortcut(QKeySequence(Qt.Key.Key_Space), self.table)
         space.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -347,7 +333,8 @@ class MainWindow(QMainWindow):
         details_header.addWidget(self._title("Details"), 1)
         details_header.addWidget(self.raw_btn)
         bv.addLayout(details_header)
-        bv.addWidget(self.info)
+        bv.addWidget(self.info, 1)
+        bv.addWidget(self.preview)
 
         right = QSplitter(Qt.Orientation.Vertical)
         right.addWidget(top)
@@ -614,10 +601,8 @@ class MainWindow(QMainWindow):
         )
         self.search.setEnabled(has_images)
         self.search_kind.setEnabled(has_images)
-        for w in (self.act_export, self.export_btn):
-            w.setEnabled(can_export)
-        for w in (self.act_export_wav, self.export_wav_btn):
-            w.setEnabled(can_wav)
+        self.act_export.setEnabled(can_export)
+        self.act_export_wav.setEnabled(can_wav)
         self._update_edit_actions()
         self._sync_mode()
 
