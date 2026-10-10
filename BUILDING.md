@@ -32,8 +32,10 @@ Each script: syncs the environment, fetches akaiutil into `build/bin/`, writes t
 contains the stylesheet template, icons, `THIRD_PARTY_NOTICES.md`, `LICENSE`, and akaiutil (in a `bin/` folder next to the
 app's executable, where the app looks for it first).
 
-To check a finished build without opening it, run its executable with `--smoke-test`. It verifies the bundled files and
-talks to the bundled akaiutil, then exits 0 (or 1 with a report of what's missing). CI does this for every platform.
+To check a finished build without opening it, run its executable with `--smoke-test`. It verifies the bundled files, that the
+audio libraries (miniaudio, soundfile/libsndfile, numpy) load and decode a WAV, and that the settings dialog and preview panel build,
+and it talks to the bundled akaiutil, then exits 0 (or 1 with a report of what's missing). Set `AKAIUTIL_GUI_NO_AUDIO=1` when
+running it on a machine with no sound card, as CI does. CI does this for every platform.
 
 ```
 QT_QPA_PLATFORM=offscreen src/akaiutil-GUI.app/Contents/MacOS/main --smoke-test=report.txt
@@ -41,16 +43,19 @@ QT_QPA_PLATFORM=offscreen src/akaiutil-GUI.app/Contents/MacOS/main --smoke-test=
 
 ## Icons
 
-`assets/icon/AppIcon1024.png` is the master: 1024x1024 and already in macOS icon form (a rounded square about 824px wide,
-centred, soft shadow, transparent corners), exported from IconKitchen or a similar tool. Everything else is made from it:
+The build uses two derived icons, both committed: `assets/icon/akaiutil-GUI-macos.icns` (macOS app) and
+`assets/icon/icon_512x512.png` (Linux AppImage and Windows installer). `icon_source.png` is the plain full-bleed artwork.
 
-- `assets/icon/akaiutil-GUI-macos.icns` (macOS app): run `scripts/make_icns.sh` (macOS only). It builds all ten sizes
-  (16, 32, 128, 256, 512 points at 1x and 2x) by scaling the master *down*.
-- `assets/icon/icon_512x512.png` (Linux AppImage and Windows installer):
-  `sips -z 512 512 assets/icon/AppIcon1024.png --out assets/icon/icon_512x512.png`
+To regenerate them from a new design, export a 1024x1024 PNG already in macOS icon form (a rounded square about 824px
+wide, centred, soft shadow, transparent corners; IconKitchen produces this) and save it as
+`assets/icon/AppIcon1024.png`. That file isn't kept in the repo (the same image is inside the `.icns`), so it's yours to supply.
+Then:
 
-`icon_source.png` is the plain full-bleed artwork the master was made from. Commit all of them. A test fails if the `.icns`
-no longer matches the master or is missing a size.
+- macOS icon: `scripts/make_icns.sh` (macOS only). It builds all ten sizes (16, 32, 128, 256, 512 points at 1x and 2x) by
+  scaling the master *down*, never up.
+- Linux and Windows icon: `sips -z 512 512 assets/icon/AppIcon1024.png --out assets/icon/icon_512x512.png`
+
+A test fails if the `.icns` is missing any of its ten sizes or isn't in the rounded macOS form.
 
 `scripts/make_icons.sh` is an older fallback that makes plain square icons straight from `icon_source.png`. It refuses to
 overwrite the exported files unless you pass `--force`; you won't normally need it.

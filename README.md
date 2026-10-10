@@ -3,9 +3,22 @@
 A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil/)
 (Klaus Michael Indlekofer's tool for Akai S900/S1000/S3000 disk images).
 
-**Status: proof of concept.** It browses disk images read-only (disks → partitions → volumes → files),
-shows akaiutil's details for whatever you select, and exports files raw or as WAV.
-A space bar under the disk tree shows what each volume uses (coloured to match the swatch beside it in the tree) and what's free; it follows the selection. The Details pane translates akaiutil's terminal output into readable labels and values ("Raw output" shows the original). It never writes to an image.
+**Status: early.** It opens Akai disk images read-only and never writes to them.
+
+- **Browse** disks, partitions, volumes and files. A space bar under the tree shows what each volume uses (coloured to
+  match the swatch beside it) and what's free; the Details pane turns akaiutil's terminal output into readable labels and
+  values ("Raw output" shows the original).
+- **Preview samples.** Select a sample to see its waveform and play it, with its loop: the attack once, then the loop
+  repeating (until you stop it, if its loop time is Hold). Click the waveform to play from there, press Space to play and
+  stop. The audio backend is the same one AKAISDS uses (miniaudio), including its macOS loop-playback fixes. Only
+  S1000/S3000 loops are previewed as loops; S900 samples play once.
+- **Search** every open disk at once (Ctrl+F): type words (they all have to match, in the file's or its volume's name), and
+  filter by type. Double-click a result to show it in its volume. Results can be previewed and exported like any file.
+- **Export** files as they are, or samples as WAV. Files from several volumes go into one folder each.
+- **Settings** (File > Settings, or Cmd/Ctrl+,): theme, audio output device and buffer size, whether samples play when
+  selected, a default export folder, which akaiutil to use, and whether to check for updates.
+- **Check for updates** from the Help menu, and automatically once a day at startup (switch it off in Settings). It only ever
+  points you at the GitHub release page; it doesn't download anything itself.
 
 Qt 6.12 LTS via PySide6 · Python 3.12+ · uv · looks like [AKAISDS](../AKAISDS) (shared light/dark theme).
 
@@ -48,6 +61,12 @@ uv run pytest
 
 The integration and GUI tests build real disk images with the real akaiutil binary (they skip if it isn't
 built). The GUI tests run offscreen.
+
+## Audio notes
+
+Preview plays through your system's default output, or the device chosen in Settings. If you hear clicks, raise the buffer
+size there; if playback feels laggy, lower it. Tests never open an audio device: `AKAIUTIL_GUI_NO_AUDIO=1` turns audio off
+entirely (the test suite sets it, and so does CI).
 
 ## How it works
 
