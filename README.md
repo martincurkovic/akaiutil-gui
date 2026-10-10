@@ -86,6 +86,8 @@ images again puts the app back in read-only mode.
   the file; a copy keeps an S3000 file's tags too (matched by tag name). A name already in the target gets a number. Drag files out of the list to
   Finder, Explorer or your DAW: samples arrive as WAV files, or exactly as Akai stores them if you hold Option/Alt when you start
   the drag.
+- **Copy a whole volume** (right-click it > Copy Volume To…) into any hard disk partition on any open disk, with its files, tags and
+  settings. It checks there is room first, and doesn't leave half a volume behind if something goes wrong.
 - **Sort a volume** (Edit > Sort Files by Name, or right-click a volume): the samplers list a volume's files in the order they
   were added and can't reorder them, so this puts them in alphabetical order (numbers in order, ignoring case) by moving files
   between slots; the files themselves aren't touched. You can sort only the samples and leave programs and other files where
