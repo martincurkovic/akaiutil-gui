@@ -1,0 +1,201 @@
+name: Build
+
+on:
+  workflow_dispatch: # allows for manual triggering
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  # the one place the app's name lives for CI; scripts/build_* and the assets under assets/ use the same name
+  APP_NAME: akaiutil-GUI
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install Qt runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y qt6-qpa-plugins libegl1 libgl1 libfontconfig1 libnss3 libasound2t64 libpulse0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcomposite1 libxdamage1 libxi6 libxtst6
+      - name: Sync environment
+        # the tests don't need the packaging tools (Nuitka, PySide6-Addons), so skip that dependency group
+        run: uv sync --no-group build
+      - name: Fetch akaiutil
+        # most of the tests drive the real akaiutil; without it they would be skipped, not run
+        run: uv run python scripts/get_akaiutil.py
+      - name: Run tests
+        run: uv run pytest tests/ -v
+
+  build-macos-arm:
+    needs: test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+      - uses: astral-sh/setup-uv@v6
+      - name: Sync environment
+        run: uv sync
+      - name: Build
+        run: |
+          chmod +x scripts/build_macos.sh
+          ./scripts/build_macos.sh
+      - name: Smoke-test the built app
+        run: |
+          BIN=$(find "src/$APP_NAME.app/Contents/MacOS" -maxdepth 1 -type f -perm -u+x -name 'main*' | head -1)
+          echo "Running $BIN"
+          QT_QPA_PLATFORM=offscreen "$BIN" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
+          cat smoke.txt
+      - name: Build DMG
+        run: |
+          mkdir -p dmg-staging
+          cp -r "src/$APP_NAME.app" dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname "$APP_NAME" -srcfolder dmg-staging -ov -format UDZO "$APP_NAME-macos-arm.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-macos-arm
+          path: ${{ env.APP_NAME }}-macos-arm.dmg
+
+  build-macos-intel:
+    needs: test
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+      - uses: astral-sh/setup-uv@v6
+      - name: Sync environment
+        run: uv sync
+      - name: Build
+        run: |
+          chmod +x scripts/build_macos.sh
+          ./scripts/build_macos.sh
+      - name: Smoke-test the built app
+        run: |
+          BIN=$(find "src/$APP_NAME.app/Contents/MacOS" -maxdepth 1 -type f -perm -u+x -name 'main*' | head -1)
+          echo "Running $BIN"
+          QT_QPA_PLATFORM=offscreen "$BIN" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
+          cat smoke.txt
+      - name: Build DMG
+        run: |
+          mkdir -p dmg-staging
+          cp -r "src/$APP_NAME.app" dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname "$APP_NAME" -srcfolder dmg-staging -ov -format UDZO "$APP_NAME-macos-intel.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-macos-intel
+          path: ${{ env.APP_NAME }}-macos-intel.dmg
+
+  build-linux:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+      - uses: astral-sh/setup-uv@v6
+      - name: Sync environment
+        run: uv sync
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential qt6-qpa-plugins libegl1 libgl1 libfontconfig1 libnss3 libnss3 libasound2t64 libpulse0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcomposite1 libxdamage1 libxi6 libxtst6
+      - name: Build
+        run: |
+          chmod +x scripts/build_linux.sh
+          ./scripts/build_linux.sh
+      - name: Smoke-test the built app
+        run: |
+          echo "Running src/$APP_NAME.dist/main.bin"
+          QT_QPA_PLATFORM=offscreen "src/$APP_NAME.dist/main.bin" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
+          cat smoke.txt
+      - name: Build AppImage
+        run: |
+          mkdir -p AppDir/usr/bin
+          cp -r "src/$APP_NAME.dist"/* AppDir/usr/bin
+          cp "assets/linux/$APP_NAME.desktop" "AppDir/$APP_NAME.desktop"
+          cp assets/icon/icon_512x512.png AppDir/icon_512x512.png
+          ln -s icon_512x512.png AppDir/.DirIcon
+          printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "$0")")"\nexec "$HERE/usr/bin/main.bin" "$@"\n' > AppDir/AppRun
+          chmod +x AppDir/AppRun
+
+          wget -O appimagetool-x86_64.AppImage https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir "$APP_NAME-linux.AppImage"
+
+          ls -la *.AppImage
+      - name: Zip the AppImage
+        run: zip "$APP_NAME-linux.zip" "$APP_NAME-linux.AppImage"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-linux
+          path: ${{ env.APP_NAME }}-linux.zip
+
+  build-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+      - uses: astral-sh/setup-uv@v6
+      - name: Sync environment
+        run: uv sync
+      - name: Build
+        run: .\scripts\build_windows.ps1
+      - name: Smoke-test the built app
+        # the built app has no console, so Start-Process waits for it and the report comes from a file
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath "src\$env:APP_NAME.dist\main.exe" -ArgumentList "--smoke-test=smoke.txt" -Wait -PassThru
+          if (Test-Path smoke.txt) { Get-Content smoke.txt } else { Write-Host "no smoke test report was written" }
+          if ($p.ExitCode -ne 0) { throw "smoke test failed (exit code $($p.ExitCode))" }
+      - name: Build installer
+        run: |
+          choco install innosetup -y
+          $VersionLine = Get-Content src\akaiutil_gui\_version.py
+          $Version = ($VersionLine -replace '.*"(.+)".*', '$1')
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=$Version "assets\windows\$env:APP_NAME.iss"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-windows
+          path: ${{ env.APP_NAME }}-Setup.exe
+
+  release:
+    needs: [build-macos-arm, build-macos-intel, build-linux, build-windows]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-files
+      - name: Add the akaiutil source code
+        # The apps contain a compiled copy of akaiutil (GPL-2), so the exact source it was built from
+        # goes on every release. The download is checked against the checksum pinned in the repo.
+        run: PYTHONPATH=src python3 scripts/get_akaiutil.py --source-only release-files/akaiutil-source
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: release-files/**/*
+          draft: true # comment this out if u want the release to be auto-published
