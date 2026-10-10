@@ -5,11 +5,12 @@ Last updated 2026-10-10. Items are in the order I'd do them; nothing here is pro
 ## Built
 
 | Area | What works |
-|---|---|
+| --- | --- |
 | Browsing | Disks, partitions, volumes, files across several images at once; space bars; readable details; search across all open disks |
 | Audio | Sample preview with loops (same miniaudio backend and macOS loop fixes as AKAISDS), waveform, Space to play |
 | Images | Add, close and reveal single images; disk rows show their file; New Disk Image (floppy up to 512 MB hard disk); Format Disk |
 | Editing (opt-in, no undo) | Rename and delete files and volumes; new volume; **Allow Editing** switches akaiutil from `-r` to read/write |
+| Safety net | Asked at the first edit: back the open images up (to the app data folder, newest 5 kept per image) or not; **File > Revert to Backup…** puts one back, after backing up the current state |
 | Import | Drop or pick WAV/AIFF/FLAC (also OGG/MP3/CAF/W64): converted to 16-bit, resampled with our own windowed-sinc, stereo split or mixed, S1000/S3000/S900 (+ S900 compressed), alphabetical order, numbered names instead of overwrites; raw Akai files (`.S3`, `.P3`...) as they are |
 | Smart import | Loop points and root note from a WAV `smpl` chunk (and an AIFF root note), root note from a name like `Piano_C3`, trim silence, normalise |
 | Sorting | Sort a volume's files by name (all, or samples only) by moving them between slots; optional automatic sort after import/paste |
@@ -37,8 +38,10 @@ akaiutil reading its own output back:
 
 1. **Sample header editor.** Loop points, root key, tuning and play mode, with the preview for instant feedback. akaiutil can't
    set these, but `akai_header.py` already knows the 150-byte header layout and the app already writes headers on import.
-   Needs a way to rewrite an existing sample's header in the image (akaiutil has `paramgeti`/`paramputi` to try first), and a
-   clear "this edits the sample itself" warning.
+   akaiutil has no command that edits a sample header (`getparam`/`putparam` are a *volume's* parameters). So: read the file
+   (`geti`), patch its first 150/192 bytes, import it under a temporary name through the tar route (keeps tags and OS version),
+   delete the original, then `reni` the copy to the original's name and slot. Needs a clear "this edits the sample itself" warning,
+   and care with stereo pairs (the header holds a partner address, `stpaira`) and S900 samples (a different header).
 2. **Open an SD card / physical drive directly.** akaiutil can open raw devices. Needs OS permissions per platform and safety
    rails against picking the wrong disk; start read-only, add editing later.
 3. **Programs and multis.** Today akaiutil's raw info text. A readable keygroup view, "which samples does this program use?",
@@ -49,8 +52,7 @@ akaiutil reading its own output back:
    with the same tar trick (delete + import, which moves the file's slot), or `rentag` for the names.
 6. **Import polish:** AIFF loop points (INST + MARK chunks: the end-marker convention needs checking), fade in/out, a pitch
    fraction from `smpl`, per-file overrides in the import dialog, a progress dialog for big batches.
-7. **Safety net:** optional "snapshot the image before the first edit" and a revert. Decided against for now.
-8. **ctypes/cffi engine** to replace the subprocess and the text parsing in `engine/parse.py`. `engine/api.py` is the seam
+7. **ctypes/cffi engine** to replace the subprocess and the text parsing in `engine/parse.py`. `engine/api.py` is the seam
    (see the README). Worth doing once the feature set settles: it removes the restart-on-add/close and the text fragility.
 
 ## Known limitations
