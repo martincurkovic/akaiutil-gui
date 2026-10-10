@@ -287,7 +287,7 @@ def _file_reference_blocks(entry: FileEntry, refs: "VolumeReferences") -> list[B
             return [Block("Used by", [Row("Program" if len(users) == 1 else f"Program {n}", u.name) for n, u in enumerate(users, 1)])]
         if refs.has_programs:
             return [Block("Used by", [Row("Programs", "None: no program in this volume plays this sample")])]
-        return [Block("Used by", [Row("Programs", "This volume has no programs")], muted=True)]
+        return []  # a volume of just samples: nothing to say on every one of them
     if entry.is_program:
         found, missing = refs.samples_of(entry)
         if not found and not missing:

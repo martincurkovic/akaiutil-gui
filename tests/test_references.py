@@ -107,8 +107,8 @@ def test_a_sample_says_which_programs_use_it(volume):
 def test_an_unused_sample_says_so_only_if_there_are_programs(volume):
     kick, snare, hat, lead, pad, r = volume
     assert "no program in this volume plays this sample" in text_of(describe.describe_file("/d/HAT.S3\nfnr: 3\ntype: S3000 sample", hat, r))
-    bare = refs([hat], {})
-    assert "no programs" in text_of(describe.describe_file("/d/HAT.S3\nfnr: 3\ntype: S3000 sample", hat, bare))
+    bare = refs([hat], {})  # no programs here: nothing to compare against, so nothing is said
+    assert "Used by" not in text_of(describe.describe_file("/d/HAT.S3\nfnr: 3\ntype: S3000 sample", hat, bare))
 
 
 def test_a_program_lists_its_samples_and_the_missing_ones(volume):
