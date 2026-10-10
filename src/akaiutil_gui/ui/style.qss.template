@@ -94,6 +94,20 @@ QPushButton:disabled {
     color: ${text_disabled};
 }
 
+/* a button that reads as a quiet text link (the start screen's User Manual / About) */
+QPushButton#linkButton {
+    background: transparent;
+    border: none;
+    padding: 4px 10px;
+    color: ${text_disabled};
+}
+
+QPushButton#linkButton:hover {
+    background: transparent;
+    color: ${text};
+    text-decoration: underline;
+}
+
 /* checkable buttons used as a segmented control (e.g. the zone selector) -
    the checked one should read as "currently selected", not just "toggled on" */
 QPushButton:checked {

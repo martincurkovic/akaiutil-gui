@@ -47,6 +47,18 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def backup_sandbox(tmp_path_factory, monkeypatch):
+    """Backups made while a test edits an image go to a temp folder, never to the real app data folder."""
+    monkeypatch.setenv("AKAIUTIL_GUI_BACKUP_DIR", str(tmp_path_factory.mktemp("backups")))
+
+
+@pytest.fixture(autouse=True)
+def log_sandbox(tmp_path_factory, monkeypatch):
+    """Anything that looks for the log folder finds a temp one, never the real app data folder."""
+    monkeypatch.setenv("AKAIUTIL_GUI_LOG_DIR", str(tmp_path_factory.mktemp("logs")))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def settings_sandbox(tmp_path_factory):
     """Every test's QSettings (theme, export folder, update check times...) lives in a temp folder, never in the real user's."""

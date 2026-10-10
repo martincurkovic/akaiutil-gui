@@ -196,3 +196,34 @@ def test_the_startup_check_is_throttled_and_can_be_turned_off(win, monkeypatch, 
     assert bool(timers) is scheduled
     if scheduled:
         assert timers == [2000]  # a moment after startup, never blocking it
+
+
+def test_backup_and_log_settings_have_defaults_and_keep_what_is_saved():
+    assert settings.get_backup_keep_days() == 14 and settings.get_verbose_log() is False
+    settings.set_backup_keep_days(30)
+    settings.set_verbose_log(True)
+    assert settings.get_backup_keep_days() == 30 and settings.get_verbose_log() is True
+    settings.set_backup_keep_days(0)
+    assert settings.get_backup_keep_days() == 0  # (never delete)
+    settings.set_backup_keep_days(-5)
+    assert settings.get_backup_keep_days() == 0
+
+
+def test_the_settings_dialog_shows_and_saves_the_backup_and_log_options(qt_app, monkeypatch):
+    from akaiutil_gui import logsetup
+
+    shown = []
+    monkeypatch.setattr(settings_dialog.reveal, "show_log_file", lambda: shown.append(1))
+    dialog = SettingsDialog()
+    assert dialog.spin_keep_days.value() == 14 and not dialog.check_verbose_log.isChecked()
+    dialog.spin_keep_days.setValue(0)
+    assert dialog.spin_keep_days.text() == "Never"
+    dialog.check_verbose_log.setChecked(True)
+    dialog.accept()
+    assert settings.get_backup_keep_days() == 0 and settings.get_verbose_log()
+    again = SettingsDialog()
+    assert again.spin_keep_days.value() == 0 and again.check_verbose_log.isChecked()
+    next(b for b in again.findChildren(QPushButton) if b.text() == "Show Log File").click()
+    assert shown == [1]
+    dialog.deleteLater()
+    again.deleteLater()

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
-from akaiutil_gui import __version__, paths
+from akaiutil_gui import __version__, logsetup, paths, settings
 from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.locate import bundled_binary, find_akaiutil
 from akaiutil_gui.ui import notices_dialog, theme
@@ -178,9 +178,15 @@ def main(argv: list[str] | None = None) -> int:
     if smoke is not None:
         return smoke_test(smoke.partition("=")[2] or None)
 
+    logsetup.setup(verbose=settings.get_verbose_log())
+    logsetup.install_exception_hooks()
+    logsetup.enable_crash_log()
+    binary = find_akaiutil(settings.get_akaiutil_path())
+    logsetup.log_startup(str(binary) if binary else None)
     window = MainWindow()
     window.show()
     window.schedule_update_check()
+    window.schedule_backup_cleanup()
     images = [a for a in argv[1:] if not a.startswith("-")]
     if images:
         window.open_images(images)

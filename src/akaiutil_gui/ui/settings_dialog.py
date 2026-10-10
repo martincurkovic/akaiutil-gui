@@ -18,15 +18,16 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from akaiutil_gui import settings
+from akaiutil_gui import logsetup, settings
 from akaiutil_gui.audio import preview
 from akaiutil_gui.engine.locate import find_akaiutil
 
-from . import theme
+from . import reveal, theme
 
 # frames, the same options and unit a DAW's buffer-size dropdown uses; converted to milliseconds when a device is
 # opened (that depends on the sample rate in use)
@@ -144,6 +145,35 @@ class SettingsDialog(QDialog):
         form.addRow(self.check_sort_after)
         editing = section_card("Editing", form)
 
+        # ---------------------------------------------------------------- backups
+        form = QFormLayout()
+        self.spin_keep_days = QSpinBox()
+        self.spin_keep_days.setRange(0, 365)
+        self.spin_keep_days.setSpecialValueText("Never")
+        self.spin_keep_days.setSuffix(" days")
+        self.spin_keep_days.setValue(settings.get_backup_keep_days())
+        self.spin_keep_days.setToolTip("Backups made when editing is switched on are deleted this long after they were made, when the app starts")
+        form.addRow("Delete backups older than", self.spin_keep_days)
+        form.addRow(note("A backup of each image is offered when editing is switched on, and kept in the app's data folder. "
+                         "File > Revert to Backup puts one back. Never keeps them until you delete them yourself."))
+        backups = section_card("Backups", form)
+
+        # ---------------------------------------------------------- troubleshooting
+        form = QFormLayout()
+        self.check_verbose_log = QCheckBox("Log every command sent to akaiutil")
+        self.check_verbose_log.setToolTip("Makes the log bigger, but shows exactly what the app asked akaiutil to do. Turn it on to repeat a problem you want to report.")
+        self.check_verbose_log.setChecked(settings.get_verbose_log())
+        form.addRow(self.check_verbose_log)
+        row = QHBoxLayout()
+        show_log = QPushButton("Show Log File")
+        show_log.setToolTip("Open the folder with the log, to attach it to a bug report")
+        show_log.clicked.connect(lambda: reveal.show_log_file())
+        row.addWidget(show_log)
+        row.addStretch(1)
+        form.addRow(row)
+        form.addRow(note("The log lists what the app did and every error. It contains file paths and Akai file names, but no audio."))
+        troubleshooting = section_card("Troubleshooting", form)
+
         # --------------------------------------------------------------- akaiutil
         form = QFormLayout()
         self.label_akaiutil = QLabel()
@@ -183,7 +213,7 @@ class SettingsDialog(QDialog):
         page = QWidget()
         page_layout = QVBoxLayout(page)
         page_layout.setSpacing(12)
-        for card in (appearance, audio, export, editing, akaiutil, updates_card):
+        for card in (appearance, audio, export, editing, backups, akaiutil, updates_card, troubleshooting):
             page_layout.addWidget(card)
         page_layout.addStretch(1)
         scroll = QScrollArea()
@@ -247,4 +277,7 @@ class SettingsDialog(QDialog):
         settings.set_ask_export_folder(self.check_ask_folder.isChecked())
         settings.set_check_updates_on_startup(self.check_updates.isChecked())
         settings.set_sort_after_adding(self.check_sort_after.isChecked())
+        settings.set_backup_keep_days(self.spin_keep_days.value())
+        settings.set_verbose_log(self.check_verbose_log.isChecked())
+        logsetup.set_verbose(self.check_verbose_log.isChecked())
         super().accept()

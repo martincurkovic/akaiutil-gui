@@ -33,3 +33,13 @@ def reveal(path: str) -> bool:
     except OSError:
         pass
     return QDesktopServices.openUrl(QUrl.fromLocalFile(str(target.parent)))
+
+
+def show_log_file() -> None:
+    """Show the log in the file manager (or the folder it will be in, if nothing has been logged yet)."""
+    from akaiutil_gui import logsetup
+
+    path = logsetup.log_path()
+    if not (path.exists() and reveal(str(path))):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        reveal(str(path.parent / "."))

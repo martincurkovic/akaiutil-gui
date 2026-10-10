@@ -11,6 +11,7 @@ ctypes/cffi engine would implement; nothing outside this package should know
 there is a subprocess underneath.
 """
 
+import logging
 import os
 import shutil
 import struct
@@ -24,6 +25,8 @@ from ..audio import wavfile
 from . import formats, parse
 from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, SampleInfo, Volume, VolumeCopy
 from .session import EngineError, Session, TrafficCallback
+
+log = logging.getLogger(__name__)
 
 
 class AkaiEngine:
@@ -188,6 +191,7 @@ class AkaiEngine:
         dest = Path(dest_dir)
         result = ExportResult()
         with self._lock:
+            log.info("export %d file(s) from %s to %s%s", len(files), vol.name, dest_dir, " as WAV" if as_wav else "")
             session = self._need_session()
             self._enter_volume(vol)
             for f in files:
@@ -225,6 +229,7 @@ class AkaiEngine:
         if problem:
             raise EngineError(problem)
         with self._lock:
+            log.info("rename volume %s (disk%d %s #%d) -> %s", vol.name, vol.disk, vol.partition, vol.index, new_name)
             self._need_writable()
             siblings = self._volumes_at(vol.disk, vol.partition)
             if sum(akai_names.same_name(v.name, vol.name) for v in siblings) != 1:
@@ -249,6 +254,7 @@ class AkaiEngine:
         if load_number is not None and not 1 <= load_number <= 128:
             raise EngineError("A load number is 1 to 128.")
         with self._lock:
+            log.info("new %s volume %r #%d in disk%d %s", volume_type, name, index, part.disk, part.name)
             self._need_writable()
             used, limit = self.volume_slots(part)
             if not 1 <= index <= limit:
@@ -279,6 +285,7 @@ class AkaiEngine:
             raise EngineError("An S900 volume only fits an S900 hard disk, and other volumes don't.")
         notes: list[str] = []
         with self._lock:
+            log.info("copy volume %s (disk%d %s #%d) -> disk%d %s as %r", src.name, src.disk, src.partition, src.index, part.disk, part.name, new_name)
             self._need_writable()
             current = self._find_volume(src.disk, src.partition, src.index)
             if current is None or not akai_names.same_name(current.name, src.name):
@@ -327,6 +334,7 @@ class AkaiEngine:
     def delete_volume(self, vol: Volume) -> None:
         """Delete a volume and every file in it."""
         with self._lock:
+            log.info("delete volume %s (disk%d %s #%d)", vol.name, vol.disk, vol.partition, vol.index)
             self._need_writable()
             current = self._find_volume(vol.disk, vol.partition, vol.index)
             if current is None or not akai_names.same_name(current.name, vol.name):
@@ -343,6 +351,7 @@ class AkaiEngine:
         if problem:
             raise EngineError(problem)
         with self._lock:
+            log.info("rename file %s in %s -> %s", file.name, vol.name, new_name)
             self._need_writable()
             self._enter_volume(vol)
             files = parse.parse_files(self._run("dir").text)
@@ -360,6 +369,7 @@ class AkaiEngine:
         """Delete files. Returns "NAME: reason" for each one that couldn't be."""
         failed = []
         with self._lock:
+            log.info("delete %d file(s) from %s: %s", len(files), vol.name, ", ".join(f.name for f in files[:10]) + (" …" if len(files) > 10 else ""))
             self._need_writable()
             self._enter_volume(vol)
             present = {f.index: f.name for f in parse.parse_files(self._run("dir").text)}
@@ -378,6 +388,7 @@ class AkaiEngine:
         `scope` is sorting.ALL, or sorting.SAMPLES to leave everything but the samples where it is. Returns how many moved.
         Nothing about a file changes but its slot: the data isn't touched, and tags and all stay."""
         with self._lock:
+            log.info("sort %s in %s", scope, vol.name)
             self._need_writable()
             self._enter_volume(vol)
             text = self._run("dir").text
@@ -412,6 +423,7 @@ class AkaiEngine:
         if command is None:
             raise EngineError(f"Can't import a “{job.kind}”.")
         with self._lock:
+            log.info("import %s as %s into %s", job.local.name, job.kind, vol.name)
             self._need_writable()
             session = self._need_session()
             self._enter_volume(vol)
@@ -443,6 +455,7 @@ class AkaiEngine:
         file goes in through a one-file tar import instead, which does (see tags.py). If that doesn't work, `put` is used
         and the file arrives untagged."""
         with self._lock:
+            log.info("copy file %s from %s to %s (%s)%s", f.name, src.name, dst.name, new_name, " with tags" if tags else "")
             self._need_writable()
             session = self._need_session()
             self._enter_volume(src)
@@ -489,6 +502,7 @@ class AkaiEngine:
         if (src.disk, src.partition) != (dst.disk, dst.partition):
             raise EngineError("A file can only be moved within a partition (copy it, then delete the original).")
         with self._lock:
+            log.info("move file %s from %s to %s (%s)", f.name, src.name, dst.name, new_name)
             self._need_writable()
             self._enter_volume(src)
             present = {x.index: x.name for x in parse.parse_files(self._run("dir").text)}
@@ -512,6 +526,7 @@ class AkaiEngine:
         if not disk.type.startswith("FL") and fmt.is_floppy:
             raise EngineError(f"A hard disk image can't be formatted as “{fmt.label}”.")
         with self._lock:
+            log.info("format disk%d (%s) as %s", disk.index, disk.type, fmt.label)
             self._need_writable()
             self._tag_names.clear()  # the partitions are about to be new ones
             self._run(f"cd {disk.path}")
@@ -528,6 +543,7 @@ class AkaiEngine:
         """Make a new, empty disk image file. Nothing needs to be open; an existing file at `path` is only replaced
         once the new one is complete."""
         path = Path(path)
+        log.info("create image %s (%s)", path, fmt.label)
         if not fmt.is_floppy and not 1 <= size_mb <= fmt.max_mb:
             raise EngineError(f"A {fmt.label} image is 1 to {fmt.max_mb} MB.")
         if fmt.partitions and not formats.PARTITION_MIN_MB <= partition_mb <= formats.PARTITION_MAX_MB:

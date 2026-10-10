@@ -33,7 +33,7 @@ inside. It does its work by running Klaus Michael Indlekofer's **akaiutil** prog
 
 ## Getting started
 
-1. **Open an image.** Choose **File > Open Disk Image…**, or drag the image file onto the window.
+1. **Open an image.** Choose **File > Open Disk Image…**, or drag the image file onto the window. (The start screen has buttons for this, and for **New Disk Image…** if you want to make an empty one.)
 2. The first time, the app needs akaiutil. If it isn't installed it offers to download it (the download is checked against a
    known checksum) or lets you point at a copy you already have. Built apps include akaiutil, so this only happens when running
    from source.
@@ -147,7 +147,8 @@ Programs and other non-sample files are always written as they are.
 
 ## Editing disk images
 
-> **Editing changes the image file itself, immediately, with no undo.** Keep a copy of anything you can't afford to lose.
+> **Editing changes the image file itself, immediately, with no undo.** That is why the app offers to back the image up first
+> (see [Backups and reverting](#backups-and-reverting) below).
 
 Choose **Edit > Allow Editing** (or just ask for a change, such as a rename; the app asks first). It restarts akaiutil in
 read/write mode on the open images, and the status bar shows **Editing**, highlighted. Every change from then on is written to the
@@ -158,6 +159,20 @@ Editing is on for **all** the open images together, not one at a time. If an ima
 tells you which one and stays read-only: change its permissions, or work on a copy.
 
 Everything in the next sections needs editing to be on, and asks to switch it on if it isn't.
+
+### Backups and reverting
+
+The first time you switch editing on, the app asks whether to **Back Up and Allow Editing**, or **Allow Editing Without a
+Backup**. A backup is a full copy of each open image (a hard disk image can be hundreds of MB; on a Mac with APFS the copy is
+instant and takes no extra space). It is kept in the app's own data folder, not next to your image, so it can't be mistaken for
+a disk you opened. The app asks once per image per session: switch editing off and on again and it doesn't ask again, and an
+image you add while editing is on gets its own question. A brand-new image from **File > New Disk Image…** has nothing to lose,
+so it isn't asked about.
+
+To go back, choose **File > Revert to Backup…**, pick one of the backups (newest first, with its date and size) and confirm.
+The image file is replaced by the backup, and the image as it was just before is backed up first, so even a revert can be undone
+the same way. The images then open again read-only. The newest 5 backups of each image are kept; older ones are deleted
+automatically. If there isn't room for a backup, the app says so and editing stays off.
 
 ---
 
@@ -319,6 +334,10 @@ already have it. **Tools > Locate akaiutil…** changes it later.
 **An image won't open, or shows "no Akai filesystem found".** The file isn't an Akai disk image akaiutil understands, or it hasn't
 been formatted. A blank image can be formatted with **Format Disk…**. **View > Console** shows what akaiutil said.
 
+**The backups take a lot of room.** Each backup is a full copy of an image. They are deleted automatically when the app starts, once
+they are older than **Settings > Backups > Delete backups older than** (14 days to begin with; the newest 5 of each image are kept
+at most), and you can set that to a shorter time. The folder is `backups` in the app's data folder.
+
 **Editing won't switch on.** The image file is read-only on your computer. The message names the file: change its permissions or
 work on a copy.
 
@@ -332,11 +351,23 @@ isn't audio, more than two channels, or a sample for the wrong sampler (an S3000
 
 **Something looks wrong.** **View > Console** shows exactly what the app and akaiutil said to each other.
 
+### Reporting a problem
+
+The app keeps a log of what it did and every error. To report a problem, attach the log:
+
+1. If you can repeat the problem, turn on **Settings > Troubleshooting > Log every command sent to akaiutil**, then repeat it.
+2. Choose **Help > Show Log File**. It opens the folder with `akaiutil-gui.log` (and `crash.log`, if the program ever closed
+   unexpectedly), with the log selected.
+3. Send those files with a short description of what you did and what you expected.
+
+The log holds the app's version, your operating system, the images you opened and the files you changed, and any error with
+details. It contains file paths and Akai file names, but never audio. It is limited in size, so older entries drop off.
+
 ---
 
 ## Good to know
 
-- **No undo,** and changes are written at once. Work on copies.
+- **No undo,** and changes are written at once. Say yes to the backup when editing is switched on, and use **File > Revert to Backup…** to go back.
 - The app can't change a sample's loop points, tuning or other settings yet; it only sets them when importing.
 - S900 samples are previewed as one-shots, and get no loops on import.
 - Direct-to-disk recordings (takes) are listed as text only.

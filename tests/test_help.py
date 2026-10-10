@@ -157,7 +157,7 @@ def test_a_missing_manual_says_so_instead_of_crashing(qt_app, monkeypatch, tmp_p
 
 def test_the_help_menu_opens_one_reused_manual_window(qt_app, window):
     help_menu = next(a.menu() for a in window.menuBar().actions() if a.text().replace("&", "") == "Help")
-    assert [a.text().replace("&", "") for a in help_menu.actions() if not a.isSeparator()] == ["User Manual…", "About akaiutil-GUI…", "Check for Updates…"]
+    assert [a.text().replace("&", "") for a in help_menu.actions() if not a.isSeparator()] == ["User Manual…", "About akaiutil-GUI…", "Show Log File", "Check for Updates…"]
     window.act_manual.trigger()
     first = window._manual_dialog
     assert first.isVisible() and first.windowTitle() == "User Manual"

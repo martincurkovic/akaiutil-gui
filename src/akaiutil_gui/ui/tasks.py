@@ -13,6 +13,9 @@ from typing import Any
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 
+from akaiutil_gui.backup import BackupError
+from akaiutil_gui.engine.session import EngineError
+
 log = logging.getLogger(__name__)
 _live: set["_Relay"] = set()  # keeps relays alive until their result arrives
 
@@ -51,7 +54,10 @@ class _Task(QRunnable):
         try:
             result = self._fn()
         except Exception as e:  # reported to the UI, never allowed to kill the pool thread
-            log.debug("task failed:\n%s", traceback.format_exc())
+            if isinstance(e, (EngineError, BackupError)):  # (a reason written for the user: no traceback needed)
+                log.warning("task failed: %s", e)
+            else:
+                log.error("task failed with an unexpected %s:\n%s", e.__class__.__name__, traceback.format_exc())
             self._relay.failed.emit(str(e) or e.__class__.__name__)
         else:
             self._relay.done.emit(result)

@@ -78,6 +78,7 @@ def answers(monkeypatch):
         name = None
         new_volume = None
         copy_volume = None
+        revert = None
         format = None
         new_image = None
         save_path = None
@@ -87,7 +88,7 @@ def answers(monkeypatch):
     a = Answers()
     a.asked, a.warnings = [], []
 
-    def confirm(parent, title, text, detail="", action="Delete", details_lines=()):
+    def confirm(parent, title, text, detail="", action="Delete", details_lines=(), other_action=None, default_is_action=False):
         a.asked.append((title, text, detail, action, list(details_lines)))
         return a.confirm
 
@@ -100,6 +101,7 @@ def answers(monkeypatch):
     monkeypatch.setattr(MainWindow, "_ask_name", lambda self, what, current, vtype, taken, suffix="": (a.asked.append(("name", what, current, list(taken), suffix)), a.name)[1])
     monkeypatch.setattr(MainWindow, "_ask_new_volume", lambda self, *args: (a.asked.append(("new", args)), a.new_volume)[1])
     monkeypatch.setattr(MainWindow, "_ask_copy_volume", lambda self, vol, count, need, targets: (a.asked.append(("copy", vol.name, count, [t.label for t in targets])), a.copy_volume(targets) if callable(a.copy_volume) else None)[1])
+    monkeypatch.setattr(MainWindow, "_ask_revert", lambda self, entries: (a.asked.append(("revert", [(p.name, b.created) for p, b in entries])), a.revert(entries) if callable(a.revert) else None)[1])
     monkeypatch.setattr(MainWindow, "_ask_format", lambda self, disk: (a.asked.append(("format", disk.index, disk.type)), a.format)[1])
     monkeypatch.setattr(MainWindow, "_ask_new_image", lambda self: (a.asked.append(("newimage",)), a.new_image)[1])
     monkeypatch.setattr(MainWindow, "_ask_save_path", lambda self, suggestion: (a.asked.append(("save", suggestion)), a.save_path)[1])
@@ -122,7 +124,8 @@ def test_allow_editing_asks_first_and_then_switches_the_mode(qt_app, window, edi
     answers.confirm = False
     window.act_allow_edit.trigger()
     assert not window._writable and not window.act_allow_edit.isChecked()
-    assert answers.asked[-1][0] == "Allow editing?" and answers.asked[-1][3] == "Allow Editing"
+    assert answers.asked[-1][0] == "Allow editing?" and answers.asked[-1][3] == "Back Up and Allow Editing"
+    assert answers.asked[-1][4] == [f"edit.img  ·  {window._images and __import__('pathlib').Path(window._images[0]).stat().st_size / 2**20:.1f} MB"]
 
     answers.confirm = True
     window.act_allow_edit.trigger()
@@ -761,3 +764,112 @@ def test_the_copy_dialog_suggests_a_free_name_and_checks_the_room(qt_app, editab
     assert not ok.isEnabled() and "already a volume called" in dialog.problem.text()
     dialog.name_edit.setText("kit")
     assert ok.isEnabled() and dialog.name == "KIT" and dialog.target.partition is big
+
+
+# ------------------------------------------------------------------- backups and revert
+def backups_of(image):
+    from akaiutil_gui import backup
+
+    return backup.list_backups(backup.default_root(), image)
+
+
+def test_switching_editing_on_backs_the_image_up_first_when_asked_to(qt_app, window, editable_hd, answers):
+    before = editable_hd.read_bytes()
+    open_and_show(qt_app, window, editable_hd)
+    assert backups_of(editable_hd) == []
+    answers.confirm = True  # "Back Up and Allow Editing"
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    (made,) = backups_of(editable_hd)
+    assert made.path.read_bytes() == before
+    assert "Backed up edit.img" in window.statusBar().currentMessage() or window._writable
+    window.act_allow_edit.trigger()  # off...
+    assert pump(qt_app, lambda: not window._writable)
+    window.act_allow_edit.trigger()  # ...and on again: it was backed up already, so the plain question comes back
+    assert pump(qt_app, lambda: window._writable)
+    assert len(backups_of(editable_hd)) == 1 and answers.asked[-1][3] == "Allow Editing"
+
+
+def test_editing_can_be_switched_on_without_a_backup_and_then_isnt_asked_again(qt_app, window, editable_hd, answers):
+    from akaiutil_gui.ui import edit_dialogs
+
+    open_and_show(qt_app, window, editable_hd)
+    answers.confirm = edit_dialogs.OTHER
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    assert backups_of(editable_hd) == []
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: not window._writable)
+    answers.confirm = True
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable) and backups_of(editable_hd) == []  # (it stays declined for the session)
+
+
+def test_cancelling_the_question_makes_no_backup_and_leaves_editing_off(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    answers.confirm = False
+    window.act_allow_edit.trigger()
+    assert not window._writable and backups_of(editable_hd) == []
+
+
+def test_a_backup_that_cant_be_made_keeps_editing_off_and_says_why(qt_app, window, editable_hd, answers, monkeypatch):
+    from akaiutil_gui import backup
+
+    def full(root, image, *a, **k):
+        raise backup.BackupError("There isn't room for a backup of edit.img.")
+
+    monkeypatch.setattr(backup, "make_backup", full)
+    open_and_show(qt_app, window, editable_hd)
+    answers.confirm = True
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: any("isn't room" in str(w) for w in answers.warnings))
+    assert not window._writable and "Editing is still off" in str(answers.warnings[-1])
+
+
+def test_revert_puts_the_backup_back_and_keeps_what_was_there(qt_app, window, editable_hd, answers):
+    original = editable_hd.read_bytes()
+    open_and_show(qt_app, window, editable_hd)
+    answers.confirm = True
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    answers.name = "thump"
+    window._rename_file(window._volume, next(f for f in window._volume_files if f.name == "KICK.S3"))
+    assert pump(qt_app, lambda: "THUMP.S3" in [window.table.item(r, 1).text() for r in range(window.table.rowCount())])
+    assert editable_hd.read_bytes() != original
+    answers.revert = lambda entries: entries[-1]  # (the oldest: the one taken before editing)
+    window._revert()
+    assert pump(qt_app, lambda: "Reverted edit.img" in window.statusBar().currentMessage())
+    assert editable_hd.read_bytes() == original
+    assert len(backups_of(editable_hd)) == 2  # the one from before, and one of the edited state
+    assert not window._writable  # reopened read-only
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1)
+
+
+def test_revert_with_no_backups_says_so(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window._revert()
+    assert any("no backups" in str(w) for w in answers.warnings) and not any(a[0] == "revert" for a in answers.asked)
+
+
+def test_cancelling_the_revert_changes_nothing(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    answers.confirm = True
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    before = editable_hd.read_bytes()
+    window._revert()  # answers.revert is None: the dialog was cancelled
+    assert any(a[0] == "revert" for a in answers.asked) and editable_hd.read_bytes() == before and window._writable
+
+
+def test_a_new_image_needs_no_backup_but_one_added_while_editing_is_asked_about(qt_app, window, editable_hd, images, answers):
+    open_and_show(qt_app, window, editable_hd)
+    answers.confirm = True
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    window.add_images([str(images["fl1"])])
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 2 and window._writable)
+    assert answers.asked[-1][0] == "Back up the new image?" and len(backups_of(images["fl1"])) == 1
+    window._backup_handled.add(str(images["fl9"].resolve()))  # (as a freshly made image is)
+    window.add_images([str(images["fl9"])])
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 3 and window._writable)
+    assert answers.asked[-1][0] == "Back up the new image?" and backups_of(images["fl9"]) == []  # (not asked again)

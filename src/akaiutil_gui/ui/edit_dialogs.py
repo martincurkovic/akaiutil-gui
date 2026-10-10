@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from akaiutil_gui import akai_names, importing, settings, sorting
+from akaiutil_gui import akai_names, backup, importing, settings, sorting
 from akaiutil_gui.engine import formats
 from akaiutil_gui.engine.models import Disk, Partition, Volume
 
@@ -200,6 +200,37 @@ class NewVolumeDialog(QDialog):
                 problem, ok = f"There is already a volume called “{name}”.", False
         self.problem.setText(problem or "")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
+
+
+class RevertDialog(QDialog):
+    """Which backup to put back."""
+
+    def __init__(self, parent, entries):
+        super().__init__(parent)
+        self.setWindowTitle("Revert to Backup")
+        self.setMinimumWidth(460)
+        self._entries = entries
+        self.list = QListWidget()
+        for image, b in entries:
+            self.list.addItem(f"{image.name}   ·   {b.created:%d %b %Y, %H:%M}   ·   {b.size / 2**20:.0f} MB")
+        self.list.setCurrentRow(0)
+        self.list.itemDoubleClicked.connect(lambda _item: self.accept())
+        note = QLabel(f"A backup is made when you switch editing on. The newest {backup.KEEP} of each image are kept.")
+        note.setObjectName("mutedLabel")
+        note.setWordWrap(True)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.revert_button = buttons.addButton("Revert…", QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Put back one of these backups:"))
+        layout.addWidget(self.list)
+        layout.addWidget(note)
+        layout.addWidget(buttons)
+
+    @property
+    def chosen(self):
+        return self._entries[self.list.currentRow()]
 
 
 @dataclass(frozen=True)
@@ -546,17 +577,28 @@ class SortDialog(QDialog):
         return sorting.SAMPLES if self.only_samples.isChecked() else sorting.ALL
 
 
-def confirm(parent, title: str, text: str, detail: str = "", action: str = "Delete", details_lines: Iterable[str] = ()) -> bool:
-    """A question whose default answer is "no"; the destructive button is named for what it does."""
+OTHER = "other"  # what confirm() answers when the second action was chosen
+
+
+def confirm(parent, title: str, text: str, detail: str = "", action: str = "Delete", details_lines: Iterable[str] = (),
+            other_action: str | None = None, default_is_action: bool = False):
+    """A question whose default answer is "no"; the destructive button is named for what it does.
+
+    Returns True for `action`, False for Cancel, and (only if `other_action` was given) OTHER for that one. With
+    `default_is_action` the first button is the default instead of Cancel: for a question where the safe choice is to go ahead."""
     box = QMessageBox(QMessageBox.Icon.Warning, title, text, parent=parent)
     if detail:
         box.setInformativeText(detail)
     lines = list(details_lines)
     if lines:
         box.setDetailedText("\n".join(lines))
-    go = box.addButton(action, QMessageBox.ButtonRole.DestructiveRole)
+    go = box.addButton(action, QMessageBox.ButtonRole.DestructiveRole if not default_is_action else QMessageBox.ButtonRole.AcceptRole)
+    other = box.addButton(other_action, QMessageBox.ButtonRole.DestructiveRole) if other_action else None
     cancel = box.addButton(QMessageBox.StandardButton.Cancel)
-    box.setDefaultButton(cancel)
+    box.setDefaultButton(go if default_is_action else cancel)
     box.setEscapeButton(cancel)
     box.exec()
-    return box.clickedButton() is go
+    clicked = box.clickedButton()
+    if other is not None and clicked is other:
+        return OTHER
+    return clicked is go

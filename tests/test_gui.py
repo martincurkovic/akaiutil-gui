@@ -1118,3 +1118,74 @@ def test_the_export_folder_name_is_safe(app):
     odd = Volume(3, "B", 1, 'A/B:C*"D', "-", "0x0", "-", "S3000")
     assert export_folder_name(odd, False) == "B - A_B_C__D" and export_folder_name(odd, True) == "disk3 B - A_B_C__D"
     assert export_folder_name(Volume(0, "A", 1, "  ", "-", "0x0", "-", "S3000"), False) == "A -"
+
+
+def test_the_start_screen_has_the_logo_and_buttons_to_open_or_make_an_image(app, window, monkeypatch):
+    from akaiutil_gui.ui.ascii_logo import LOGO
+
+    assert window.stack.currentIndex() == 0
+    assert window.empty_logo.text() == LOGO.strip("\n")
+    assert (window.open_btn.text(), window.new_btn.text()) == ("Open Disk Image…", "New Disk Image…")
+    called = []
+    monkeypatch.setattr(type(window), "open_dialog", lambda self: called.append("open"))
+    monkeypatch.setattr(type(window), "_new_image", lambda self: called.append("new"))
+    window.open_btn.clicked.disconnect()
+    window.new_btn.clicked.disconnect()
+    window.open_btn.clicked.connect(window.open_dialog)
+    window.new_btn.clicked.connect(window._new_image)
+    window.open_btn.click()
+    window.new_btn.click()
+    assert called == ["open", "new"]
+
+
+def test_the_start_screens_manual_and_about_links_open_those_windows(app, window, monkeypatch):
+    from akaiutil_gui.ui import main_window
+
+    shown = []
+    monkeypatch.setattr(main_window, "show_manual_dialog", lambda parent: shown.append("manual"))
+    monkeypatch.setattr(type(window), "_about", lambda self: shown.append("about"))
+    window.help_btn.clicked.disconnect()
+    window.about_btn.clicked.disconnect()
+    window.help_btn.clicked.connect(lambda: main_window.show_manual_dialog(window))
+    window.about_btn.clicked.connect(window._about)
+    window.help_btn.click()
+    window.about_btn.click()
+    assert shown == ["manual", "about"]
+
+
+def test_the_start_screen_shows_the_version_and_no_read_only_label_until_an_image_is_open(app, window, images):
+    from akaiutil_gui import __version__
+
+    assert window.version_label.text() == f"Version {__version__}"
+    assert not window.version_label.isHidden() and window.mode_label.isHidden()
+    window.open_images([str(images["fl1"])])
+    assert pump(app, lambda: window.stack.currentIndex() == 1)
+    assert window.version_label.isHidden() and not window.mode_label.isHidden()
+    window.close_images()
+    assert pump(app, lambda: window.stack.currentIndex() == 0)
+    assert not window.version_label.isHidden() and window.mode_label.isHidden()
+
+
+def test_starting_up_deletes_backups_older_than_the_setting_and_help_shows_the_log(app, window, tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+
+    from akaiutil_gui import backup
+    from akaiutil_gui.ui import reveal
+
+    image = tmp_path / "X.img"
+    image.write_bytes(b"x" * 100)
+    root = backup.default_root()
+    old = backup.make_backup(root, image, now=datetime.now() - timedelta(days=40))
+    new = backup.make_backup(root, image, now=datetime.now() - timedelta(days=1))
+    window.run_backup_cleanup()
+    assert pump(app, lambda: not old.path.exists())
+    assert new.path.exists()
+    settings.set_backup_keep_days(0)  # never delete
+    older = backup.make_backup(root, image, now=datetime.now() - timedelta(days=90))
+    window.run_backup_cleanup()
+    pump(app, lambda: False, timeout=0.3)
+    assert older.path.exists()
+    shown = []
+    monkeypatch.setattr(reveal, "show_log_file", lambda: shown.append(1))
+    window.act_show_log.trigger()
+    assert shown == [1] and window.act_show_log.text().replace("&", "") == "Show Log File"

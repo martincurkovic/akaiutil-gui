@@ -156,6 +156,30 @@ def set_import_stereo_mix(mix: bool) -> None:
     _qs().setValue(IMPORT_STEREO_MIX, bool(mix))
 
 
+BACKUP_KEEP_DAYS_DEFAULT = 14
+
+
+def get_backup_keep_days() -> int:
+    """How long backups of disk images are kept before the app deletes them when it starts (0: never delete them)."""
+    try:
+        return max(0, int(_qs().value("backup/keep_days", BACKUP_KEEP_DAYS_DEFAULT)))
+    except (TypeError, ValueError):
+        return BACKUP_KEEP_DAYS_DEFAULT
+
+
+def set_backup_keep_days(days: int) -> None:
+    _qs().setValue("backup/keep_days", max(0, int(days)))
+
+
+def get_verbose_log() -> bool:
+    """Also log every command sent to akaiutil (for bug reports)."""
+    return _bool("log/verbose", False)
+
+
+def set_verbose_log(on: bool) -> None:
+    _qs().setValue("log/verbose", bool(on))
+
+
 def get_sort_after_adding() -> bool:
     """Put a volume in alphabetical order after files are imported or pasted into it."""
     return _bool("edit/sort_after_adding", False)

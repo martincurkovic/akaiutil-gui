@@ -11,6 +11,7 @@ everything else.
 The process is started read-only (-r) unless the caller asks for a writable session.
 """
 
+import logging
 import os
 import queue
 import re
@@ -21,6 +22,8 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 # "<start of line>/disk0/A/MY VOL > " at the very end of the buffer
 _PROMPT_RE = re.compile(rb"(?:\A|\n)(/[^\n]*?) > \Z")
@@ -67,6 +70,7 @@ class Session:
     def start(self) -> str:
         args = [self._binary, *([] if self.writable else ["-r"]), *self._images]
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash on Windows
+        log.info("starting akaiutil %s on %s (%s)", "read/write" if self.writable else "read-only", self._images, self._binary)
         try:
             self._proc = subprocess.Popen(
                 args,
@@ -78,12 +82,14 @@ class Session:
                 creationflags=flags,
             )
         except OSError as e:
+            log.error("couldn't start akaiutil: %s", e)
             self.close()
             raise EngineError(f"Couldn't start akaiutil ({self._binary}): {e}") from e
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
         self.banner = self._read_until_prompt(timeout=60).text
         if self.writable and "read/write mode" not in self.banner:
+            log.error("akaiutil didn't start in read/write mode; its banner:\n%s", self.banner.strip()[-600:])
             self.close()  # never carry on believing we can write, or the other way round, when akaiutil says otherwise
             raise EngineError("akaiutil didn't start in read/write mode.")
         return self.banner
@@ -117,6 +123,7 @@ class Session:
         with self._lock:
             if not self.alive:
                 raise EngineError("akaiutil is not running")
+            log.debug("> %s", command)
             self._emit("in", command + "\n")
             try:
                 self._proc.stdin.write(command.encode("utf-8") + b"\n")
@@ -141,9 +148,11 @@ class Session:
             try:
                 chunk = self._chunks.get(timeout=timeout)
             except queue.Empty:
+                log.error("akaiutil didn't answer within %.0fs; so far: %r", timeout, buf[-300:])
                 raise EngineError(f"akaiutil didn't answer within {timeout:.0f}s") from None
             if chunk is None:
                 text = buf.decode("utf-8", errors="replace")
+                log.error("akaiutil exited unexpectedly; its last words:\n%s", text.strip()[-600:])
                 raise EngineError(f"akaiutil exited unexpectedly.\n{text.strip()}")
             buf += chunk
             if buf.endswith(b" > "):  # cheap pre-check before the regex
@@ -153,6 +162,8 @@ class Session:
         text = buf[: m.start(1)].decode("utf-8", errors="replace")
         self.cwd = m.group(1).decode("utf-8", errors="replace")
         self._emit("out", text + self.cwd + " > ")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("< %s", " | ".join(ln.strip() for ln in text.splitlines() if ln.strip())[:300] or "(nothing)")
         return Response(text=text, cwd=self.cwd)
 
     def _emit(self, direction: str, text: str) -> None:

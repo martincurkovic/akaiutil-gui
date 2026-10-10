@@ -1,5 +1,6 @@
 """The main window."""
 
+import logging
 import os
 import re
 import shutil
@@ -33,16 +34,34 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QSettings, QThreadPool
 
-from akaiutil_gui import akai_names, describe, importing, search, settings, sorting, transfer
+from akaiutil_gui import (
+    akai_names,
+    describe,
+    importing,
+    search,
+    settings,
+    sorting,
+    transfer,
+)
 from akaiutil_gui.audio.sample import LoadedSample, load_wav
 from akaiutil_gui.formatting import human_size
 from akaiutil_gui.engine import fetch, formats
 from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.locate import candidates, find_akaiutil
-from akaiutil_gui.engine.models import CatalogEntry, Disk, DiskUsage, ExportResult, FileEntry, Partition, Volume
+from akaiutil_gui import __version__, backup
+from akaiutil_gui.engine.models import (
+    CatalogEntry,
+    Disk,
+    DiskUsage,
+    ExportResult,
+    FileEntry,
+    Partition,
+    Volume,
+)
 
 from . import edit_dialogs, file_drag, reveal, theme
-from .details_view import DetailsView
+from .ascii_logo import LOGO
+from .details_view import DetailsView, monospace_family
 from .disk_tree import DiskTree
 from .about_dialog import AboutDialog
 from .manual_dialog import show_manual_dialog
@@ -52,6 +71,8 @@ from .file_table import FileTable
 from .tasks import run_async
 from .update_helper import CHECK_INTERVAL_SECONDS, UpdateCheckRunner
 from .usage_bar import UsageSummary
+
+log = logging.getLogger(__name__)
 
 IMAGE_FILTER = "Disk images (*.img *.iso *.bin *.dsk *.hfe *.fdi *.raw);;All files (*)"
 
@@ -140,21 +161,39 @@ class MainWindow(QMainWindow):
         self._engine: AkaiEngine | None = None
         self._engine_binary: Path | None = None
         self._images: list[str] = []
-        self._disk_files: dict[int, str] = {}  # disk number -> the image file akaiutil says it came from
-        self._open_select: tuple[int, str | None, int | None] | None = None  # where to land once a reopen has loaded
+        self._disk_files: dict[
+            int, str
+        ] = {}  # disk number -> the image file akaiutil says it came from
+        self._open_select: tuple[int, str | None, int | None] | None = (
+            None  # where to land once a reopen has loaded
+        )
         self._volume: Volume | None = None
         self._volume_details: describe.Details | None = None
         self._pending = 0
         self._setup_running = False  # akaiutil is being downloaded right now
         self._update_runner = UpdateCheckRunner(self)
-        self._catalog: list[CatalogEntry] = []  # every file on every open disk, for searching
-        self._in_results = False  # the file table is showing search results, not a volume's files
-        self._volume_files: list[FileEntry] = []  # the selected volume's files, to put back when a search ends
+        self._catalog: list[
+            CatalogEntry
+        ] = []  # every file on every open disk, for searching
+        self._in_results = (
+            False  # the file table is showing search results, not a volume's files
+        )
+        self._volume_files: list[
+            FileEntry
+        ] = []  # the selected volume's files, to put back when a search ends
         self._files_title_text = "Files"
-        self._pending_reveal: tuple[Volume, int] | None = None  # select this file once its volume has loaded
-        self._preview_token = 0  # numbers each preview load; only the newest may show its result
-        self._preview_cache: OrderedDict[tuple, LoadedSample] = OrderedDict()  # decoded samples, so replaying is instant
-        self._preview_dir: str | None = None  # scratch folder the WAVs are converted into
+        self._pending_reveal: tuple[Volume, int] | None = (
+            None  # select this file once its volume has loaded
+        )
+        self._preview_token = (
+            0  # numbers each preview load; only the newest may show its result
+        )
+        self._preview_cache: OrderedDict[tuple, LoadedSample] = (
+            OrderedDict()
+        )  # decoded samples, so replaying is instant
+        self._preview_dir: str | None = (
+            None  # scratch folder the WAVs are converted into
+        )
         self._theme_actions: dict[str, QAction] = {}
         # Details requests run on worker threads and can finish in any order, so each gets a number
         # and only _info_current may show its result (0: nothing in flight is wanted any more).
@@ -163,12 +202,23 @@ class MainWindow(QMainWindow):
         self._volume_token = 0  # the request for the selected volume's own details
         self._files_token = 0
         self._usage_token = 0
-        self._usage_cache: dict[int, DiskUsage] = {}  # dropped for a disk whenever it is edited
-        self._usage_waiting: dict[int, list] = {}  # disk -> callbacks for a load that's under way
-        self._usage_epoch: dict[int, int] = {}  # bumped when a disk is changed: a load that started earlier is out of date
+        self._usage_cache: dict[
+            int, DiskUsage
+        ] = {}  # dropped for a disk whenever it is edited
+        self._usage_waiting: dict[
+            int, list
+        ] = {}  # disk -> callbacks for a load that's under way
+        self._usage_epoch: dict[
+            int, int
+        ] = {}  # bumped when a disk is changed: a load that started earlier is out of date
         self._writable = False  # akaiutil is running read/write (Edit > Allow Editing)
-        self._clip: tuple[str, list[tuple[Volume, FileEntry]]] | None = None  # Copy / Cut: ("copy" | "cut", files)
-        self._drag_dir: str | None = None  # where files dragged out of the window are written
+        self._backup_handled: set[str] = set()  # images (resolved paths) already backed up, or made new, or declined, this session
+        self._clip: tuple[str, list[tuple[Volume, FileEntry]]] | None = (
+            None  # Copy / Cut: ("copy" | "cut", files)
+        )
+        self._drag_dir: str | None = (
+            None  # where files dragged out of the window are written
+        )
         self._writing = 0  # edits to a disk that are under way (only one at a time)
         self._status_hold = 0.0  # until then the status bar keeps the message about an edit (a file count would replace it)
 
@@ -202,7 +252,9 @@ class MainWindow(QMainWindow):
         # right top: file list + export buttons
         self.files_title = self._title("Files")
         self.export_btn = QPushButton("Export…")
-        self.export_btn.setToolTip("Copy the selected files out of the disk image, unchanged")
+        self.export_btn.setToolTip(
+            "Copy the selected files out of the disk image, unchanged"
+        )
         self.export_btn.clicked.connect(lambda: self._export(as_wav=False))
         self.export_wav_btn = QPushButton("Export as WAV…")
         self.export_wav_btn.setToolTip("Convert the selected samples to WAV files")
@@ -230,10 +282,14 @@ class MainWindow(QMainWindow):
             self.search_kind.addItem(label, value)
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
-        self._search_timer.setInterval(150)  # so typing doesn't refilter the table on every keystroke
+        self._search_timer.setInterval(
+            150
+        )  # so typing doesn't refilter the table on every keystroke
         self._search_timer.timeout.connect(self._apply_search)
         self.search.textChanged.connect(lambda _text: self._search_timer.start())
-        self.search_kind.currentIndexChanged.connect(lambda _i: self._search_timer.start())
+        self.search_kind.currentIndexChanged.connect(
+            lambda _i: self._search_timer.start()
+        )
         header.addWidget(self.files_title, 1)
         header.addWidget(self.search)
         header.addWidget(self.search_kind)
@@ -243,7 +299,12 @@ class MainWindow(QMainWindow):
         # The right-hand header row is as tall as its tallest widget (the search box, filter and buttons); give the
         # left title the same height (the text stays vertically centred) so the tree and the file table start at
         # the same y.
-        self.disks_title.setMinimumHeight(max(w.sizeHint().height() for w in (self.export_btn, self.search, self.search_kind)))
+        self.disks_title.setMinimumHeight(
+            max(
+                w.sizeHint().height()
+                for w in (self.export_btn, self.search, self.search_kind)
+            )
+        )
         tv.addWidget(self.table)
         self.preview = PreviewPanel()
         self.preview.hide()  # appears when a single sample is selected
@@ -252,8 +313,13 @@ class MainWindow(QMainWindow):
         space = QShortcut(QKeySequence(Qt.Key.Key_Space), self.table)
         space.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         space.activated.connect(self.preview.toggle)
-        self.table.itemActivated.connect(lambda _item: self._activate_result())  # double-click or Enter
-        for widget in (self.table, self.tree):  # F2 and Delete work where the thing to rename or delete is
+        self.table.itemActivated.connect(
+            lambda _item: self._activate_result()
+        )  # double-click or Enter
+        for widget in (
+            self.table,
+            self.tree,
+        ):  # F2 and Delete work where the thing to rename or delete is
             rename_key = QShortcut(QKeySequence(Qt.Key.Key_F2), widget)
             rename_key.setContext(Qt.ShortcutContext.WidgetShortcut)
             rename_key.activated.connect(self._rename_focused)
@@ -306,19 +372,51 @@ class MainWindow(QMainWindow):
         empty = QWidget()
         ev = QVBoxLayout(empty)
         ev.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label = QLabel("Open an Akai disk image to get started")
+        self.empty_logo = QLabel(LOGO.strip("\n"))
+        self.empty_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # (a stylesheet beats setFont, and the app's gives every label a pixel size and no fixed-width family)
+        self.empty_logo.setStyleSheet(
+            f"font-family: '{monospace_family()}'; font-size: 13pt;"
+        )
+        label = QLabel("Open or create a new Akai disk image to get started")
         label.setObjectName("emptyState")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint = QLabel("or drop image files onto this window")
         hint.setObjectName("mutedLabel")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        open_btn = QPushButton("Open Disk Image…")
-        open_btn.clicked.connect(self.open_dialog)
+        self.open_btn = QPushButton("Open Disk Image…")
+        self.open_btn.clicked.connect(self.open_dialog)
+        self.new_btn = QPushButton("New Disk Image…")
+        self.new_btn.setToolTip("Make a new, empty disk image: a floppy or a hard disk")
+        self.new_btn.clicked.connect(self._new_image)
+        buttons = QHBoxLayout()
+        buttons.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        buttons.addWidget(self.open_btn)
+        buttons.addWidget(self.new_btn)
+        # quiet links along the bottom edge, so they don't compete with the two buttons that matter
+        self.help_btn = QPushButton("User Manual")
+        self.help_btn.setToolTip("Open the user manual")
+        self.help_btn.clicked.connect(lambda: show_manual_dialog(self))
+        self.about_btn = QPushButton("About")
+        self.about_btn.setToolTip("About akaiutil-GUI")
+        self.about_btn.clicked.connect(self._about)
+        footer = QHBoxLayout()
+        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        for button in (self.help_btn, self.about_btn):
+            button.setFlat(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setObjectName("linkButton")
+            footer.addWidget(button)
+        ev.addStretch(3)
+        ev.addWidget(self.empty_logo)
+        ev.addSpacing(28)
         ev.addWidget(label)
         ev.addSpacing(8)
-        ev.addWidget(open_btn, 0, Qt.AlignmentFlag.AlignCenter)
+        ev.addLayout(buttons)
         ev.addSpacing(8)
         ev.addWidget(hint)
+        ev.addStretch(4)
+        ev.addLayout(footer)
 
         self.stack = QStackedWidget()
         self.stack.addWidget(empty)
@@ -346,9 +444,15 @@ class MainWindow(QMainWindow):
         self.busy_bar.hide()
         self.mode_label = QLabel("Read-only")
         self.mode_label.setObjectName("modeLabel")
-        self.statusBar().setSizeGripEnabled(False)  # the corner square; macOS windows have no grip
+        self.statusBar().setSizeGripEnabled(
+            False
+        )  # the corner square; macOS windows have no grip
         self.statusBar().addPermanentWidget(self.busy_bar)
         self.statusBar().addPermanentWidget(self.mode_label)
+        self.version_label = QLabel(f"Version {__version__}")  # (bottom left, on the start screen only)
+        self.version_label.setObjectName("mutedLabel")
+        self.statusBar().addWidget(self.version_label)
+        self._sync_status_labels()
 
     def _title(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -359,13 +463,28 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
 
         file_menu = mb.addMenu("&File")
-        self.act_open = self._action("&Open Disk Image…", self.open_dialog, QKeySequence.StandardKey.Open)
-        self.act_add = self._action("&Add Disk Image…", self.add_dialog, QKeySequence("Ctrl+Shift+O"))
-        self.act_close_disk = self._action("Close &Disk Image", self._close_selected_disk, QKeySequence("Ctrl+Shift+W"))
-        self.act_close = self._action("Close All &Images", self.close_images, QKeySequence("Ctrl+W"))
-        self.act_export = self._action("&Export…", lambda: self._export(False), QKeySequence("Ctrl+E"))
-        self.act_export_wav = self._action("Export as &WAV…", lambda: self._export(True), QKeySequence("Ctrl+Shift+E"))
-        self.act_new_image = self._action("&New Disk Image…", self._new_image, QKeySequence.StandardKey.New)
+        self.act_open = self._action(
+            "&Open Disk Image…", self.open_dialog, QKeySequence.StandardKey.Open
+        )
+        self.act_add = self._action(
+            "&Add Disk Image…", self.add_dialog, QKeySequence("Ctrl+Shift+O")
+        )
+        self.act_close_disk = self._action(
+            "Close &Disk Image", self._close_selected_disk, QKeySequence("Ctrl+Shift+W")
+        )
+        self.act_close = self._action(
+            "Close All &Images", self.close_images, QKeySequence("Ctrl+W")
+        )
+        self.act_revert = self._action("Revert to &Backup…", self._revert)
+        self.act_export = self._action(
+            "&Export…", lambda: self._export(False), QKeySequence("Ctrl+E")
+        )
+        self.act_export_wav = self._action(
+            "Export as &WAV…", lambda: self._export(True), QKeySequence("Ctrl+Shift+E")
+        )
+        self.act_new_image = self._action(
+            "&New Disk Image…", self._new_image, QKeySequence.StandardKey.New
+        )
         act_quit = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
         act_quit.setMenuRole(QAction.MenuRole.QuitRole)
         file_menu.addActions([self.act_new_image, self.act_open, self.act_add])
@@ -374,30 +493,58 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addActions([self.act_export, self.act_export_wav])
         file_menu.addSeparator()
-        settings_action = self._action("&Settings…", self._open_settings, QKeySequence.StandardKey.Preferences)
-        settings_action.setMenuRole(QAction.MenuRole.PreferencesRole)  # macOS moves it to the app menu
+        file_menu.addAction(self.act_revert)
+        file_menu.addSeparator()
+        settings_action = self._action(
+            "&Settings…", self._open_settings, QKeySequence.StandardKey.Preferences
+        )
+        settings_action.setMenuRole(
+            QAction.MenuRole.PreferencesRole
+        )  # macOS moves it to the app menu
         file_menu.addAction(settings_action)
         file_menu.addSeparator()
         file_menu.addAction(act_quit)
 
         self.edit_menu = mb.addMenu("&Edit")
         self.act_allow_edit = QAction("Allow &Editing", self, checkable=True)
-        self.act_allow_edit.setToolTip("Let the app change the disk images (rename, delete, create). Off: they are only read.")
+        self.act_allow_edit.setToolTip(
+            "Let the app change the disk images (rename, delete, create). Off: they are only read."
+        )
         self.act_allow_edit.triggered.connect(self._toggle_editing)
         self.act_new_volume = self._action("New &Volume…", self._new_volume)
         self.act_rename = self._action("&Rename…", self._rename_focused)
         self.act_delete = self._action("&Delete…", self._delete_focused)
-        self.act_copy = self._action("&Copy Files", lambda: self._copy_selection("copy"), QKeySequence.StandardKey.Copy)
-        self.act_cut = self._action("Cu&t Files", lambda: self._copy_selection("cut"), QKeySequence.StandardKey.Cut)
-        self.act_paste = self._action("&Paste Files", self._paste, QKeySequence.StandardKey.Paste)
-        self.act_import = self._action("&Import Files…", self._import_dialog, QKeySequence("Ctrl+I"))
+        self.act_copy = self._action(
+            "&Copy Files",
+            lambda: self._copy_selection("copy"),
+            QKeySequence.StandardKey.Copy,
+        )
+        self.act_cut = self._action(
+            "Cu&t Files",
+            lambda: self._copy_selection("cut"),
+            QKeySequence.StandardKey.Cut,
+        )
+        self.act_paste = self._action(
+            "&Paste Files", self._paste, QKeySequence.StandardKey.Paste
+        )
+        self.act_import = self._action(
+            "&Import Files…", self._import_dialog, QKeySequence("Ctrl+I")
+        )
         self.act_sort = self._action("&Sort Files by Name…", self._sort_volume)
         self.act_format = self._action("&Format Disk…", self._format_disk)
         self.edit_menu.addAction(self.act_allow_edit)
         self.edit_menu.addSeparator()
         self.edit_menu.addActions([self.act_copy, self.act_cut, self.act_paste])
         self.edit_menu.addSeparator()
-        self.edit_menu.addActions([self.act_new_volume, self.act_import, self.act_sort, self.act_rename, self.act_delete])
+        self.edit_menu.addActions(
+            [
+                self.act_new_volume,
+                self.act_import,
+                self.act_sort,
+                self.act_rename,
+                self.act_delete,
+            ]
+        )
         self.edit_menu.addSeparator()
         self.edit_menu.addAction(self.act_format)
         self.edit_menu.aboutToShow.connect(self._update_edit_actions)
@@ -424,13 +571,24 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self._action("Locate &akaiutil…", self.locate_binary))
 
         help_menu = mb.addMenu("&Help")
-        self.act_manual = self._action("&User Manual…", lambda: show_manual_dialog(self), QKeySequence.StandardKey.HelpContents)
+        self.act_manual = self._action(
+            "&User Manual…",
+            lambda: show_manual_dialog(self),
+            QKeySequence.StandardKey.HelpContents,
+        )
         help_menu.addAction(self.act_manual)
         help_menu.addSeparator()
         about = self._action("&About akaiutil-GUI…", self._about)
         about.setMenuRole(QAction.MenuRole.AboutRole)  # macOS moves it to the app menu
         help_menu.addAction(about)
-        help_menu.addAction(self._action("Check for &Updates…", lambda: self._update_runner.start(manual=True)))
+        help_menu.addSeparator()
+        self.act_show_log = self._action("Show &Log File", lambda: reveal.show_log_file())
+        help_menu.addAction(self.act_show_log)
+        help_menu.addAction(
+            self._action(
+                "Check for &Updates…", lambda: self._update_runner.start(manual=True)
+            )
+        )
 
     def _action(self, text, slot, shortcut=None) -> QAction:
         act = QAction(text, self)
@@ -442,11 +600,16 @@ class MainWindow(QMainWindow):
     def _update_actions(self) -> None:
         has_images = bool(self._images)
         rows = self.table.selected_rows()
-        can_export = bool(rows) and all(v is not None for v, _ in rows) and self._pending == 0
+        can_export = (
+            bool(rows) and all(v is not None for v, _ in rows) and self._pending == 0
+        )
         can_wav = can_export and any(f.is_sample for _, f in rows)
         self.act_close.setEnabled(has_images)
         self.act_add.setEnabled(True)
-        self.act_close_disk.setEnabled(has_images and self._selected_disk() is not None and self._writing == 0)
+        self.act_revert.setEnabled(has_images and self._writing == 0)
+        self.act_close_disk.setEnabled(
+            has_images and self._selected_disk() is not None and self._writing == 0
+        )
         self.search.setEnabled(has_images)
         self.search_kind.setEnabled(has_images)
         for w in (self.act_export, self.export_btn):
@@ -459,18 +622,27 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- opening
     def open_dialog(self) -> None:
         start = settings.get_last_dir("open") or str(Path.home())
-        paths, _ = QFileDialog.getOpenFileNames(self, "Open disk image(s)", start, IMAGE_FILTER)
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Open disk image(s)", start, IMAGE_FILTER
+        )
         if paths:
             settings.set_last_dir("open", str(Path(paths[0]).parent))
             self.open_images(paths)
 
-    def open_images(self, paths: list[str], writable: bool = False, select: tuple[int, str | None, int | None] | None = None) -> None:
+    def open_images(
+        self,
+        paths: list[str],
+        writable: bool = False,
+        select: tuple[int, str | None, int | None] | None = None,
+    ) -> None:
         """Open these disk images (replacing whatever is open). Read-only unless `writable` and every file allows it.
         `select` is a (disk, partition, volume number) to land on instead of the first disk."""
         binary = find_akaiutil(settings.get_akaiutil_path())
         if binary is None:
             # first run: offer to get akaiutil, then carry on with what the user asked for
-            self._set_up_akaiutil(then=lambda: self.open_images(paths, writable, select))
+            self._set_up_akaiutil(
+                then=lambda: self.open_images(paths, writable, select)
+            )
             return
         if self._engine is not None:
             self._engine.close()
@@ -484,7 +656,14 @@ class MainWindow(QMainWindow):
         if writable:
             locked = [Path(p).name for p in self._images if not os.access(p, os.W_OK)]
             if locked:
-                writable, note = False, f"Editing is off: {', '.join(locked)} can't be written to."
+                writable, note = (
+                    False,
+                    f"Editing is off: {', '.join(locked)} can't be written to.",
+                )
+        if writable:
+            unbacked = [Path(p).name for p in self._images if str(Path(p).resolve()) not in self._backup_handled]
+            if unbacked:  # (a new image joins while editing is on: it gets its backup question when editing is switched on again)
+                writable, note = False, f"Editing is off: switch it on to be asked about a backup of {', '.join(unbacked)}."
         engine = self._engine
         self.statusBar().showMessage("Opening…")
         self._run(
@@ -497,21 +676,31 @@ class MainWindow(QMainWindow):
         if engine is not self._engine:
             return  # superseded by a newer open
         self._writable = engine.is_writable
+        log.info("opened %s (%s)", ", ".join(self._images), "editing" if self._writable else "read-only")
         m = re.search(r"Rev\.\s*([\w.]+)", banner)
         names = ", ".join(Path(p).name for p in self._images)
         self.setWindowTitle(f"{names} — akaiutil-gui")
         message = f"Opened {names}  ·  akaiutil {m.group(1) if m else '?'}  ·  {self._engine_binary}"
         # akaiutil reports unreadable/unformatted disks only in its start-up chatter
-        problems = [ln.strip() for ln in banner.splitlines() if re.search(r"invalid format|cannot|error", ln, re.I)]
+        problems = [
+            ln.strip()
+            for ln in banner.splitlines()
+            if re.search(r"invalid format|cannot|error", ln, re.I)
+        ]
         if problems:
             message = f"⚠ {problems[0]}  ·  {message}"
         if note:
             message = f"{note}  ·  {message}"
         self.statusBar().showMessage(message)
-        self._disk_files = {int(n): path for n, path in re.findall(r'^disk(\d+): "(.*)"$', banner, re.M)}
+        self._disk_files = {
+            int(n): path for n, path in re.findall(r'^disk(\d+): "(.*)"$', banner, re.M)
+        }
         if not self._disk_files:  # (akaiutil numbers them in the order they were given)
-            self._disk_files = {i: str(Path(p).resolve()) for i, p in enumerate(self._images)}
+            self._disk_files = {
+                i: str(Path(p).resolve()) for i, p in enumerate(self._images)
+            }
         self.stack.setCurrentIndex(1)
+        self._sync_status_labels()
         select, self._open_select = self._open_select, None
         self.tree.load(engine, select=select, files=self._disk_files)
         self._update_actions()
@@ -519,7 +708,9 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------- adding and closing single disks
     def add_dialog(self) -> None:
         start = settings.get_last_dir("open") or str(Path.home())
-        paths, _ = QFileDialog.getOpenFileNames(self, "Add disk image(s)", start, IMAGE_FILTER)
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Add disk image(s)", start, IMAGE_FILTER
+        )
         if paths:
             settings.set_last_dir("open", str(Path(paths[0]).parent))
             self.add_images(paths)
@@ -542,7 +733,29 @@ class MainWindow(QMainWindow):
             return
         if self._busy():
             return
-        self._reopen([*self._images, *new])
+        everything = [*self._images, *new]
+        need = [str(Path(p).resolve()) for p in new if str(Path(p).resolve()) not in self._backup_handled] if self._writable else []
+        if not need:
+            self._reopen(everything)
+            return
+        # editing is on, so the new image can be changed straight away: ask about its backup now, as when editing was switched on
+        answer = edit_dialogs.confirm(
+            self,
+            "Back up the new image?",
+            "Editing is on, so this image can be changed as soon as it is open.",
+            "There is no undo. Back it up first? The backup is kept in the app's folder, and File > Revert to Backup… puts it back.",
+            action="Back Up and Add",
+            other_action="Add Without a Backup",
+            details_lines=[Path(p).name for p in need],
+            default_is_action=True,
+        )
+        if not answer:
+            return
+        if answer is edit_dialogs.OTHER:
+            self._backup_handled.update(need)
+            self._reopen(everything)
+        else:
+            self._backup_images(need, lambda: self._reopen(everything))
 
     def _reopen(self, paths: list[str], disk_map=None) -> None:
         """Restart on another set of images, keeping the editing mode and the selection (`disk_map` says what number the
@@ -553,8 +766,18 @@ class MainWindow(QMainWindow):
             old = obj.index if isinstance(obj, Disk) else obj.disk
             new = disk_map(old) if disk_map is not None else old
             if new is not None:
-                partition = None if isinstance(obj, Disk) else obj.name if isinstance(obj, Partition) else obj.partition
-                select = (new, partition, obj.index if isinstance(obj, Volume) else None)
+                partition = (
+                    None
+                    if isinstance(obj, Disk)
+                    else obj.name
+                    if isinstance(obj, Partition)
+                    else obj.partition
+                )
+                select = (
+                    new,
+                    partition,
+                    obj.index if isinstance(obj, Volume) else None,
+                )
         self.open_images(paths, writable=self._writable, select=select)
 
     def _close_selected_disk(self) -> None:
@@ -568,19 +791,25 @@ class MainWindow(QMainWindow):
             return
         path = self._disk_files.get(disk.index)
         if path is not None:
-            remaining = [p for p in self._images if Path(p).resolve() != Path(path).resolve()]
+            remaining = [
+                p for p in self._images if Path(p).resolve() != Path(path).resolve()
+            ]
         else:
             remaining = [p for i, p in enumerate(self._images) if i != disk.index]
         if not remaining:
             self.close_images()
             return
         gone = disk.index
-        self._reopen(remaining, disk_map=lambda old: None if old == gone else old - (old > gone))
+        self._reopen(
+            remaining, disk_map=lambda old: None if old == gone else old - (old > gone)
+        )
 
     def _reveal_disk(self, disk: Disk) -> None:
         path = self.tree.disk_path(disk.index)
         if path is not None and not reveal.reveal(path):
-            self.statusBar().showMessage(f"Couldn't open the folder of {Path(path).name}.", 6000)
+            self.statusBar().showMessage(
+                f"Couldn't open the folder of {Path(path).name}.", 6000
+            )
 
     def _open_failed(self, message: str) -> None:
         self.close_images()
@@ -595,6 +824,7 @@ class MainWindow(QMainWindow):
         self._writable = False
         self._reset_views()
         self.stack.setCurrentIndex(0)
+        self._sync_status_labels()
         self.setWindowTitle("akaiutil-gui")
         self.statusBar().clearMessage()
         self._update_actions()
@@ -638,24 +868,36 @@ class MainWindow(QMainWindow):
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle("Set up akaiutil")
-        box.setText("akaiutil-gui needs the akaiutil program to read disk images, and it isn't installed yet.")
+        box.setText(
+            "akaiutil-gui needs the akaiutil program to read disk images, and it isn't installed yet."
+        )
         box.setInformativeText(
             f"It can {fetch.describe_plan()}. The download is checked against a known checksum before it is used, "
             "and nothing else on your system is changed.\n\nOr, if you already have akaiutil, point the app at it."
         )
         looked = "\n".join(str(c) for c in candidates(settings.get_akaiutil_path()))
         box.setDetailedText(f"Looked for akaiutil in:\n{looked}")
-        download = box.addButton("Download and set up", QMessageBox.ButtonRole.AcceptRole)
+        download = box.addButton(
+            "Download and set up", QMessageBox.ButtonRole.AcceptRole
+        )
         locate = box.addButton("Locate existing…", QMessageBox.ButtonRole.ActionRole)
         box.addButton(QMessageBox.StandardButton.Cancel)
         box.setDefaultButton(download)
         box.exec()
         clicked = box.clickedButton()
-        return "download" if clicked is download else "locate" if clicked is locate else "cancel"
+        return (
+            "download"
+            if clicked is download
+            else "locate"
+            if clicked is locate
+            else "cancel"
+        )
 
     def _download_akaiutil(self, then) -> None:
         relay = _ProgressRelay(self)
-        dialog = QProgressDialog("Starting…", "", 0, 0, self)  # 0, 0: an indeterminate bar
+        dialog = QProgressDialog(
+            "Starting…", "", 0, 0, self
+        )  # 0, 0: an indeterminate bar
         dialog.setWindowTitle("Setting up akaiutil")
         dialog.setCancelButton(None)
         dialog.setWindowModality(Qt.WindowModality.WindowModal)
@@ -673,8 +915,12 @@ class MainWindow(QMainWindow):
 
         def done(path: Path) -> None:
             finish()
-            settings.set_akaiutil_path(str(path))  # remembered, so this only ever happens once
-            self.statusBar().showMessage(f"akaiutil {fetch.VERSION} is ready ({path})", 8000)
+            settings.set_akaiutil_path(
+                str(path)
+            )  # remembered, so this only ever happens once
+            self.statusBar().showMessage(
+                f"akaiutil {fetch.VERSION} is ready ({path})", 8000
+            )
             then()
 
         def failed(message: str) -> None:
@@ -695,7 +941,9 @@ class MainWindow(QMainWindow):
         settings.set_akaiutil_path(path)
         found = find_akaiutil(path)
         if found is None:
-            QMessageBox.warning(self, "Not executable", f"{path} isn't an executable file.")
+            QMessageBox.warning(
+                self, "Not executable", f"{path} isn't an executable file."
+            )
             return None
         self.statusBar().showMessage(f"Using akaiutil at {found}", 5000)
         return found
@@ -725,7 +973,9 @@ class MainWindow(QMainWindow):
         epoch = self._usage_epoch.get(disk.index, 0)
 
         def done(usage: DiskUsage) -> None:
-            if engine is not self._engine or epoch != self._usage_epoch.get(disk.index, 0):
+            if engine is not self._engine or epoch != self._usage_epoch.get(
+                disk.index, 0
+            ):
                 return  # the image was closed or replaced meanwhile, or the disk was edited since this was asked
             self._usage_cache[disk.index] = usage
             self._rebuild_catalog()
@@ -744,7 +994,11 @@ class MainWindow(QMainWindow):
         """Space bar under the tree: the whole disk, or the partition that was selected."""
         self._usage_token += 1
         token = self._usage_token
-        disk = self.tree.disk(obj.index if isinstance(obj, Disk) else obj.disk) if obj is not None else None
+        disk = (
+            self.tree.disk(obj.index if isinstance(obj, Disk) else obj.disk)
+            if obj is not None
+            else None
+        )
         if self._engine is None or disk is None:
             self.usage.clear()
             return
@@ -755,7 +1009,9 @@ class MainWindow(QMainWindow):
             if isinstance(obj, Disk):
                 self.usage.show_disk(usage)
             else:
-                self.usage.show_partition(usage, obj.name if isinstance(obj, Partition) else obj.partition)
+                self.usage.show_partition(
+                    usage, obj.name if isinstance(obj, Partition) else obj.partition
+                )
 
         if disk.index not in self._usage_cache:
             self.usage.show_loading()
@@ -763,20 +1019,30 @@ class MainWindow(QMainWindow):
 
     # ----------------------------------------------------------------- search
     def _searching(self) -> bool:
-        return bool(self.search.text().strip()) or self.search_kind.currentData() != search.ALL
+        return (
+            bool(self.search.text().strip())
+            or self.search_kind.currentData() != search.ALL
+        )
 
     def _reset_search_ui(self) -> None:
         """Clear the search box and type filter without reacting to it."""
         self._search_timer.stop()
         self._in_results = False
-        for widget, clear in ((self.search, lambda: self.search.clear()), (self.search_kind, lambda: self.search_kind.setCurrentIndex(0))):
+        for widget, clear in (
+            (self.search, lambda: self.search.clear()),
+            (self.search_kind, lambda: self.search_kind.setCurrentIndex(0)),
+        ):
             widget.blockSignals(True)
             clear()
             widget.blockSignals(False)
         self.files_title.setText(self._files_title_text)
 
     def _rebuild_catalog(self) -> None:
-        self._catalog = [entry for index in sorted(self._usage_cache) for entry in self._usage_cache[index].catalog]
+        self._catalog = [
+            entry
+            for index in sorted(self._usage_cache)
+            for entry in self._usage_cache[index].catalog
+        ]
         if self._searching():
             self._apply_search()  # the index just grew: results may have too
 
@@ -803,12 +1069,21 @@ class MainWindow(QMainWindow):
             self.files_title.setText("Indexing the disks…")
             return
         query = self.search.text().strip()
-        results, truncated = search.filter_catalog(self._catalog, query, self.search_kind.currentData())
+        results, truncated = search.filter_catalog(
+            self._catalog, query, self.search_kind.currentData()
+        )
         self._in_results = True
         self.table.set_results(results)
         what = f"“{query}”" if query else self.search_kind.currentText().lower()
         title = f"{len(results):,}{'+' if truncated else ''} result{'s' if len(results) != 1 else ''} for {what}"
-        self.files_title.setText(title + (f"  ·  showing the first {len(results):,}, narrow the search" if truncated else ""))
+        self.files_title.setText(
+            title
+            + (
+                f"  ·  showing the first {len(results):,}, narrow the search"
+                if truncated
+                else ""
+            )
+        )
         self._update_actions()
 
     def _leave_search(self) -> None:
@@ -839,7 +1114,11 @@ class MainWindow(QMainWindow):
         self.search_kind.blockSignals(True)
         self.search_kind.setCurrentIndex(0)
         self.search_kind.blockSignals(False)
-        if current is not None and (current.disk, current.partition, current.index) == (vol.disk, vol.partition, vol.index):
+        if current is not None and (current.disk, current.partition, current.index) == (
+            vol.disk,
+            vol.partition,
+            vol.index,
+        ):
             self._leave_search()  # already the selected volume: just put its files back and pick the file
         else:
             self._in_results = False  # the tree selection below loads the volume (and ends the search state)
@@ -864,23 +1143,37 @@ class MainWindow(QMainWindow):
         if isinstance(obj, Volume):
             self._set_files_title(f"Files in {obj.path}")
             token = self._files_token
-            self._run(lambda: engine.list_files(obj), lambda files: self._files_loaded(token, files))
+            self._run(
+                lambda: engine.list_files(obj),
+                lambda files: self._files_loaded(token, files),
+            )
             disk = self.tree.disk(obj.disk)
-            cached = self._usage_cache.get(obj.disk)  # filled for the usage bar; else it's one quick listing
+            cached = self._usage_cache.get(
+                obj.disk
+            )  # filled for the usage bar; else it's one quick listing
 
             def volume_details(text: str) -> describe.Details:
-                usage = cached or (engine.disk_usage(disk) if disk is not None else None)
+                usage = cached or (
+                    engine.disk_usage(disk) if disk is not None else None
+                )
                 return describe.describe_volume(text, usage)
 
-            self._show_info(lambda: engine.volume_info(obj), volume_details, remember=True)
+            self._show_info(
+                lambda: engine.volume_info(obj), volume_details, remember=True
+            )
         elif isinstance(obj, Partition):
             self._set_files_title("Select a volume to see its files")
             if obj.is_dd:
                 self._show_info(
-                    lambda: engine.list_takes_text(obj), lambda t: describe.describe_takes(f"Direct-to-disk area {obj.name}", t)
+                    lambda: engine.list_takes_text(obj),
+                    lambda t: describe.describe_takes(
+                        f"Direct-to-disk area {obj.name}", t
+                    ),
                 )
             else:
-                self._show_info(lambda: engine.partition_info(obj), describe.describe_partition)
+                self._show_info(
+                    lambda: engine.partition_info(obj), describe.describe_partition
+                )
         elif isinstance(obj, Disk):
             self._set_files_title("Select a volume to see its files")
             self._show_info(lambda: engine.disk_info(obj), describe.describe_disk)
@@ -895,7 +1188,9 @@ class MainWindow(QMainWindow):
         n = len(files)
         total = human_size(sum(f.size for f in files))
         if time.monotonic() >= self._status_hold:
-            self.statusBar().showMessage(f"{n} file{'s' if n != 1 else ''}, {total}", 8000)
+            self.statusBar().showMessage(
+                f"{n} file{'s' if n != 1 else ''}, {total}", 8000
+            )
         self._select_pending_file()
         self._update_actions()
 
@@ -904,7 +1199,11 @@ class MainWindow(QMainWindow):
         if self._pending_reveal is None or self._in_results:
             return
         vol, file_index = self._pending_reveal
-        if self._volume is not None and (self._volume.disk, self._volume.partition, self._volume.index) == (vol.disk, vol.partition, vol.index):
+        if self._volume is not None and (
+            self._volume.disk,
+            self._volume.partition,
+            self._volume.index,
+        ) == (vol.disk, vol.partition, vol.index):
             self._pending_reveal = None
             self.table.select_file(self._volume, file_index)
 
@@ -918,7 +1217,12 @@ class MainWindow(QMainWindow):
         self._preview_token += 1
         self.preview.stop()
         engine = self._engine
-        if engine is None or len(rows) != 1 or rows[0][0] is None or not rows[0][1].is_sample:
+        if (
+            engine is None
+            or len(rows) != 1
+            or rows[0][0] is None
+            or not rows[0][1].is_sample
+        ):
             self.preview.clear()
             self.preview.hide()
             return
@@ -977,10 +1281,14 @@ class MainWindow(QMainWindow):
         elif len(rows) > 1:
             self._info_current = 0
             self.info.show_details(describe.describe_selection([f for _, f in rows]))
-        elif self._in_results:  # a search with nothing selected: there is no volume to fall back to
+        elif (
+            self._in_results
+        ):  # a search with nothing selected: there is no volume to fall back to
             self._info_current = 0
             self.info.show_details(None)
-        elif self._volume_details is not None:  # nothing selected: back to the volume's own details
+        elif (
+            self._volume_details is not None
+        ):  # nothing selected: back to the volume's own details
             self._info_current = 0
             self.info.show_details(self._volume_details)
         elif self._volume is not None:
@@ -1012,7 +1320,9 @@ class MainWindow(QMainWindow):
         if as_wav:
             rows = [(v, f) for v, f in rows if f.is_sample]
             if not rows:
-                QMessageBox.information(self, "Export as WAV", "None of the selected files are samples.")
+                QMessageBox.information(
+                    self, "Export as WAV", "None of the selected files are samples."
+                )
                 return
         dest = self._export_destination()
         if not dest:
@@ -1020,7 +1330,9 @@ class MainWindow(QMainWindow):
 
         groups: dict[tuple, tuple[Volume, list[FileEntry]]] = {}
         for vol, f in rows:
-            groups.setdefault((vol.disk, vol.partition, vol.index), (vol, []))[1].append(f)
+            groups.setdefault((vol.disk, vol.partition, vol.index), (vol, []))[
+                1
+            ].append(f)
         several_volumes = len(groups) > 1
         several_disks = len({k[0] for k in groups}) > 1
         asker = _OverwriteAsker(self)
@@ -1030,9 +1342,15 @@ class MainWindow(QMainWindow):
             merged = ExportResult()
             for vol, files in groups.values():
                 # files from several volumes get a folder each, so same-named files can't overwrite each other
-                target = Path(dest) / export_folder_name(vol, several_disks) if several_volumes else Path(dest)
+                target = (
+                    Path(dest) / export_folder_name(vol, several_disks)
+                    if several_volumes
+                    else Path(dest)
+                )
                 target.mkdir(parents=True, exist_ok=True)
-                res = engine.export_files(vol, files, target, as_wav, confirm_overwrite=asker.ask)
+                res = engine.export_files(
+                    vol, files, target, as_wav, confirm_overwrite=asker.ask
+                )
                 merged.exported += res.exported
                 merged.skipped += res.skipped
                 merged.failed += res.failed
@@ -1059,7 +1377,9 @@ class MainWindow(QMainWindow):
                     continue
                 target = Path(dest) / export_folder_name(vol, False)
                 target.mkdir(parents=True, exist_ok=True)
-                res = engine.export_files(vol, samples, target, True, confirm_overwrite=asker.ask)
+                res = engine.export_files(
+                    vol, samples, target, True, confirm_overwrite=asker.ask
+                )
                 merged.exported += res.exported
                 merged.skipped += res.skipped
                 merged.failed += res.failed
@@ -1067,7 +1387,9 @@ class MainWindow(QMainWindow):
 
         def done(res: ExportResult) -> None:
             if not (res.exported or res.skipped or res.failed):
-                self.statusBar().showMessage("There are no samples to export there.", 8000)
+                self.statusBar().showMessage(
+                    "There are no samples to export there.", 8000
+                )
                 return
             self._export_done(res, dest)
 
@@ -1078,7 +1400,9 @@ class MainWindow(QMainWindow):
         """The volumes inside a tree item (a volume is itself), leaving out direct-to-disk recording partitions."""
         if isinstance(obj, Volume):
             return [obj]
-        partitions = [obj] if isinstance(obj, Partition) else engine.list_partitions(obj)
+        partitions = (
+            [obj] if isinstance(obj, Partition) else engine.list_partitions(obj)
+        )
         return [v for p in partitions if not p.is_dd for v in engine.list_volumes(p)]
 
     def _export_destination(self) -> str | None:
@@ -1088,8 +1412,15 @@ class MainWindow(QMainWindow):
         if default and not settings.get_ask_export_folder():
             if Path(default).is_dir():
                 return default
-            self.statusBar().showMessage(f"The default export folder {default} doesn't exist; choose another.", 8000)
-        start = default if default and Path(default).is_dir() else settings.get_last_dir("export") or str(Path.home())
+            self.statusBar().showMessage(
+                f"The default export folder {default} doesn't exist; choose another.",
+                8000,
+            )
+        start = (
+            default
+            if default and Path(default).is_dir()
+            else settings.get_last_dir("export") or str(Path.home())
+        )
         dest = QFileDialog.getExistingDirectory(self, "Export to folder", start)
         if dest:
             settings.set_last_dir("export", dest)
@@ -1103,13 +1434,27 @@ class MainWindow(QMainWindow):
             parts.append(f"{len(res.failed)} failed")
         self.statusBar().showMessage("  ·  ".join(parts), 10000)
         if res.failed or res.skipped:
-            lines = [f"Skipped (already exists): {p}" for p in res.skipped] + [f"Failed: {m}" for m in res.failed]
-            box = QMessageBox(QMessageBox.Icon.Warning if res.failed else QMessageBox.Icon.Information,
-                              "Export finished", "  ·  ".join(parts), parent=self)
+            lines = [f"Skipped (already exists): {p}" for p in res.skipped] + [
+                f"Failed: {m}" for m in res.failed
+            ]
+            box = QMessageBox(
+                QMessageBox.Icon.Warning
+                if res.failed
+                else QMessageBox.Icon.Information,
+                "Export finished",
+                "  ·  ".join(parts),
+                parent=self,
+            )
             box.setDetailedText("\n".join(lines))
             box.exec()
 
     # -------------------------------------------------------------- editing
+    def _sync_status_labels(self) -> None:
+        """Read-only / Editing means nothing until an image is open, and the version is only worth a corner of the start screen."""
+        browsing = self.stack.currentIndex() == 1
+        self.mode_label.setVisible(browsing)
+        self.version_label.setVisible(not browsing)
+
     def _sync_mode(self) -> None:
         """The status bar's Read-only / Editing label and the Allow Editing tick."""
         self.mode_label.setText("Editing" if self._writable else "Read-only")
@@ -1145,10 +1490,35 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Can't edit this image",
-                "These files can't be written to, so they can't be edited:\n\n" + "\n".join(locked)
+                "These files can't be written to, so they can't be edited:\n\n"
+                + "\n".join(locked)
                 + "\n\nChange their permissions (or copy them somewhere writable) and open them again.",
             )
             self._sync_mode()
+            return
+        need = [str(Path(p).resolve()) for p in self._images if str(Path(p).resolve()) not in self._backup_handled]
+        if need:
+            sizes = [(Path(p), Path(p).stat().st_size) for p in need if Path(p).exists()]
+            total = sum(size for _, size in sizes) / 2**20
+            answer = edit_dialogs.confirm(
+                self,
+                "Allow editing?",
+                "Editing changes the disk image files themselves.",
+                f"There is no undo. Back up {'this image' if len(sizes) == 1 else f'these {len(sizes)} images'} first ({total:.0f} MB)? "
+                "The backups are kept in the app's folder, and File > Revert to Backup… puts one back.",
+                action="Back Up and Allow Editing",
+                other_action="Allow Editing Without a Backup",
+                details_lines=[f"{p.name}  ·  {size / 2**20:.1f} MB" for p, size in sizes],
+                default_is_action=True,
+            )
+            if not answer:
+                self._sync_mode()
+                return
+            if answer is edit_dialogs.OTHER:
+                self._backup_handled.update(need)
+                self._set_editing(True, then)
+            else:
+                self._backup_images(need, lambda: self._set_editing(True, then))
             return
         if not edit_dialogs.confirm(
             self,
@@ -1161,6 +1531,78 @@ class MainWindow(QMainWindow):
             return
         self._set_editing(True, then)
 
+    def _backup_images(self, paths: list[str], then) -> None:
+        """Copy images into the backup folder (on a worker thread), then carry on with `then`."""
+        root = backup.default_root()
+        self.statusBar().showMessage(f"Backing up {len(paths)} image{'s' if len(paths) != 1 else ''}…")
+
+        def work() -> list[backup.Backup]:
+            return [backup.make_backup(root, p) for p in paths]
+
+        def done(made: list[backup.Backup]) -> None:
+            for b in made:
+                log.info("backed up %s as %s (%.0f MB)", b.image, b.path, b.size / 2**20)
+            self._backup_handled.update(paths)
+            self.statusBar().showMessage(f"Backed up {', '.join(Path(p).name for p in paths)}.", 6000)
+            then()
+
+        def failed(message: str) -> None:
+            QMessageBox.critical(self, "Couldn't back up", f"{message}\n\nEditing is still off.")
+            self.statusBar().clearMessage()
+            self._sync_mode()
+
+        self._run(work, done, failed)
+
+    def _ask_revert(self, entries: list[tuple[Path, backup.Backup]]) -> tuple[Path, backup.Backup] | None:
+        dialog = edit_dialogs.RevertDialog(self, entries)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return None
+        return dialog.chosen
+
+    def _revert(self) -> None:
+        """File > Revert to Backup: put a backup back in place of an open image."""
+        engine = self._engine
+        if engine is None or self._busy():
+            return
+        root = backup.default_root()
+        entries = [(Path(p), b) for p in self._images for b in backup.list_backups(root, p)]
+        if not entries:
+            QMessageBox.information(
+                self, "Revert to Backup", "There are no backups of the open images yet. They are made when you switch editing on."
+            )
+            return
+        chosen = self._ask_revert(entries)
+        if chosen is None:
+            return
+        image, picked = chosen
+        if not edit_dialogs.confirm(
+            self,
+            f"Revert {image.name}?",
+            f"Replace {image.name} with the backup from {picked.created:%d %b %Y, %H:%M}?",
+            "Everything done to it since is lost, except that the image as it is now is backed up first.",
+            action="Revert",
+        ):
+            return
+        images = list(self._images)
+        self._writing += 1
+        self._update_actions()
+        self.statusBar().showMessage(f"Reverting {image.name}…")
+
+        def work() -> backup.Backup:
+            log.info("reverting %s to the backup %s", image, picked.path)
+            engine.close()  # (the image is replaced while nothing has it open)
+            return backup.restore(root, picked, image)
+
+        def finish(message: str = "", note: str = "") -> None:
+            self._writing -= 1
+            self.open_images(images)  # (read-only: editing is switched on again, and asked about again, when wanted)
+            if message:
+                QMessageBox.critical(self, "Couldn't revert", message)
+            elif note:
+                self.statusBar().showMessage(note, 10000)
+
+        self._run(work, lambda before: finish(note=f"Reverted {image.name}. Before that it was backed up as {before.path.name}."), lambda message: finish(message=message))
+
     def _set_editing(self, on: bool, then=None) -> None:
         engine = self._engine
         if engine is None:
@@ -1170,9 +1612,13 @@ class MainWindow(QMainWindow):
             if engine is not self._engine:
                 return
             self._writable = on
+            log.info("editing %s", "on" if on else "off")
             self._sync_mode()
             self.statusBar().showMessage(
-                "Editing is on: changes are written to the disk image straight away." if on else "Editing is off.", 8000
+                "Editing is on: changes are written to the disk image straight away."
+                if on
+                else "Editing is off.",
+                8000,
             )
             if then is not None:
                 then()
@@ -1242,21 +1688,35 @@ class MainWindow(QMainWindow):
         obj = self.tree.current_object()
         if isinstance(obj, Volume):
             obj = self.tree.partition(obj.disk, obj.partition)
-        return obj if isinstance(obj, Partition) and self._can_hold_volumes(obj) else None
+        return (
+            obj if isinstance(obj, Partition) and self._can_hold_volumes(obj) else None
+        )
 
     @staticmethod
     def _can_hold_volumes(part: Partition) -> bool:
-        return not part.is_dd and not part.type.startswith("FL")  # a floppy's one volume is always there
+        return not part.is_dd and not part.type.startswith(
+            "FL"
+        )  # a floppy's one volume is always there
 
     def _update_edit_actions(self) -> None:
         """Edit menu: say what Rename and Delete would do right now, and switch off what can't be done."""
         has = self._engine is not None and self._writing == 0
         target = self._edit_target() if has else None
-        rename_text, delete_text, can_rename, can_delete = "&Rename…", "&Delete…", False, False
+        rename_text, delete_text, can_rename, can_delete = (
+            "&Rename…",
+            "&Delete…",
+            False,
+            False,
+        )
         if target is not None:
             kind, what = target
             if kind == "volume":
-                rename_text, delete_text, can_rename, can_delete = "&Rename Volume…", "&Delete Volume…", True, True
+                rename_text, delete_text, can_rename, can_delete = (
+                    "&Rename Volume…",
+                    "&Delete Volume…",
+                    True,
+                    True,
+                )
             else:
                 n = len(what)
                 rename_text = "&Rename File…" if n == 1 else "&Rename…"
@@ -1266,14 +1726,18 @@ class MainWindow(QMainWindow):
         self.act_delete.setText(delete_text)
         self.act_rename.setEnabled(can_rename)
         self.act_delete.setEnabled(can_delete)
-        self.act_new_volume.setEnabled(has and self._partition_for_new_volume() is not None)
+        self.act_new_volume.setEnabled(
+            has and self._partition_for_new_volume() is not None
+        )
         self.act_format.setEnabled(has and self._selected_disk() is not None)
         self.act_import.setEnabled(has and self._selected_volume() is not None)
         self.act_sort.setEnabled(has and self._selected_volume() is not None)
         rows = self._selected_rows() if has else []
         self.act_copy.setEnabled(bool(rows))
         self.act_cut.setEnabled(bool(rows))
-        self.act_paste.setEnabled(has and self._clip is not None and self._selected_volume() is not None)
+        self.act_paste.setEnabled(
+            has and self._clip is not None and self._selected_volume() is not None
+        )
 
     def _rename_focused(self) -> None:
         target = self._edit_target()
@@ -1295,8 +1759,17 @@ class MainWindow(QMainWindow):
         else:
             self._delete_files(what)
 
-    def _ask_name(self, what: str, current: str, volume_type: str, taken: list[str], suffix: str = "") -> str | None:
-        dialog = edit_dialogs.RenameDialog(self, what, current, volume_type, taken, suffix)
+    def _ask_name(
+        self,
+        what: str,
+        current: str,
+        volume_type: str,
+        taken: list[str],
+        suffix: str = "",
+    ) -> str | None:
+        dialog = edit_dialogs.RenameDialog(
+            self, what, current, volume_type, taken, suffix
+        )
         return dialog.name if dialog.exec() == dialog.DialogCode.Accepted else None
 
     def _rename_volume(self, vol: Volume) -> None:
@@ -1306,13 +1779,19 @@ class MainWindow(QMainWindow):
 
     def _do_rename_volume(self, vol: Volume) -> None:
         engine = self._engine
-        taken = [v.name for v in self.tree.volumes_in(vol.disk, vol.partition) if v.index != vol.index]
+        taken = [
+            v.name
+            for v in self.tree.volumes_in(vol.disk, vol.partition)
+            if v.index != vol.index
+        ]
         name = self._ask_name("volume", vol.name, vol.type, taken)
         if engine is None or name is None:
             return
         self._run_edit(
             lambda: engine.rename_volume(vol, name),
-            lambda new: self._edited(vol.disk, select=new, message=f"Renamed “{vol.name}” to “{new.name}”."),
+            lambda new: self._edited(
+                vol.disk, select=new, message=f"Renamed “{vol.name}” to “{new.name}”."
+            ),
             lambda message: self._edit_failed(vol.disk, message),
         )
 
@@ -1326,11 +1805,16 @@ class MainWindow(QMainWindow):
         base, ext = akai_names.split_extension(f.name)
         taken: list[str] = []
         v = self._volume
-        if not self._in_results and v is not None and (v.disk, v.partition, v.index) == (vol.disk, vol.partition, vol.index):
+        if (
+            not self._in_results
+            and v is not None
+            and (v.disk, v.partition, v.index) == (vol.disk, vol.partition, vol.index)
+        ):
             taken = [  # the other files of the same type in this volume (the type is part of a file's name)
                 akai_names.split_extension(o.name)[0]
                 for o in self._volume_files
-                if o.index != f.index and akai_names.split_extension(o.name)[1].casefold() == ext.casefold()
+                if o.index != f.index
+                and akai_names.split_extension(o.name)[1].casefold() == ext.casefold()
             ]
         name = self._ask_name("file", base, vol.type, taken, suffix=ext)
         if engine is None or name is None:
@@ -1340,7 +1824,11 @@ class MainWindow(QMainWindow):
             self._pending_reveal = (vol, new.index) if not self._in_results else None
             self._edited(vol.disk, message=f"Renamed “{f.name}” to “{new.name}”.")
 
-        self._run_edit(lambda: engine.rename_file(vol, f, name), done, lambda message: self._edit_failed(vol.disk, message))
+        self._run_edit(
+            lambda: engine.rename_file(vol, f, name),
+            done,
+            lambda message: self._edit_failed(vol.disk, message),
+        )
 
     def _delete_files(self, rows: list[tuple[Volume, FileEntry]]) -> None:
         if self._engine is None or not rows or self._busy():
@@ -1351,7 +1839,9 @@ class MainWindow(QMainWindow):
         engine = self._engine
         groups: dict[tuple, tuple[Volume, list[FileEntry]]] = {}
         for vol, f in rows:
-            groups.setdefault((vol.disk, vol.partition, vol.index), (vol, []))[1].append(f)
+            groups.setdefault((vol.disk, vol.partition, vol.index), (vol, []))[
+                1
+            ].append(f)
         if len(rows) == 1:
             vol, f = rows[0]
             text = f"Delete “{f.name}” from {vol.name}?"
@@ -1360,7 +1850,9 @@ class MainWindow(QMainWindow):
         else:
             text = f"Delete {len(rows)} files from {len(groups)} volumes?"
         lines = [f"{vol.name}: {f.name}" for vol, f in rows] if len(rows) > 1 else []
-        if engine is None or not edit_dialogs.confirm(self, "Delete files?", text, "This can't be undone.", details_lines=lines):
+        if engine is None or not edit_dialogs.confirm(
+            self, "Delete files?", text, "This can't be undone.", details_lines=lines
+        ):
             return
 
         def work() -> list[str]:
@@ -1376,9 +1868,15 @@ class MainWindow(QMainWindow):
                 self._edited(disk)
             n = len(rows) - len(failed)
             self._status_hold = time.monotonic() + 8
-            self.statusBar().showMessage(f"Deleted {n} file{'s' if n != 1 else ''}.", 8000)
+            self.statusBar().showMessage(
+                f"Deleted {n} file{'s' if n != 1 else ''}.", 8000
+            )
             if failed:
-                self._warn("Some files weren't deleted", f"{len(failed)} of {len(rows)} files couldn't be deleted.", failed)
+                self._warn(
+                    "Some files weren't deleted",
+                    f"{len(failed)} of {len(rows)} files couldn't be deleted.",
+                    failed,
+                )
 
         self._run_edit(work, done, lambda message: self._edit_failed(disks[0], message))
 
@@ -1390,15 +1888,30 @@ class MainWindow(QMainWindow):
     def _do_delete_volume(self, vol: Volume) -> None:
         engine = self._engine
         usage = self._usage_cache.get(vol.disk)
-        count = next((u.files for u in usage.volumes if (u.partition, u.index) == (vol.partition, vol.index)), None) if usage else None
+        count = (
+            next(
+                (
+                    u.files
+                    for u in usage.volumes
+                    if (u.partition, u.index) == (vol.partition, vol.index)
+                ),
+                None,
+            )
+            if usage
+            else None
+        )
         detail = "Every file in it goes too. This can't be undone."
         if count is not None:
             detail = f"It holds {count} file{'s' if count != 1 else ''}, and they go too. This can't be undone."
-        if engine is None or not edit_dialogs.confirm(self, "Delete volume?", f"Delete the volume “{vol.name}”?", detail):
+        if engine is None or not edit_dialogs.confirm(
+            self, "Delete volume?", f"Delete the volume “{vol.name}”?", detail
+        ):
             return
         self._run_edit(
             lambda: engine.delete_volume(vol),
-            lambda _none: self._edited(vol.disk, message=f"Deleted the volume “{vol.name}”."),
+            lambda _none: self._edited(
+                vol.disk, message=f"Deleted the volume “{vol.name}”."
+            ),
             lambda message: self._edit_failed(vol.disk, message),
         )
 
@@ -1417,15 +1930,25 @@ class MainWindow(QMainWindow):
             targets = []
             for disk in engine.list_disks():
                 for part in engine.list_partitions(disk):
-                    if self._can_hold_volumes(part) and (part.type == "HD9") == (vol.type == "S900"):
-                        targets.append(edit_dialogs.CopyTarget(part, tuple(v.name for v in engine.list_volumes(part))))
+                    if self._can_hold_volumes(part) and (part.type == "HD9") == (
+                        vol.type == "S900"
+                    ):
+                        targets.append(
+                            edit_dialogs.CopyTarget(
+                                part, tuple(v.name for v in engine.list_volumes(part))
+                            )
+                        )
             block = targets[0].partition.block_size if targets else 8192
             return len(files), sum(-(-f.size // block) * block for f in files), targets
 
         def show(found: tuple[int, int, list[edit_dialogs.CopyTarget]]) -> None:
             count, need, targets = found
             if not targets:
-                QMessageBox.information(self, "Copy Volume", "There is no hard disk partition to copy it to.")
+                QMessageBox.information(
+                    self,
+                    "Copy Volume",
+                    "There is no hard disk partition to copy it to.",
+                )
                 return
             answer = self._ask_copy_volume(vol, count, need, targets)
             if answer is None:
@@ -1434,9 +1957,18 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Copying “{vol.name}”…")
 
             def done(copied) -> None:
-                self._edited(target.disk, select=copied.volume, announce=True, message=f"Copied “{vol.name}” to “{copied.volume.name}” (partition {target.name}).")
+                self._edited(
+                    target.disk,
+                    select=copied.volume,
+                    announce=True,
+                    message=f"Copied “{vol.name}” to “{copied.volume.name}” (partition {target.name}).",
+                )
                 if copied.notes:
-                    self._warn("About the copy", f"“{copied.volume.name}” was copied.", copied.notes)
+                    self._warn(
+                        "About the copy",
+                        f"“{copied.volume.name}” was copied.",
+                        copied.notes,
+                    )
 
             self._run_edit(
                 lambda: engine.copy_volume(vol, target, name),
@@ -1446,7 +1978,9 @@ class MainWindow(QMainWindow):
 
         self._run(survey, show)
 
-    def _ask_copy_volume(self, vol: Volume, count: int, need: int, targets) -> tuple[Partition, str] | None:
+    def _ask_copy_volume(
+        self, vol: Volume, count: int, need: int, targets
+    ) -> tuple[Partition, str] | None:
         dialog = edit_dialogs.CopyVolumeDialog(self, vol, count, need, targets)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return None
@@ -1464,7 +1998,9 @@ class MainWindow(QMainWindow):
             return ["S900"], "S900"
         types = ["S3000", "S1000", "CD3000"]
         existing = [v.type for v in self.tree.volumes_in(part.disk, part.name)]
-        common = max((t for t in types if t in existing), key=existing.count, default="S3000")
+        common = max(
+            (t for t in types if t in existing), key=existing.count, default="S3000"
+        )
         return types, common
 
     def _do_new_volume(self, part: Partition) -> None:
@@ -1475,7 +2011,11 @@ class MainWindow(QMainWindow):
         def show(slots: tuple[list[int], int]) -> None:
             used, limit = slots
             if len(used) >= limit:
-                QMessageBox.information(self, "New Volume", f"Partition {part.name} already holds the most volumes it can ({limit}).")
+                QMessageBox.information(
+                    self,
+                    "New Volume",
+                    f"Partition {part.name} already holds the most volumes it can ({limit}).",
+                )
                 return
             types, default = self._volume_types(part)
             taken = [v.name for v in self.tree.volumes_in(part.disk, part.name)]
@@ -1484,22 +2024,37 @@ class MainWindow(QMainWindow):
                 return
             name, number, volume_type, load_number = answer
             self._run_edit(
-                lambda: engine.create_volume(part, number, name, volume_type, load_number),
-                lambda new: self._edited(part.disk, select=new, announce=True, message=f"Created the volume “{new.name}”."),
+                lambda: engine.create_volume(
+                    part, number, name, volume_type, load_number
+                ),
+                lambda new: self._edited(
+                    part.disk,
+                    select=new,
+                    announce=True,
+                    message=f"Created the volume “{new.name}”.",
+                ),
                 lambda message: self._edit_failed(part.disk, message),
             )
 
         self._run(lambda: engine.volume_slots(part), show)
 
-    def _ask_new_volume(self, part, used, limit, types, default, taken) -> tuple[str, int, str, int | None] | None:
-        dialog = edit_dialogs.NewVolumeDialog(self, part.name, used, limit, types, default, taken)
+    def _ask_new_volume(
+        self, part, used, limit, types, default, taken
+    ) -> tuple[str, int, str, int | None] | None:
+        dialog = edit_dialogs.NewVolumeDialog(
+            self, part.name, used, limit, types, default, taken
+        )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return None
         return dialog.name, dialog.volume_number, dialog.volume_type, dialog.load_number
 
     def _ask_format(self, disk: Disk) -> tuple[formats.DiskFormat, int] | None:
         dialog = edit_dialogs.DiskFormatDialog(self, disk)
-        return (dialog.format, dialog.partition_mb) if dialog.exec() == dialog.DialogCode.Accepted else None
+        return (
+            (dialog.format, dialog.partition_mb)
+            if dialog.exec() == dialog.DialogCode.Accepted
+            else None
+        )
 
     def _format_disk(self, disk: Disk | None = None) -> None:
         disk = disk or self._selected_disk()
@@ -1518,7 +2073,11 @@ class MainWindow(QMainWindow):
         if usage is not None:
             files = sum(v.files for v in usage.volumes)
             held = f"It holds {files:,} file{'s' if files != 1 else ''} in {len(usage.volumes)} volume{'s' if len(usage.volumes) != 1 else ''}, and they all go. "
-        name = Path(self._images[disk.index]).name if disk.index < len(self._images) else f"disk{disk.index}"
+        name = (
+            Path(self._images[disk.index]).name
+            if disk.index < len(self._images)
+            else f"disk{disk.index}"
+        )
         if not edit_dialogs.confirm(
             self,
             "Format disk?",
@@ -1529,7 +2088,12 @@ class MainWindow(QMainWindow):
             return
         self._run_edit(
             lambda: engine.format_disk(disk, fmt, partition_mb),
-            lambda _none: self._edited(disk.index, select=disk, announce=True, message=f"Formatted disk{disk.index} as {fmt.label}."),
+            lambda _none: self._edited(
+                disk.index,
+                select=disk,
+                announce=True,
+                message=f"Formatted disk{disk.index} as {fmt.label}.",
+            ),
             lambda message: self._edit_failed(disk.index, message),
         )
 
@@ -1540,7 +2104,9 @@ class MainWindow(QMainWindow):
         return dialog.format, dialog.size_mb, dialog.partition_mb
 
     def _ask_save_path(self, suggestion: str) -> str | None:
-        path, _ = QFileDialog.getSaveFileName(self, "Create disk image", suggestion, IMAGE_FILTER)
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Create disk image", suggestion, IMAGE_FILTER
+        )
         return path or None
 
     def _new_image(self) -> None:
@@ -1554,21 +2120,29 @@ class MainWindow(QMainWindow):
             return
         fmt, size_mb, partition_mb = answer
         start = settings.get_last_dir("open") or str(Path.home())
-        path = self._ask_save_path(str(Path(start) / f"{fmt.label}.img".replace("(", "").replace(")", "")))
+        path = self._ask_save_path(
+            str(Path(start) / f"{fmt.label}.img".replace("(", "").replace(")", ""))
+        )
         if path is None:
             return
         if not Path(path).suffix:
             path += ".img"
         if any(Path(path).resolve() == Path(p).resolve() for p in self._images):
-            QMessageBox.warning(self, "That image is open", f"{Path(path).name} is open in the window. Close it first if you want to replace it.")
+            QMessageBox.warning(
+                self,
+                "That image is open",
+                f"{Path(path).name} is open in the window. Close it first if you want to replace it.",
+            )
             return
         settings.set_last_dir("open", str(Path(path).parent))
         engine = AkaiEngine(binary, on_traffic=self._traffic.feed)
         self.statusBar().showMessage(f"Creating {Path(path).name}…")
         self._run(
             lambda: engine.create_image(path, fmt, size_mb, partition_mb),
-            lambda made: self.add_images([str(made)]),
-            lambda message: QMessageBox.critical(self, "Couldn't create the disk image", message),
+            lambda made: (self._backup_handled.add(str(Path(made).resolve())), self.add_images([str(made)])),
+            lambda message: QMessageBox.critical(
+                self, "Couldn't create the disk image", message
+            ),
         )
 
     # --------------------------------------------------- copying and moving files
@@ -1599,13 +2173,17 @@ class MainWindow(QMainWindow):
             return
         self.transfer_files(list(mime.rows), volume, move)
 
-    def transfer_files(self, rows: list[tuple[Volume, FileEntry]], dst: Volume, move: bool) -> None:
+    def transfer_files(
+        self, rows: list[tuple[Volume, FileEntry]], dst: Volume, move: bool
+    ) -> None:
         """Copy (or move) files into a volume: from Paste, or from a drop on the volume in the tree."""
         if self._engine is None or not rows or self._busy():
             return
         self._ensure_editing(lambda: self._do_transfer(rows, dst, move))
 
-    def _do_transfer(self, rows: list[tuple[Volume, FileEntry]], dst: Volume, move: bool) -> None:
+    def _do_transfer(
+        self, rows: list[tuple[Volume, FileEntry]], dst: Volume, move: bool
+    ) -> None:
         engine = self._engine
         if engine is None:
             return
@@ -1617,9 +2195,17 @@ class MainWindow(QMainWindow):
 
         def work() -> tuple[transfer.TransferResult, str]:
             result = transfer.transfer_files(
-                engine, rows, dst, move, progress=lambda i, n, name: relay.message.emit(f"{verb} {i + 1} of {n}: {name}…")
+                engine,
+                rows,
+                dst,
+                move,
+                progress=lambda i, n, name: relay.message.emit(
+                    f"{verb} {i + 1} of {n}: {name}…"
+                ),
             )
-            return result, (self._sort_after(engine, dst) if sort_after and result.done else "")
+            return result, (
+                self._sort_after(engine, dst) if sort_after and result.done else ""
+            )
 
         disks = sorted({dst.disk} | ({src.disk for src, _ in rows} if move else set()))
 
@@ -1638,9 +2224,17 @@ class MainWindow(QMainWindow):
                 self._warn("Couldn't sort the volume", sort_problem)
             problems = result.failed + result.skipped
             if problems:
-                self._warn("Some files weren't transferred", f"{len(problems)} of {len(rows)} files weren't {'moved' if move else 'copied'}.", problems)
+                self._warn(
+                    "Some files weren't transferred",
+                    f"{len(problems)} of {len(rows)} files weren't {'moved' if move else 'copied'}.",
+                    problems,
+                )
             if result.notes:
-                self._warn("Some tags didn't come along", "The destination has no tag with the same name for these, so they arrived without it.", result.notes)
+                self._warn(
+                    "Some tags didn't come along",
+                    "The destination has no tag with the same name for these, so they arrived without it.",
+                    result.notes,
+                )
 
         def failed(message: str) -> None:
             relay.deleteLater()
@@ -1653,10 +2247,14 @@ class MainWindow(QMainWindow):
         rows = self._selected_rows()
         if not rows or self._engine is None:
             return None
-        as_raw = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier)  # Option on a Mac
+        as_raw = bool(
+            QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier
+        )  # Option on a Mac
         return file_drag.FileDragData(rows, lambda: self._export_for_drag(rows, as_raw))
 
-    def _export_for_drag(self, rows: list[tuple[Volume, FileEntry]], as_raw: bool) -> list[str]:
+    def _export_for_drag(
+        self, rows: list[tuple[Volume, FileEntry]], as_raw: bool
+    ) -> list[str]:
         """Write the dragged files somewhere another application can reach, and say where. Samples are WAVs unless `as_raw`."""
         engine = self._engine
         if engine is None:
@@ -1666,11 +2264,17 @@ class MainWindow(QMainWindow):
         self._drag_dir = tempfile.mkdtemp(prefix="akaiutil-gui-drag-")
         groups: dict[tuple, tuple[Volume, list[FileEntry]]] = {}
         for vol, f in rows:
-            groups.setdefault((vol.disk, vol.partition, vol.index), (vol, []))[1].append(f)
+            groups.setdefault((vol.disk, vol.partition, vol.index), (vol, []))[
+                1
+            ].append(f)
         paths: list[str] = []
         for vol, files in groups.values():
             # files from several volumes get a folder each, so same-named files can't overwrite each other
-            target = Path(self._drag_dir) / export_folder_name(vol, True) if len(groups) > 1 else Path(self._drag_dir)
+            target = (
+                Path(self._drag_dir) / export_folder_name(vol, True)
+                if len(groups) > 1
+                else Path(self._drag_dir)
+            )
             if len(groups) > 1:
                 target.mkdir(parents=True, exist_ok=True)
                 paths.append(str(target))
@@ -1678,7 +2282,13 @@ class MainWindow(QMainWindow):
             others = [f for f in files if f not in samples]
             for batch, wav in ((samples, True), (others, False)):
                 if batch:
-                    res = engine.export_files(vol, batch, target, as_wav=wav, confirm_overwrite=lambda _p: True)
+                    res = engine.export_files(
+                        vol,
+                        batch,
+                        target,
+                        as_wav=wav,
+                        confirm_overwrite=lambda _p: True,
+                    )
                     if len(groups) == 1:
                         paths += res.exported
         return paths
@@ -1689,7 +2299,10 @@ class MainWindow(QMainWindow):
         """Sort a volume after files were added to it (on a worker thread). Returns what went wrong, or ""."""
         try:
             files = engine.list_files(volume)
-            engine.sort_files(volume, sorting.ALL if all(f.is_sample for f in files) else sorting.SAMPLES)
+            engine.sort_files(
+                volume,
+                sorting.ALL if all(f.is_sample for f in files) else sorting.SAMPLES,
+            )
         except Exception as e:
             return str(e)
         return ""
@@ -1706,7 +2319,10 @@ class MainWindow(QMainWindow):
             return
 
         def ask() -> None:
-            self._run(lambda: engine.list_files(volume), lambda files: self._do_sort(volume, files))
+            self._run(
+                lambda: engine.list_files(volume),
+                lambda files: self._do_sort(volume, files),
+            )
 
         self._ensure_editing(ask)
 
@@ -1722,18 +2338,33 @@ class MainWindow(QMainWindow):
             return
 
         def done(moved: int) -> None:
-            text = f"Sorted “{volume.name}”: {moved} file{'s' if moved != 1 else ''} moved." if moved else f"“{volume.name}” was already in order."
+            text = (
+                f"Sorted “{volume.name}”: {moved} file{'s' if moved != 1 else ''} moved."
+                if moved
+                else f"“{volume.name}” was already in order."
+            )
             self._edited(volume.disk, select=volume, announce=True, message=text)
 
-        self._run_edit(lambda: engine.sort_files(volume, scope), done, lambda message: self._edit_failed(volume.disk, message))
+        self._run_edit(
+            lambda: engine.sort_files(volume, scope),
+            done,
+            lambda message: self._edit_failed(volume.disk, message),
+        )
 
     # --------------------------------------------------------------- importing
     def _ask_import_files(self) -> list[str]:
-        start = settings.get_last_dir("import") or settings.get_last_dir("open") or str(Path.home())
+        start = (
+            settings.get_last_dir("import")
+            or settings.get_last_dir("open")
+            or str(Path.home())
+        )
         audio = " ".join(f"*{e}" for e in sorted(importing.AUDIO_EXTENSIONS))
         akai = " ".join(f"*{e} *{e.upper()}" for e in sorted(importing.AKAI_EXTENSIONS))
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Import into the volume", start, f"Audio and Akai files ({audio} {akai});;All files (*)"
+            self,
+            "Import into the volume",
+            start,
+            f"Audio and Akai files ({audio} {akai});;All files (*)",
         )
         if paths:
             settings.set_last_dir("import", str(Path(paths[0]).parent))
@@ -1750,18 +2381,29 @@ class MainWindow(QMainWindow):
     def import_files(self, paths: list, volume: Volume | None = None) -> None:
         """Put audio and Akai files into a volume (the one given, else the selected one), in alphabetical order."""
         if self._engine is None:
-            self.statusBar().showMessage("Open a disk image first, then drop the samples onto one of its volumes.", 8000)
+            self.statusBar().showMessage(
+                "Open a disk image first, then drop the samples onto one of its volumes.",
+                8000,
+            )
             return
         volume = volume or self._selected_volume()
         if volume is None:
-            QMessageBox.information(self, "Import", "Select the volume to import into (or drop the files onto it in the list of disks), then try again.")
+            QMessageBox.information(
+                self,
+                "Import",
+                "Select the volume to import into (or drop the files onto it in the list of disks), then try again.",
+            )
             return
         if self._busy():
             return
-        sources = [importing.inspect(p) for p in sorted(paths, key=importing.natural_key)]
+        sources = [
+            importing.inspect(p) for p in sorted(paths, key=importing.natural_key)
+        ]
         self._ensure_editing(lambda: self._do_import(volume, sources))
 
-    def _ask_import(self, volume: Volume, sources: list) -> tuple[str, bool, str, importing.ImportOptions] | None:
+    def _ask_import(
+        self, volume: Volume, sources: list
+    ) -> tuple[str, bool, str, importing.ImportOptions] | None:
         dialog = edit_dialogs.ImportDialog(self, volume, sources)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return None
@@ -1782,13 +2424,25 @@ class MainWindow(QMainWindow):
             work_dir = Path(tempfile.mkdtemp(prefix="akaiutil-gui-import-"))
             try:
                 result = importing.run_import(
-                    engine, volume, sources, work_dir, sample_type, compress, stereo,
-                    progress=lambda i, n, name: relay.message.emit(f"Importing {i + 1} of {n}: {name}…"),
+                    engine,
+                    volume,
+                    sources,
+                    work_dir,
+                    sample_type,
+                    compress,
+                    stereo,
+                    progress=lambda i, n, name: relay.message.emit(
+                        f"Importing {i + 1} of {n}: {name}…"
+                    ),
                     options=options,
                 )
             finally:
                 shutil.rmtree(work_dir, ignore_errors=True)
-            return result, (self._sort_after(engine, volume) if sort_after and result.imported else "")
+            return result, (
+                self._sort_after(engine, volume)
+                if sort_after and result.imported
+                else ""
+            )
 
         def done(answer: tuple[importing.ImportResult, str]) -> None:
             result, sort_problem = answer
@@ -1801,7 +2455,11 @@ class MainWindow(QMainWindow):
             if sort_problem:
                 self._warn("Couldn't sort the volume", sort_problem)
             if result.failed:
-                self._warn("Some files weren't imported", f"{len(result.failed)} of {len(sources)} files couldn't be imported.", result.failed)
+                self._warn(
+                    "Some files weren't imported",
+                    f"{len(result.failed)} of {len(sources)} files couldn't be imported.",
+                    result.failed,
+                )
 
         def failed(message: str) -> None:
             relay.deleteLater()
@@ -1809,7 +2467,13 @@ class MainWindow(QMainWindow):
 
         self._run_edit(work, done, failed)
 
-    def _edited(self, disk_index: int, select=None, announce: bool | None = None, message: str = "") -> None:
+    def _edited(
+        self,
+        disk_index: int,
+        select=None,
+        announce: bool | None = None,
+        message: str = "",
+    ) -> None:
         """A disk has just been changed: forget what we knew about it and show it as it is now.
 
         The tree reloads the disk and puts the selection back (`select` says what to select, if not what was);
@@ -1836,21 +2500,32 @@ class MainWindow(QMainWindow):
                 self._update_usage(current)
             volume, engine = self._volume, self._engine
             if engine is not None and volume is not None and volume.disk == disk_index:
-                token = self._files_token  # keep the volume's list current for when the search ends
-                self._run(lambda: engine.list_files(volume), lambda files: self._files_loaded(token, files))
+                token = (
+                    self._files_token
+                )  # keep the volume's list current for when the search ends
+                self._run(
+                    lambda: engine.list_files(volume),
+                    lambda files: self._files_loaded(token, files),
+                )
         if message:
             self._status_hold = time.monotonic() + 8
             self.statusBar().showMessage(message, 8000)
 
     def _edit_failed(self, disk_index: int, message: str) -> None:
-        self._warn("Couldn't change the disk image", message.splitlines()[0] if message else "akaiutil refused.", message.splitlines()[1:])
+        self._warn(
+            "Couldn't change the disk image",
+            message.splitlines()[0] if message else "akaiutil refused.",
+            message.splitlines()[1:],
+        )
         engine = self._engine
         if engine is None:
             return
         if not engine.is_open:
             self.close_images()
             return
-        self._edited(disk_index)  # whatever it managed to do, show the disk as it is now
+        self._edited(
+            disk_index
+        )  # whatever it managed to do, show the disk as it is now
 
     def _warn(self, title: str, text: str, details: list[str] | None = None) -> None:
         box = QMessageBox(QMessageBox.Icon.Warning, title, text, parent=self)
@@ -1901,7 +2576,10 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         rename = menu.addAction("Rename…", lambda: self._rename_file(*rows[0]))
         rename.setEnabled(len(rows) == 1)
-        menu.addAction("Delete…" if len(rows) == 1 else f"Delete {len(rows)} Files…", lambda: self._delete_files(rows))
+        menu.addAction(
+            "Delete…" if len(rows) == 1 else f"Delete {len(rows)} Files…",
+            lambda: self._delete_files(rows),
+        )
         return menu
 
     def _on_table_context(self, pos) -> None:
@@ -1950,10 +2628,14 @@ class MainWindow(QMainWindow):
         theme.set_theme_preference(value)
         action = self._theme_actions.get(value)
         if action is not None:
-            action.setChecked(True)  # keeps View > Theme in step when the Settings dialog changed it
+            action.setChecked(
+                True
+            )  # keeps View > Theme in step when the Settings dialog changed it
 
     def _open_settings(self) -> None:
-        dialog = SettingsDialog(self, update_runner=self._update_runner, locate=self.locate_binary)
+        dialog = SettingsDialog(
+            self, update_runner=self._update_runner, locate=self.locate_binary
+        )
         dialog.themeChosen.connect(self._set_theme)
         dialog.exec()
 
@@ -1962,6 +2644,20 @@ class MainWindow(QMainWindow):
         due = time.time() - settings.get_last_update_check() > CHECK_INTERVAL_SECONDS
         if settings.get_check_updates_on_startup() and due:
             QTimer.singleShot(2000, lambda: self._update_runner.start(manual=False))
+
+    def schedule_backup_cleanup(self) -> None:
+        """A few seconds after startup, delete backups older than the Settings say (on a worker thread: they can be big files)."""
+        QTimer.singleShot(4000, self.run_backup_cleanup)
+
+    def run_backup_cleanup(self) -> None:
+        days = settings.get_backup_keep_days()
+        root = backup.default_root()
+
+        def done(removed: list[Path]) -> None:
+            if removed:
+                log.info("deleted %d backup(s) older than %d days from %s", len(removed), days, root)
+
+        run_async(lambda: backup.cleanup(root, days), done, lambda message: log.warning("backup cleanup failed: %s", message))
 
     def _about(self) -> None:
         AboutDialog(self).exec()
@@ -1981,7 +2677,9 @@ class MainWindow(QMainWindow):
     def dropEvent(self, event) -> None:
         if event.mimeData().hasFormat(file_drag.INTERNAL_MIME):
             return
-        self.handle_drop([u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()])
+        self.handle_drop(
+            [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+        )
 
     def _on_tree_drop(self, volume, paths: list[str]) -> None:
         self.handle_drop(paths, volume)
@@ -1994,7 +2692,10 @@ class MainWindow(QMainWindow):
         images = [str(f) for f in files if importing.kind_of(f) == "other"]
         if samples:
             if images:
-                self.statusBar().showMessage(f"Ignored {len(images)} disk image{'s' if len(images) != 1 else ''} dropped along with samples.", 6000)
+                self.statusBar().showMessage(
+                    f"Ignored {len(images)} disk image{'s' if len(images) != 1 else ''} dropped along with samples.",
+                    6000,
+                )
             self.import_files(samples, volume)
         elif images:
             self.add_images(images)
