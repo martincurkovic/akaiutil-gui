@@ -13,6 +13,12 @@ dependencies = [
     # -Essentials has Widgets/Multimedia; the full "PySide6" meta-package
     # would also pull in WebEngine & friends (hundreds of MB we don't use).
     "PySide6-Essentials>=6.12,<6.13",
+    # audio preview: the same backend AKAISDS uses (miniaudio drives the platform's native audio API
+    # directly; soundfile reads the WAVs akaiutil exports). numpy comes with soundfile; it's listed
+    # because the waveform code imports it.
+    "miniaudio>=1.71",
+    "soundfile>=0.14.0",
+    "numpy>=2.0",
 ]
 
 [project.scripts]
