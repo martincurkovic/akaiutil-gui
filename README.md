@@ -9,6 +9,21 @@ A space bar under the disk tree shows what each volume uses (coloured to match t
 
 Qt 6.12 LTS via PySide6 · Python 3.12+ · uv · looks like [AKAISDS](../AKAISDS) (shared light/dark theme).
 
+## Download & Installation
+
+Download the latest release from the Releases tab on GitHub. akaiutil is included, so there's nothing else to install.
+
+**macOS** (14 or newer, Apple Silicon or Intel): open the `.dmg` and drag akaiutil-GUI to Applications.
+
+**Windows**: run `akaiutil-GUI-Setup.exe`.
+
+**Linux**: unzip the download and run the `.AppImage` (you may need `chmod +x` on it first).
+
+The macOS and Windows builds are not code-signed, so they will trigger security warnings (macOS Gatekeeper, Windows
+SmartScreen). You can bypass them the usual way: on macOS, right-click the app and choose Open (or allow it under System
+Settings > Privacy & Security); on Windows, choose "More info" > "Run anyway". If you'd rather not, build it yourself
+from source ([BUILDING.md](BUILDING.md)).
+
 ## Quick start
 
 ```sh
