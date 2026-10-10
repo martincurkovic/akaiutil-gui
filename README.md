@@ -17,7 +17,8 @@ there is no undo (see [Editing](#editing)).
   S1000/S3000 loops are previewed as loops; S900 samples play once.
 - **Search** every open disk at once (Ctrl+F): type words (they all have to match, in the file's or its volume's name), and
   filter by type. Double-click a result to show it in its volume. Results can be previewed and exported like any file.
-- **Export** files as they are, or samples as WAV. Files from several volumes go into one folder each.
+- **Export** files as they are, or samples as WAV (with the root note and loop points in a `smpl` chunk, so a DAW sees them).
+  Right-click a volume, partition or disk to export all its samples at once. Files from several volumes go into one folder each.
 - **Edit** (opt-in): rename and delete files and volumes, create volumes, import samples, format a disk, and make new empty
   disk images.
 - **Settings** (File > Settings, or Cmd/Ctrl+,): theme, audio output device and buffer size, whether samples play when
