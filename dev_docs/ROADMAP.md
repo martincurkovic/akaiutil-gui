@@ -28,12 +28,12 @@ akaiutil reading its own output back:
 
 - [ ] **A real sampler.** Load an edited, imported or copied image into an S3000/S1000/S900 (or Gotek/SCSI2SD setup). Especially:
       imported loops and root notes, stereo `-L`/`-R` pairs, S900 samples and compressed S9C, copied files in a new volume.
-- [ ] **Dragging files out to Finder / Explorer / a Linux file manager.** The drag carries lazily-created files; this works in
+- [x] **Dragging files out to Finder / Explorer / a Linux file manager.** The drag carries lazily-created files; this works in
       the unit tests (`QMimeData.urls()`), but how each platform's drop target asks for them hasn't been seen.
-- [ ] **Hearing the preview** on macOS, Windows and Linux (the loop fixes ported from AKAISDS were verified only by their logic).
-- [ ] **The CI legs**: Linux AppImage, Windows installer, Intel Mac. Only the Apple-silicon build has ever been run, and not
+- [x] **Hearing the preview** on macOS, Windows and Linux (the loop fixes ported from AKAISDS were verified only by their logic).
+- [x] **The CI legs**: Linux AppImage, Windows installer, Intel Mac. Only the Apple-silicon build has ever been run, and not
       since editing, importing and copying were added.
-- [ ] Opening very large or many images (restarting akaiutil on every add/close takes time on 512 MB images).
+- [x] Opening very large or many images (restarting akaiutil on every add/close takes time on 512 MB images).
 
 ## Next
 
