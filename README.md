@@ -85,6 +85,11 @@ images again puts the app back in read-only mode.
   the file; a copy carries the file but not its tags. A name already in the target gets a number. Drag files out of the list to
   Finder, Explorer or your DAW: samples arrive as WAV files, or exactly as Akai stores them if you hold Option/Alt when you start
   the drag.
+- **Sort a volume** (Edit > Sort Files by Name, or right-click a volume): the samplers list a volume's files in the order they
+  were added and can't reorder them, so this puts them in alphabetical order (numbers in order, ignoring case) by moving files
+  between slots; the files themselves aren't touched. You can sort only the samples and leave programs and other files where
+  they are, which matters because a program's number (what a MIDI program change selects) is its place among the programs.
+  Settings can do it automatically after every import or paste.
 - **Import** (drop files on a volume, or Edit > Import Files): WAV, AIFF and FLAC (also OGG and MP3) become samples for the
   S1000, S3000 or S900 (you're asked which, for stereo files whether to split them into left and right samples or mix them to
   mono, and for an S900 whether to compress). Anything that isn't 16-bit or is faster than the sampler can play (44.1 kHz; 40 kHz
