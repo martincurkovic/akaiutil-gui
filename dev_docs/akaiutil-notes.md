@@ -45,6 +45,17 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
 - A destination is a path like `/disk1/B/NEW_NAME`: an underscore for a space, as everywhere.
 - Native `copyi` also keeps tags (by number), so the tar route in `tags.py` is only needed to map tags by name.
 
+## Editing a sample's header
+- No akaiutil command edits one. `geti <n> 0 192` reads the first 192 bytes (the end offset is exclusive: 191 gives 191 bytes).
+- `engine.edit_sample_settings`: patch the header (`akai_header.write_settings`: only the edited fields change, and a loop entry
+  that wasn't touched keeps its exact bytes), import the whole sample through the tar route under a temporary name (`#EDIT.S3`),
+  move the original aside to a spare slot (`#OLD.S3`), `reni` the copy to the original name and slot, `fixramnamei` (the name
+  inside the header is otherwise the temporary one), check size, OS version, tags and audio, and only then `deli` the old copy.
+  A failed step puts the original back. It needs two free slots.
+- A loop's `at` is its last frame and `len` how far back it starts; time 0 is a loop that is off; entries after `lnum` can hold
+  leftovers (a real sample had `at=1473175` in an off loop), so nothing but time decides whether a loop is on.
+- The end marker of a normal sample is its last frame (`slen - 1`).
+
 ## Exporting audio
 - `sample2wav*` writes fmt, data and the `S1H `/`S3H ` header chunk, and **no `smpl` chunk**, so a DAW sees no loops or root note.
   `audio/wavfile.add_loop_info` reads the header (`akai_header.parse_header`) and appends one: root key, and the loops that are
