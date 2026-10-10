@@ -6,6 +6,7 @@ fills in the same objects.
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -205,6 +206,15 @@ class DiskUsage:
             for v in self.volumes_in(p.name):
                 order[(p.name, v.index)] = len(order)
         return order
+
+
+@dataclass(frozen=True)
+class ImportJob:
+    """One file to put into a volume. `local` is named exactly as it should arrive (spaces and all): "KICK.wav" for a
+    sample to be converted, "KICK.S3" for a file that is already Akai's. kind: "wav1" | "wav3" | "wav9" | "wav9c" | "put"."""
+
+    local: Path
+    kind: str
 
 
 @dataclass

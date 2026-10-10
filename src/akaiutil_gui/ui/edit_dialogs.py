@@ -2,21 +2,23 @@
 
 from collections.abc import Iterable
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
+    QCheckBox,
     QLabel,
+    QListWidget,
     QLineEdit,
     QMessageBox,
     QSpinBox,
     QVBoxLayout,
 )
 
-from akaiutil_gui import akai_names
+from akaiutil_gui import akai_names, importing
 from akaiutil_gui.engine import formats
 from akaiutil_gui.engine.models import Disk
 
@@ -277,6 +279,99 @@ class DiskFormatDialog(QDialog):
                 text += f", leaving {total - covered:g} MB unused (at most {formats.MAX_PARTITIONS} partitions)"
             text += "."
         self.summary.setText(text)
+
+
+class ImportDialog(QDialog):
+    """What to make of the audio being imported: which sampler's kind of sample, and what to do with stereo. Lists every file
+    in the order it will be added, with what will be done to it."""
+
+    def __init__(self, parent, volume, sources: list[importing.Source]):
+        super().__init__(parent)
+        self._volume = volume
+        self._sources = sources
+        self.setWindowTitle("Import")
+        self.setMinimumWidth(620)
+        audio = [s for s in sources if s.kind == "audio" and not s.problem]
+
+        self.type_combo = QComboBox()
+        for t in importing.allowed_types(volume.type):
+            self.type_combo.addItem(t)
+        self.type_combo.setCurrentIndex(max(0, self.type_combo.findText(importing.default_type(volume.type))))
+        self.type_combo.setEnabled(self.type_combo.count() > 1)
+        self.compress = QCheckBox("Compress (.S9C)")
+        self.compress.setToolTip("The S900's compressed sample format: about a third of the space, for a little quality")
+        self.stereo_combo = QComboBox()
+        self.stereo_combo.addItem("Split into a left and a right sample", importing.STEREO_SPLIT)
+        self.stereo_combo.addItem("Mix to mono", importing.STEREO_MIX)
+        self.files = QListWidget()
+        self.files.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self.files.setMinimumHeight(140)
+        self.files.setWordWrap(True)  # a long description wraps instead of scrolling sideways
+        self.files.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.note = QLabel("Files are added in this order. A name that is already in the volume gets a number, so nothing is replaced.")
+        self.note.setObjectName("mutedLabel")
+        self.note.setWordWrap(True)
+
+        form = QFormLayout()
+        self.type_row = (QLabel("Sample type"), self._row(self.type_combo, self.compress))
+        self.stereo_row = (QLabel("Stereo files"), self.stereo_combo)
+        form.addRow(*self.type_row)
+        form.addRow(*self.stereo_row)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        n = len(sources)
+        layout.addWidget(QLabel(f"Import {n} file{'s' if n != 1 else ''} into the {volume.type} volume “{volume.name}”:"))
+        layout.addWidget(self.files)
+        layout.addLayout(form)
+        layout.addWidget(self.note)
+        layout.addWidget(self.buttons)
+
+        for widget in self.type_row:
+            widget.setVisible(bool(audio))
+        self.stereo_row[0].setVisible(any(s.channels == 2 for s in audio))
+        self.stereo_row[1].setVisible(any(s.channels == 2 for s in audio))
+        self.type_combo.currentIndexChanged.connect(self._refresh)
+        self.stereo_combo.currentIndexChanged.connect(self._refresh)
+        self._refresh()
+
+    @staticmethod
+    def _row(*widgets):
+        from PySide6.QtWidgets import QWidget
+
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        for w in widgets:
+            row.addWidget(w)
+        row.addStretch(1)
+        return holder
+
+    @property
+    def sample_type(self) -> str:
+        return self.type_combo.currentText()
+
+    @property
+    def compress_s900(self) -> bool:
+        return self.sample_type == "S900" and self.compress.isChecked()
+
+    @property
+    def stereo(self) -> str:
+        return self.stereo_combo.currentData()
+
+    @property
+    def importable(self) -> int:
+        return sum(1 for s in self._sources if not s.problem)
+
+    def _refresh(self) -> None:
+        self.compress.setVisible(self.sample_type == "S900" and self.type_row[1].isVisible())
+        self.files.clear()
+        for s in self._sources:
+            self.files.addItem(f"{s.path.name}   —   {importing.describe(s, self.sample_type, self.stereo)}")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(self.importable > 0)
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Import")
 
 
 def confirm(parent, title: str, text: str, detail: str = "", action: str = "Delete", details_lines: Iterable[str] = ()) -> bool:

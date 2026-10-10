@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRect, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import QStyle, QTreeWidget, QTreeWidgetItem
 
 from akaiutil_gui.engine.api import AkaiEngine
@@ -35,6 +35,7 @@ def _disk_text(d: Disk, path: str | None = None) -> str:
 
 class DiskTree(QTreeWidget):
     nodeSelected = Signal(object)  # Disk | Partition | Volume | None
+    filesDropped = Signal(object, list)  # (Volume | None, paths): files dropped on a volume (None: on anything else)
     contextRequested = Signal(object, object)  # (Disk | Partition | Volume | None, global QPoint): a right-click
     disksLoaded = Signal(list)  # list[Disk], once the top level is built
     failed = Signal(str)
@@ -60,6 +61,8 @@ class DiskTree(QTreeWidget):
         self.currentItemChanged.connect(self._on_current)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
+        self.setAcceptDrops(True)  # files dropped on a volume are imported into it
+        self._drop_item: QTreeWidgetItem | None = None
         theme.notifier.changed.connect(self._refresh_swatches)  # swatch pixmaps bake the colour in
 
     def mouseDoubleClickEvent(self, event) -> None:
@@ -78,6 +81,47 @@ class DiskTree(QTreeWidget):
             self.mouseReleaseEvent(event)
             return
         super().mouseDoubleClickEvent(event)
+
+    # ------------------------------------------------------------- drag and drop
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if not event.mimeData().hasUrls():
+            event.ignore()
+            return
+        item = self.itemAt(event.position().toPoint())
+        target = item if item is not None and isinstance(item.data(0, _ROLE_OBJ), Volume) else None
+        self._highlight(target)
+        event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._highlight(None)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        item = self.itemAt(event.position().toPoint())
+        obj = item.data(0, _ROLE_OBJ) if item is not None else None
+        self._highlight(None)
+        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+        event.acceptProposedAction()
+        if paths:
+            self.filesDropped.emit(obj if isinstance(obj, Volume) else None, paths)
+
+    def _highlight(self, item: QTreeWidgetItem | None) -> None:
+        """Mark the volume a drop would go to."""
+        if item is self._drop_item:
+            return
+        if self._drop_item is not None and self._drop_item.treeWidget() is self:
+            self._drop_item.setBackground(0, QBrush())
+        self._drop_item = item
+        if item is not None:
+            color = QColor(theme.current_palette()["accent"])
+            color.setAlpha(90)
+            item.setBackground(0, QBrush(color))
 
     def drawBranches(self, painter: QPainter, rect: QRect, index) -> None:
         """Paint the expand/collapse chevron ourselves.

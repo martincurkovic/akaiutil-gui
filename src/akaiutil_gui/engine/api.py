@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .. import akai_names, describe
 from . import formats, parse
-from .models import Disk, DiskUsage, ExportResult, FileEntry, Partition, SampleInfo, Volume
+from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, SampleInfo, Volume
 from .session import EngineError, Session, TrafficCallback
 
 
@@ -299,6 +299,28 @@ class AkaiEngine:
                     failed.append(f"{f.name}: {e}")
         return failed
 
+    def import_job(self, vol: Volume, job: ImportJob) -> list[str]:
+        """Put one file into a volume. Returns the names of the files that appeared (two for a stereo sample)."""
+        command = _IMPORT_COMMANDS.get(job.kind)
+        if command is None:
+            raise EngineError(f"Can't import a “{job.kind}”.")
+        with self._lock:
+            self._need_writable()
+            session = self._need_session()
+            self._enter_volume(vol)
+            before = {f.name for f in parse.parse_files(self._run("dir").text)}
+            _clear_dir(session.staging_dir)
+            # akaiutil reads a file from its own working directory, and takes '_' on the command line for a space in its name
+            shutil.copyfile(job.local, session.staging_dir / job.local.name)
+            text = self._run(f"{command} {akai_names.command_token(job.local.name)}", timeout=600).text
+            _clear_dir(session.staging_dir)
+            after = parse.parse_files(self._run("dir").text)
+            created = [f.name for f in after if f.name not in before]
+            if not created:
+                said = " ".join(ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("importing"))
+                raise EngineError(said or "akaiutil didn't add anything.")
+            return created
+
     def format_disk(self, disk: Disk, fmt: formats.DiskFormat, partition_mb: int = formats.PARTITION_MAX_MB) -> None:
         """Erase a disk and make it an empty one of the given kind. Everything on it is lost.
 
@@ -383,6 +405,9 @@ class AkaiEngine:
         if resp.cwd.rstrip() != vol.path.rstrip():
             raise EngineError(f"Couldn't open volume {vol.path}: {resp.text.strip() or resp.cwd}")
 
+
+# akaiutil's command for each kind of import (see models.ImportJob)
+_IMPORT_COMMANDS = {"wav1": "wav2sample1", "wav3": "wav2sample3", "wav9": "wav2sample9", "wav9c": "wav2sample9c", "put": "put"}
 
 # akaiutil's "create volume" command for each volume type
 _MKVOL_COMMANDS = {"S900": "mkvoli9", "S1000": "mkvoli1", "S3000": "mkvoli3", "CD3000": "mkvoli3cd"}

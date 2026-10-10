@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QSettings, QThreadPool
 
-from akaiutil_gui import __version__, akai_names, describe, search, settings
+from akaiutil_gui import __version__, akai_names, describe, importing, search, settings
 from akaiutil_gui.audio.sample import LoadedSample, load_wav
 from akaiutil_gui.formatting import human_size
 from akaiutil_gui.engine import fetch, formats
@@ -209,6 +209,7 @@ class MainWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_table_context)
         self.tree.contextRequested.connect(self._on_tree_context)
+        self.tree.filesDropped.connect(self._on_tree_drop)
         top = QWidget()
         tv = QVBoxLayout(top)
         tv.setContentsMargins(0, 0, 0, 0)
@@ -381,10 +382,11 @@ class MainWindow(QMainWindow):
         self.act_new_volume = self._action("New &Volume…", self._new_volume)
         self.act_rename = self._action("&Rename…", self._rename_focused)
         self.act_delete = self._action("&Delete…", self._delete_focused)
+        self.act_import = self._action("&Import Files…", self._import_dialog, QKeySequence("Ctrl+I"))
         self.act_format = self._action("&Format Disk…", self._format_disk)
         self.edit_menu.addAction(self.act_allow_edit)
         self.edit_menu.addSeparator()
-        self.edit_menu.addActions([self.act_new_volume, self.act_rename, self.act_delete])
+        self.edit_menu.addActions([self.act_new_volume, self.act_import, self.act_rename, self.act_delete])
         self.edit_menu.addSeparator()
         self.edit_menu.addAction(self.act_format)
         self.edit_menu.aboutToShow.connect(self._update_edit_actions)
@@ -1212,6 +1214,7 @@ class MainWindow(QMainWindow):
         self.act_delete.setEnabled(can_delete)
         self.act_new_volume.setEnabled(has and self._partition_for_new_volume() is not None)
         self.act_format.setEnabled(has and self._selected_disk() is not None)
+        self.act_import.setEnabled(has and self._selected_volume() is not None)
 
     def _rename_focused(self) -> None:
         target = self._edit_target()
@@ -1459,6 +1462,81 @@ class MainWindow(QMainWindow):
             lambda message: QMessageBox.critical(self, "Couldn't create the disk image", message),
         )
 
+    # --------------------------------------------------------------- importing
+    def _ask_import_files(self) -> list[str]:
+        start = settings.get_last_dir("import") or settings.get_last_dir("open") or str(Path.home())
+        audio = " ".join(f"*{e}" for e in sorted(importing.AUDIO_EXTENSIONS))
+        akai = " ".join(f"*{e} *{e.upper()}" for e in sorted(importing.AKAI_EXTENSIONS))
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Import into the volume", start, f"Audio and Akai files ({audio} {akai});;All files (*)"
+        )
+        if paths:
+            settings.set_last_dir("import", str(Path(paths[0]).parent))
+        return paths
+
+    def _import_dialog(self, volume: Volume | None = None) -> None:
+        volume = volume if isinstance(volume, Volume) else self._selected_volume()
+        if self._engine is None or volume is None:
+            return
+        paths = self._ask_import_files()
+        if paths:
+            self.import_files(importing.expand(paths), volume)
+
+    def import_files(self, paths: list, volume: Volume | None = None) -> None:
+        """Put audio and Akai files into a volume (the one given, else the selected one), in alphabetical order."""
+        if self._engine is None:
+            self.statusBar().showMessage("Open a disk image first, then drop the samples onto one of its volumes.", 8000)
+            return
+        volume = volume or self._selected_volume()
+        if volume is None:
+            QMessageBox.information(self, "Import", "Select the volume to import into (or drop the files onto it in the list of disks), then try again.")
+            return
+        if self._busy():
+            return
+        sources = [importing.inspect(p) for p in sorted(paths, key=importing.natural_key)]
+        self._ensure_editing(lambda: self._do_import(volume, sources))
+
+    def _ask_import(self, volume: Volume, sources: list) -> tuple[str, bool, str] | None:
+        dialog = edit_dialogs.ImportDialog(self, volume, sources)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return None
+        return dialog.sample_type, dialog.compress_s900, dialog.stereo
+
+    def _do_import(self, volume: Volume, sources: list) -> None:
+        engine = self._engine
+        answer = self._ask_import(volume, sources)
+        if engine is None or answer is None:
+            return
+        sample_type, compress, stereo = answer
+        relay = _ProgressRelay(self)
+        relay.message.connect(lambda text: self.statusBar().showMessage(text))
+
+        def work() -> importing.ImportResult:
+            work_dir = Path(tempfile.mkdtemp(prefix="akaiutil-gui-import-"))
+            try:
+                return importing.run_import(
+                    engine, volume, sources, work_dir, sample_type, compress, stereo,
+                    progress=lambda i, n, name: relay.message.emit(f"Importing {i + 1} of {n}: {name}…"),
+                )
+            finally:
+                shutil.rmtree(work_dir, ignore_errors=True)
+
+        def done(result: importing.ImportResult) -> None:
+            relay.deleteLater()
+            n = result.count
+            text = f"Imported {n} sample{'s' if n != 1 else ''} into “{volume.name}”."
+            if result.failed:
+                text += f"  {len(result.failed)} failed."
+            self._edited(volume.disk, select=volume, announce=True, message=text)
+            if result.failed:
+                self._warn("Some files weren't imported", f"{len(result.failed)} of {len(sources)} files couldn't be imported.", result.failed)
+
+        def failed(message: str) -> None:
+            relay.deleteLater()
+            self._edit_failed(volume.disk, message)
+
+        self._run_edit(work, done, failed)
+
     def _edited(self, disk_index: int, select=None, announce: bool | None = None, message: str = "") -> None:
         """A disk has just been changed: forget what we knew about it and show it as it is now.
 
@@ -1511,6 +1589,8 @@ class MainWindow(QMainWindow):
     def _tree_menu(self, obj) -> QMenu | None:
         menu = QMenu(self)
         if isinstance(obj, Volume):
+            menu.addAction("Import Files…", lambda: self._import_dialog(obj))
+            menu.addSeparator()
             menu.addAction("Rename…", lambda: self._rename_volume(obj))
             menu.addAction("Delete…", lambda: self._delete_volume(obj))
         elif isinstance(obj, Partition) and self._can_hold_volumes(obj):
@@ -1602,7 +1682,7 @@ class MainWindow(QMainWindow):
             self,
             "About akaiutil-gui",
             f"<b>akaiutil-gui {__version__}</b><br>"
-            "A cross-platform Qt front end for akaiutil. Proof of concept.<br><br>"
+            "A cross-platform Qt front end for akaiutil.<br><br>"
             "Does its work by running <b>akaiutil</b> by Klaus Michael Indlekofer, "
             "which is licensed under the GNU GPL v2 or later.<br><br>"
             "akaiutil-gui is licensed under the GNU GPL v2 or later (see Help ▸ Third-party notices).",
@@ -1619,10 +1699,23 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:
-        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
-        paths = [p for p in paths if Path(p).is_file()]
-        if paths:
-            self.add_images(paths)  # opens them if nothing is open yet
+        self.handle_drop([u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()])
+
+    def _on_tree_drop(self, volume, paths: list[str]) -> None:
+        self.handle_drop(paths, volume)
+
+    def handle_drop(self, paths: list[str], volume: Volume | None = None) -> None:
+        """Files dropped on the window: audio and Akai files are imported (into `volume`, or the selected one), and anything
+        else is taken to be a disk image to open."""
+        files = importing.expand(paths)
+        samples = [f for f in files if importing.kind_of(f) != "other"]
+        images = [str(f) for f in files if importing.kind_of(f) == "other"]
+        if samples:
+            if images:
+                self.statusBar().showMessage(f"Ignored {len(images)} disk image{'s' if len(images) != 1 else ''} dropped along with samples.", 6000)
+            self.import_files(samples, volume)
+        elif images:
+            self.add_images(images)
 
     def closeEvent(self, event) -> None:
         QSettings().setValue("window/geometry", self.saveGeometry())
