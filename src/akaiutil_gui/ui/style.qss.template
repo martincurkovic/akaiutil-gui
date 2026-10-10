@@ -683,19 +683,7 @@ QMenu::separator {
     margin: 4px 8px;
 }
 
-/* ---------- Splitters / docks ---------- */
-QSplitter::handle {
-    background: transparent;
-}
-
-QSplitter::handle:horizontal {
-    width: 6px;
-}
-
-QSplitter::handle:vertical {
-    height: 6px;
-}
-
+/* ---------- Docks (splitters paint their own handles: ui/splitter.py) ---------- */
 QDockWidget {
     color: ${text_statusbar};
 }

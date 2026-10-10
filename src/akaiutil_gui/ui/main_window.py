@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QProgressDialog,
     QPushButton,
-    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -67,6 +66,7 @@ from .about_dialog import AboutDialog
 from .manual_dialog import show_manual_dialog
 from .preview_panel import PreviewPanel
 from .settings_dialog import SettingsDialog
+from .splitter import Splitter
 from .file_table import FileTable
 from .tasks import run_async
 from .update_helper import CHECK_INTERVAL_SECONDS, UpdateCheckRunner
@@ -339,14 +339,14 @@ class MainWindow(QMainWindow):
         bv.addWidget(self.info, 1)
         bv.addWidget(self.preview)
 
-        right = QSplitter(Qt.Orientation.Vertical)
+        right = self.right_splitter = Splitter(Qt.Orientation.Vertical)
         right.addWidget(top)
         right.addWidget(bottom)
         right.setStretchFactor(0, 1)
         right.setStretchFactor(1, 1)  # the readable details run long, give them room
         right.setChildrenCollapsible(False)
 
-        browser = QSplitter(Qt.Orientation.Horizontal)
+        browser = self.browser_splitter = Splitter(Qt.Orientation.Horizontal)
         browser.addWidget(left)
         browser.addWidget(right)
         browser.setStretchFactor(0, 1)
@@ -2833,6 +2833,13 @@ class MainWindow(QMainWindow):
         geometry = QSettings().value("window/geometry")
         if geometry is not None:
             self.restoreGeometry(geometry)
+        for name, splitter in self._splitters().items():
+            state = QSettings().value(f"window/{name}")
+            if state is not None:
+                splitter.restoreState(state)
+
+    def _splitters(self) -> dict[str, Splitter]:
+        return {"browserSplitter": self.browser_splitter, "rightSplitter": self.right_splitter}
 
     # ------------------------------------------------------------- events
     def dragEnterEvent(self, event) -> None:
@@ -2869,6 +2876,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         QSettings().setValue("window/geometry", self.saveGeometry())
+        for name, splitter in self._splitters().items():
+            QSettings().setValue(f"window/{name}", splitter.saveState())
         self._update_runner.wait()
         self.preview.stop()
         if self._preview_dir is not None:
