@@ -127,8 +127,13 @@ The preview uses the same audio engine as AKAISDS.
 ## Taking files out
 
 Select files and use **File > Export…** (Ctrl/Cmd+E) to copy them out of the image exactly as Akai stores them, or
-**File > Export as WAV…** (Ctrl/Cmd+Shift+E) to convert samples to WAV files. A WAV exported this way carries the sample's loops
-and settings in an extra chunk, so importing it back restores them.
+**File > Export as WAV…** (Ctrl/Cmd+Shift+E) to convert samples to WAV files. A WAV exported this way carries the sample's root
+note and loop points in the standard `smpl` chunk, so a DAW or sample editor sees them, and also the sampler's own settings in an
+extra chunk, so importing it back into this program restores everything. (Loops are only written if the sample's play mode loops.
+The sample's tuning offset isn't in the `smpl` chunk.)
+
+To take out a whole volume, partition or disk, right-click it in the tree and choose **Export Samples as WAV…**. Each volume gets
+a folder named after it (`A - DRUMS`) inside the folder you pick. Programs and other non-sample files aren't included.
 
 If you export files from several volumes at once, each volume gets its own folder so same-named files can't overwrite each other.
 If a file already exists in the folder you're asked whether to replace it (with Replace All and Skip All for big batches).

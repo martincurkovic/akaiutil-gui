@@ -13,12 +13,14 @@ there is a subprocess underneath.
 
 import os
 import shutil
+import struct
 import threading
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
 from .. import akai_names, describe, sorting, tags as filetags
+from ..audio import wavfile
 from . import formats, parse
 from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, SampleInfo, Volume
 from .session import EngineError, Session, TrafficCallback
@@ -179,8 +181,8 @@ class AkaiEngine:
     ) -> ExportResult:
         """Copy files out of the disk image into dest_dir.
 
-        as_wav converts samples with akaiutil's `sample2wavi`; otherwise the
-        raw Akai file is written with `geti`. Existing destination files are
+        as_wav converts samples with akaiutil's `sample2wavi` (and adds a "smpl" chunk with the root note and loops,
+        which akaiutil leaves out); otherwise the raw Akai file is written with `geti`. Existing destination files are
         only replaced if confirm_overwrite(path) says so (default: never).
         """
         dest = Path(dest_dir)
@@ -206,6 +208,11 @@ class AkaiEngine:
                         result.skipped.append(str(target))
                         continue
                     shutil.move(str(src), str(target))
+                    if as_wav:
+                        try:
+                            wavfile.add_loop_info(target)  # so a DAW sees the loops and root note too
+                        except (OSError, struct.error):
+                            pass  # (the WAV is fine without them)
                     result.exported.append(str(target))
         return result
 

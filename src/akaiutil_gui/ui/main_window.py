@@ -1040,6 +1040,47 @@ class MainWindow(QMainWindow):
 
         self._run(work, lambda res: self._export_done(res, dest))
 
+    def _export_node(self, obj) -> None:
+        """Export every sample in a volume, partition or disk as WAV files, a folder for each volume."""
+        engine = self._engine
+        if engine is None or self._busy():
+            return
+        dest = self._export_destination()
+        if not dest:
+            return
+        asker = _OverwriteAsker(self)
+        self.statusBar().showMessage("Exporting samples as WAV…")
+
+        def work() -> ExportResult:
+            merged = ExportResult()
+            for vol in self._volumes_under(engine, obj):
+                samples = [f for f in engine.list_files(vol) if f.is_sample]
+                if not samples:
+                    continue
+                target = Path(dest) / export_folder_name(vol, False)
+                target.mkdir(parents=True, exist_ok=True)
+                res = engine.export_files(vol, samples, target, True, confirm_overwrite=asker.ask)
+                merged.exported += res.exported
+                merged.skipped += res.skipped
+                merged.failed += res.failed
+            return merged
+
+        def done(res: ExportResult) -> None:
+            if not (res.exported or res.skipped or res.failed):
+                self.statusBar().showMessage("There are no samples to export there.", 8000)
+                return
+            self._export_done(res, dest)
+
+        self._run(work, done)
+
+    @staticmethod
+    def _volumes_under(engine, obj) -> list[Volume]:
+        """The volumes inside a tree item (a volume is itself), leaving out direct-to-disk recording partitions."""
+        if isinstance(obj, Volume):
+            return [obj]
+        partitions = [obj] if isinstance(obj, Partition) else engine.list_partitions(obj)
+        return [v for p in partitions if not p.is_dd for v in engine.list_volumes(p)]
+
     def _export_destination(self) -> str | None:
         """Where to export to: the default folder from Settings (without asking, if that's what's set), or a
         folder the user picks, starting from the default folder or the last one used."""
@@ -1775,11 +1816,18 @@ class MainWindow(QMainWindow):
             paste.setEnabled(self._clip is not None)
             menu.addAction("Sort Files by Name…", lambda: self._sort_volume(obj))
             menu.addSeparator()
+            menu.addAction("Export Samples as WAV…", lambda: self._export_node(obj))
+            menu.addSeparator()
             menu.addAction("Rename…", lambda: self._rename_volume(obj))
             menu.addAction("Delete…", lambda: self._delete_volume(obj))
-        elif isinstance(obj, Partition) and self._can_hold_volumes(obj):
-            menu.addAction("New Volume…", lambda: self._new_volume(obj))
+        elif isinstance(obj, Partition):
+            if self._can_hold_volumes(obj):
+                menu.addAction("New Volume…", lambda: self._new_volume(obj))
+            if not obj.is_dd:
+                menu.addAction("Export Samples as WAV…", lambda: self._export_node(obj))
         elif isinstance(obj, Disk):
+            menu.addAction("Export Samples as WAV…", lambda: self._export_node(obj))
+            menu.addSeparator()
             if self.tree.disk_path(obj.index):
                 menu.addAction(reveal.label(), lambda: self._reveal_disk(obj))
             menu.addAction("Close Disk Image", lambda: self.close_disk(obj))

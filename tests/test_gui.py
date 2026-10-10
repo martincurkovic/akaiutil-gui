@@ -1080,6 +1080,37 @@ def test_exporting_results_from_one_volume_goes_straight_into_the_folder(app, th
     assert [p.name for p in tmp_path.iterdir()] == ["LEAD.S3"]  # no sub-folder
 
 
+def exported(tmp_path):
+    return sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*.wav"))
+
+
+def test_a_disk_exports_every_sample_into_a_folder_per_volume(app, three_disks, tmp_path):
+    w = three_disks
+    settings.set_default_export_folder(str(tmp_path))
+    settings.set_ask_export_folder(False)
+    w._export_node(w.tree.disk(0))
+    assert pump(app, lambda: "Exported" in w.statusBar().currentMessage())
+    assert exported(tmp_path) == ["A - BASS/BASS.wav", "A - DRUMS/KICK.wav", "A - DRUMS/SNARE.wav", "A - MY SYNTH/LEAD.wav"]
+    assert "4 file(s)" in w.statusBar().currentMessage()
+
+
+def test_a_partition_and_a_volume_export_just_their_own_samples(app, three_disks, tmp_path):
+    w = three_disks
+    settings.set_default_export_folder(str(tmp_path))
+    settings.set_ask_export_folder(False)
+    w._export_node(w.tree.partition(1, "A"))  # the S1000 floppy
+    assert pump(app, lambda: "Exported" in w.statusBar().currentMessage())
+    assert exported(tmp_path) == ["A - NOT NAMED/KICK.wav", "A - NOT NAMED/SNARE.wav"]
+    other = tmp_path / "more"
+    other.mkdir()
+    settings.set_default_export_folder(str(other))
+    w.statusBar().clearMessage()
+    drums = next(v for v in w._engine.list_volumes(w.tree.partition(0, "A")) if v.name == "DRUMS")
+    w._export_node(drums)
+    assert pump(app, lambda: "Exported" in w.statusBar().currentMessage())
+    assert exported(other) == ["A - DRUMS/KICK.wav", "A - DRUMS/SNARE.wav"]
+
+
 def test_the_export_folder_name_is_safe(app):
     from akaiutil_gui.engine.models import Volume
     from akaiutil_gui.ui.main_window import export_folder_name

@@ -255,8 +255,9 @@ def test_new_volume_is_only_offered_where_a_volume_can_go(qt_app, window, images
     assert pump(qt_app, lambda: window.tree.partition(0, "A") is not None and window.tree.partition(1, "A") is not None)
     hd_part, floppy_part = window.tree.partition(0, "A"), window.tree.partition(1, "A")
     assert window._can_hold_volumes(hd_part) and not window._can_hold_volumes(floppy_part)
-    assert window._tree_menu(hd_part) is not None
-    assert window._tree_menu(floppy_part) is None
+    names = lambda menu: [a.text() for a in menu.actions() if not a.isSeparator()]  # noqa: E731
+    assert "New Volume…" in names(window._tree_menu(hd_part))
+    assert "New Volume…" not in names(window._tree_menu(floppy_part))
     assert [a.text() for a in window._tree_menu(window.tree.disk(0)).actions() if not a.isSeparator()][-1] == "Format Disk…"
 
 
@@ -366,8 +367,8 @@ def test_the_edit_menu_is_off_without_an_image(qt_app, window):
 def test_context_menus_offer_what_fits_what_was_clicked(qt_app, window, editable_hd, answers):
     open_and_show(qt_app, window, editable_hd)
     texts = lambda menu: [a.text().replace("&", "") for a in menu.actions() if not a.isSeparator()]  # noqa: E731
-    assert texts(window._tree_menu(window._volume)) == ["Import Files…", "Paste Files", "Sort Files by Name…", "Rename…", "Delete…"]
-    assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…"]
+    assert texts(window._tree_menu(window._volume)) == ["Import Files…", "Paste Files", "Sort Files by Name…", "Export Samples as WAV…", "Rename…", "Delete…"]
+    assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…", "Export Samples as WAV…"]
 
     window.table.selectRow(0)
     rows = window._selected_rows()

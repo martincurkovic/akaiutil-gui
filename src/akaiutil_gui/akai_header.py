@@ -8,6 +8,7 @@ akaiutil itself writes the name and the number of samples, and uses the rest as 
 """
 
 import struct
+from dataclasses import dataclass
 
 LOOP_HOLD = 9999  # a loop time meaning "until the key is released"
 MAX_LOOPS = 8
@@ -38,3 +39,37 @@ def build_header(sample_type: str, rate: int, frames: int, root: int = 60, loops
     h[136:138] = struct.pack("<H", 0xFFFF)  # stpaira: no stereo partner
     h[138:140] = struct.pack("<H", min(rate, 0xFFFF))
     return bytes(h)
+
+
+@dataclass(frozen=True)
+class HeaderInfo:
+    """What a DAW wants to know from a sample header."""
+
+    root: int  # MIDI note the sample plays at its original pitch
+    rate: int
+    frames: int
+    looping: bool  # the play mode loops (a header can hold loops that its play mode ignores)
+    loops: tuple[tuple[int, int], ...]  # (first frame, last frame) of each loop that is in use
+
+
+PMODE_LOOP, PMODE_LOOP_UNTIL_RELEASE = 0, 1
+
+
+def parse_header(data: bytes) -> HeaderInfo | None:
+    """Read an S1000/S3000 sample header (the same fields build_header writes). None if it isn't one."""
+    if len(data) < 150 or data[0] != 3:
+        return None
+    frames = struct.unpack_from("<I", data, 26)[0]
+    loops = []
+    for i in range(min(data[16], MAX_LOOPS)):
+        at, _fine, length, time = struct.unpack_from("<IHIH", data, 38 + 12 * i)
+        if time == 0 or length == 0 or length > at or at >= frames:
+            continue  # (time 0 is a loop that is switched off)
+        loops.append((at - length, at))
+    return HeaderInfo(
+        root=data[2] if data[2] <= 127 else 60,
+        rate=struct.unpack_from("<H", data, 138)[0],
+        frames=frames,
+        looping=data[19] in (PMODE_LOOP, PMODE_LOOP_UNTIL_RELEASE),
+        loops=tuple(loops),
+    )

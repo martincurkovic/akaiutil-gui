@@ -235,7 +235,7 @@ def test_the_other_disks_selection_survives_closing_a_later_one(qt_app, three):
 def test_a_disks_context_menu_offers_reveal_close_and_format(qt_app, three):
     window = three
     texts = [a.text() for a in window._tree_menu(window.tree.disk(1)).actions() if not a.isSeparator()]
-    assert texts == [reveal.label(), "Close Disk Image", "Format Disk…"]
+    assert texts == ["Export Samples as WAV…", reveal.label(), "Close Disk Image", "Format Disk…"]
 
 
 def test_reveal_goes_to_the_disks_file(qt_app, three, monkeypatch):
