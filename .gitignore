@@ -27,6 +27,24 @@ build/
 testing_images/
 *.img
 
+# --- standalone app builds (pyside6-deploy / Nuitka) ----------------------------
+# written by scripts/build_*: the version from the git tag, the generated deploy spec, and the outputs
+src/akaiutil_gui/_version.py
+*.spec
+*.build/
+*.dist/
+*.onefile-build/
+nuitka-crash-report.xml
+*.app/
+deployment/
+*.dmg
+*.AppImage
+*.exe
+/dmg-staging
+/AppDir
+/appimagetool-*
+/akaiutil-GUI-Setup.exe
+
 # --- editors and OS --------------------------------------------------------
 .DS_Store
 .idea/
