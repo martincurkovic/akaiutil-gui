@@ -23,6 +23,8 @@ there is no undo (see [Editing](#editing)).
   disk images.
 - **Settings** (File > Settings, or Cmd/Ctrl+,): theme, audio output device and buffer size, whether samples play when
   selected, a default export folder, which akaiutil to use, and whether to check for updates.
+- **A log file** (Help > Show Log File) of what the app did and every error, with an option to record every akaiutil command,
+  for bug reports. A `crash.log` beside it catches the program dying in native code. See "Reporting a problem" in the manual.
 - **Check for updates** from the Help menu, and automatically once a day at startup (switch it off in Settings). It only ever
   points you at the GitHub release page; it doesn't download anything itself.
 
@@ -72,8 +74,10 @@ built). The GUI tests run offscreen.
 
 Every image opens read-only, and the status bar says so. **Edit > Allow Editing** (or just asking for a change from a
 right-click menu) asks first, then restarts akaiutil in read/write mode on the same images. From then on each change is
-written to the image file straight away and **can't be undone**, so work on a copy of anything that matters. Opening
-images again puts the app back in read-only mode.
+written to the image file straight away and **can't be undone**, so the first time you switch editing on the app offers to
+**back the images up** (kept in the app's data folder, the newest 5 per image), and **File > Revert to Backup…** puts one back.
+Backups older than 14 days (changeable in Settings) are deleted when the app starts.
+Opening images again puts the app back in read-only mode.
 
 - **Rename** (F2, or right-click): volumes and files. A file's type (`.S3`, `.P3`...) can't be changed this way. Akai names
   are up to 12 characters (10 on an S900) of letters, digits, space and `# + - .`, always in capitals.
