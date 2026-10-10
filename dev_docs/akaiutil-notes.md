@@ -34,6 +34,12 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   inside a volume). Another partition can use other names, so a copy maps tags by name (`tags.map_tags`). Floppies have none.
 - A format of a disk makes other blank images in the session print "invalid format" every restart: don't read that as failure.
 
+## Exporting audio
+- `sample2wav*` writes fmt, data and the `S1H `/`S3H ` header chunk, and **no `smpl` chunk**, so a DAW sees no loops or root note.
+  `audio/wavfile.add_loop_info` reads the header (`akai_header.parse_header`) and appends one: root key, and the loops that are
+  in use (time not 0, within the sample) if the play mode loops (LOOP / LOOPNOTREL). The tuning offset isn't carried.
+  S900 samples have no such chunk and get nothing.
+
 ## Importing audio
 - `wav2sample*` reads mono/stereo 8/16/24/32-bit PCM at any rate (it writes the rate into the header) and splits stereo into
   `NAME      -L` / `-R` itself (name padded to 10 characters first, as the samplers' stereo pairs are).
