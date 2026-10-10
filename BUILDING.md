@@ -41,8 +41,19 @@ QT_QPA_PLATFORM=offscreen src/akaiutil-GUI.app/Contents/MacOS/main --smoke-test=
 
 ## Icons
 
-`assets/icon/icon_source.png` is the master (square, at least 1024x1024). `scripts/make_icons.sh` (macOS only) turns it
-into `icon_512x512.png` (Linux and Windows) and `akaiutil-GUI-macos.icns`. Commit all three.
+`assets/icon/AppIcon1024.png` is the master: 1024x1024 and already in macOS icon form (a rounded square about 824px wide,
+centred, soft shadow, transparent corners), exported from IconKitchen or a similar tool. Everything else is made from it:
+
+- `assets/icon/akaiutil-GUI-macos.icns` (macOS app): run `scripts/make_icns.sh` (macOS only). It builds all ten sizes
+  (16, 32, 128, 256, 512 points at 1x and 2x) by scaling the master *down*.
+- `assets/icon/icon_512x512.png` (Linux AppImage and Windows installer):
+  `sips -z 512 512 assets/icon/AppIcon1024.png --out assets/icon/icon_512x512.png`
+
+`icon_source.png` is the plain full-bleed artwork the master was made from. Commit all of them. A test fails if the `.icns`
+no longer matches the master or is missing a size.
+
+`scripts/make_icons.sh` is an older fallback that makes plain square icons straight from `icon_source.png`. It refuses to
+overwrite the exported files unless you pass `--force`; you won't normally need it.
 
 ## Running Tests
 
