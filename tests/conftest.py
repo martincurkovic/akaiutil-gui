@@ -101,3 +101,48 @@ def fake_audio(monkeypatch, qt_app):
     return FakeDevice
 
 
+
+
+# --------------------------------------------------------------------------- images that tests may change
+@pytest.fixture(scope="session")
+def small_hd_template(binary, tmp_path_factory):
+    """A small S3000 hard disk (4 partitions of 5 MB) with three volumes in A; tests that edit take a copy of it."""
+    import imagegen
+
+    out = tmp_path_factory.mktemp("editable")
+    wavs = out / "wavs"
+    wavs.mkdir()
+    for name, freq in [("KICK", 60), ("SNARE", 200), ("BASS", 55), ("LEAD", 440)]:
+        imagegen.write_sine_wav(wavs / f"{name}.wav", freq)
+    image = out / "template.img"
+    image.write_bytes(bytes(8192 * 2500))  # 20 MB
+    imagegen._script(binary, image, ["formatharddisk3 5M"], wavs)  # formatting restarts akaiutil: its own session
+    imagegen._script(
+        binary,
+        image,
+        [
+            "cd /disk0/A",
+            "mkvol3 DRUMS",
+            "mkvol3 BASS",
+            "mkvol3 MY_SYNTH",
+            "cd DRUMS",
+            "wav2sample3 KICK.wav",
+            "wav2sample3 SNARE.wav",
+            "cd ../BASS",
+            "wav2sample3 BASS.wav",
+            "cd ../MY_SYNTH",
+            "wav2sample3 LEAD.wav",
+        ],
+        wavs,
+    )
+    return image
+
+
+@pytest.fixture
+def editable_hd(small_hd_template, tmp_path):
+    """A private copy of the small hard disk that a test can rename, delete and create things in."""
+    import shutil
+
+    copy = tmp_path / "edit.img"
+    shutil.copy(small_hd_template, copy)
+    return copy

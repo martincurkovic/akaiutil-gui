@@ -8,7 +8,7 @@ marker, and the path in that prompt is the authoritative current directory.
 stderr is merged into stdout so error messages arrive in order with
 everything else.
 
-The process is always started read-only (-r) in this proof of concept.
+The process is started read-only (-r) unless the caller asks for a writable session.
 """
 
 import os
@@ -44,8 +44,10 @@ class Session:
         binary: str | os.PathLike,
         images: list[str | os.PathLike],
         on_traffic: TrafficCallback | None = None,
+        writable: bool = False,
     ):
         self._binary = str(binary)
+        self.writable = writable
         self._images = [str(Path(p).resolve()) for p in images]
         self._on_traffic = on_traffic
         self._lock = threading.RLock()
@@ -63,7 +65,7 @@ class Session:
 
     # ------------------------------------------------------------ lifecycle
     def start(self) -> str:
-        args = [self._binary, "-r", *self._images]
+        args = [self._binary, *([] if self.writable else ["-r"]), *self._images]
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash on Windows
         try:
             self._proc = subprocess.Popen(
@@ -81,6 +83,9 @@ class Session:
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
         self.banner = self._read_until_prompt(timeout=60).text
+        if self.writable and "read/write mode" not in self.banner:
+            self.close()  # never carry on believing we can write, or the other way round, when akaiutil says otherwise
+            raise EngineError("akaiutil didn't start in read/write mode.")
         return self.banner
 
     def close(self) -> None:
@@ -95,6 +100,10 @@ class Session:
                     proc.kill()
                     proc.wait()
             shutil.rmtree(self.staging_dir, ignore_errors=True)
+
+    @property
+    def images(self) -> list[str]:
+        return list(self._images)
 
     @property
     def alive(self) -> bool:

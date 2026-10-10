@@ -1,0 +1,620 @@
+"""Editing through the window: Allow Editing, rename, delete, new volume. Offscreen, real akaiutil, a copy of a small image."""
+
+import os
+import stat
+import time
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox
+
+from akaiutil_gui import settings
+from akaiutil_gui.engine import formats
+from akaiutil_gui.engine.models import Volume
+from akaiutil_gui.ui import edit_dialogs, theme
+
+
+def pump(app, cond, timeout=10.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        app.processEvents()
+        if cond():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+@pytest.fixture
+def window(qt_app, binary):
+    from akaiutil_gui.ui.main_window import MainWindow
+
+    theme.apply_to_app(qt_app, settings.THEME_DARK)
+    w = MainWindow()
+    w.resize(1100, 700)
+    w.show()
+    yield w
+    w.close()
+
+
+def vol(index, name="", part="A"):
+    """A Volume with just enough in it to find the real one in the tree."""
+    return Volume(0, part, index, name, "-", "0x0000", "17.00", "S3000")
+
+
+def tree_volumes(window, part="A"):
+    return [v.name for v in window.tree.volumes_in(0, part)]
+
+
+def open_and_show(app, window, image, volume_index=1, volume_name="DRUMS", files=2):
+    window.open_images([str(image)])
+    assert pump(app, lambda: window.tree.topLevelItemCount() == 1)
+    window.tree.reveal_volume(vol(volume_index))
+    assert pump(app, lambda: window._volume is not None and window._volume.index == volume_index and window.table.rowCount() == files)
+    assert window._volume.name == volume_name
+    assert pump(app, lambda: window._pending == 0 and window._index_ready())
+
+
+@pytest.fixture
+def answers(monkeypatch):
+    """Stand-ins for the questions the window asks; each test sets what is answered, and can see what was asked."""
+
+    class Answers:
+        confirm = True
+        name = None
+        new_volume = None
+        format = None
+        new_image = None
+        save_path = None
+        asked = []
+        warnings = []
+
+    a = Answers()
+    a.asked, a.warnings = [], []
+
+    def confirm(parent, title, text, detail="", action="Delete", details_lines=()):
+        a.asked.append((title, text, detail, action, list(details_lines)))
+        return a.confirm
+
+    monkeypatch.setattr(edit_dialogs, "confirm", confirm)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kw: a.warnings.append(args[1:3]) or QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kw: a.warnings.append(args[1:3]) or QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kw: a.warnings.append(args[1:3]) or QMessageBox.StandardButton.Ok)
+    from akaiutil_gui.ui.main_window import MainWindow
+
+    monkeypatch.setattr(MainWindow, "_ask_name", lambda self, what, current, vtype, taken, suffix="": (a.asked.append(("name", what, current, list(taken), suffix)), a.name)[1])
+    monkeypatch.setattr(MainWindow, "_ask_new_volume", lambda self, *args: (a.asked.append(("new", args)), a.new_volume)[1])
+    monkeypatch.setattr(MainWindow, "_ask_format", lambda self, disk: (a.asked.append(("format", disk.index, disk.type)), a.format)[1])
+    monkeypatch.setattr(MainWindow, "_ask_new_image", lambda self: (a.asked.append(("newimage",)), a.new_image)[1])
+    monkeypatch.setattr(MainWindow, "_ask_save_path", lambda self, suggestion: (a.asked.append(("save", suggestion)), a.save_path)[1])
+    monkeypatch.setattr(MainWindow, "_warn", lambda self, title, text, details=None: a.warnings.append((title, text, details)))
+    return a
+
+
+# ------------------------------------------------------------------- the mode
+def test_images_open_read_only_and_the_edit_menu_says_so(qt_app, window, editable_hd):
+    open_and_show(qt_app, window, editable_hd)
+    assert not window._writable
+    assert window.mode_label.text() == "Read-only"
+    assert not window.act_allow_edit.isChecked() and window.act_allow_edit.isEnabled()
+    assert window.act_new_volume.isEnabled()  # asking to is how you switch editing on
+    assert not window.act_rename.isEnabled() or window.act_rename.text() == "&Rename Volume…"
+
+
+def test_allow_editing_asks_first_and_then_switches_the_mode(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    answers.confirm = False
+    window.act_allow_edit.trigger()
+    assert not window._writable and not window.act_allow_edit.isChecked()
+    assert answers.asked[-1][0] == "Allow editing?" and answers.asked[-1][3] == "Allow Editing"
+
+    answers.confirm = True
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    assert window.act_allow_edit.isChecked() and window.mode_label.text() == "Editing"
+    assert window.mode_label.property("editing") is True
+    assert window._engine.is_writable
+
+    window.act_allow_edit.trigger()  # untick: no question needed to make things safer
+    assert pump(qt_app, lambda: not window._writable)
+    assert window.mode_label.text() == "Read-only" and not window._engine.is_writable
+
+
+def test_the_view_survives_switching_editing_on(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    assert window._volume.name == "DRUMS" and window.table.rowCount() == 2  # nothing was reloaded or lost
+    assert window.tree.current_object().name == "DRUMS"
+
+
+def test_every_image_opens_read_only_again(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    window.open_images([str(editable_hd)])
+    assert not window._writable and window.mode_label.text() == "Read-only"
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1)
+    assert not window._engine.is_writable
+    window.close_images()
+    assert not window._writable and not window.act_allow_edit.isEnabled()
+
+
+def test_a_file_that_cant_be_written_is_named_and_editing_stays_off(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    editable_hd.chmod(stat.S_IRUSR)
+    try:
+        if os.access(editable_hd, os.W_OK):
+            pytest.skip("this account can write to read-only files")
+        window.act_allow_edit.trigger()
+        assert not window._writable and not window.act_allow_edit.isChecked()
+        assert answers.warnings and "edit.img" in answers.warnings[-1][1]
+        assert not any(a[0] == "Allow editing?" for a in answers.asked)  # no point asking
+    finally:
+        editable_hd.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
+# --------------------------------------------------------------------- volumes
+def test_renaming_a_volume_from_read_only_asks_then_does_it(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    answers.name = "KICK KIT"
+    window._rename_volume(window._volume)
+    assert pump(qt_app, lambda: window._writable and "KICK KIT" in tree_volumes(window))
+    assert [a[0] for a in answers.asked][0] == "Allow editing?"
+    assert tree_volumes(window) == ["KICK KIT", "BASS", "MY SYNTH"]
+    # still looking at the same volume, now under its new name, files and all
+    assert pump(qt_app, lambda: window._volume is not None and window._volume.name == "KICK KIT" and window.table.rowCount() == 2)
+    assert window.tree.currentItem().text(0) == "KICK KIT"
+    assert window.files_title.text() == "Files in /disk0/A/KICK KIT"
+    assert "Renamed “DRUMS” to “KICK KIT”" in window.statusBar().currentMessage()
+
+
+def test_the_rename_question_knows_the_other_names_in_the_partition(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    answers.name = None  # cancelled
+    window._rename_volume(window._volume)
+    assert pump(qt_app, lambda: any(a[0] == "name" for a in answers.asked))
+    kind, what, current, taken, suffix = next(a for a in answers.asked if a[0] == "name")
+    assert (what, current, sorted(taken), suffix) == ("volume", "DRUMS", ["BASS", "MY SYNTH"], "")
+    assert tree_volumes(window) == ["DRUMS", "BASS", "MY SYNTH"]  # cancelled: nothing happened
+
+
+def test_a_refused_rename_says_why_and_leaves_the_disk_as_it_was(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    answers.name = "BASS"  # the dialog would have stopped this; the engine must too
+    window._rename_volume(window._volume)
+    assert pump(qt_app, lambda: bool(answers.warnings))
+    assert "already a volume called “BASS”" in answers.warnings[-1][1]
+    assert pump(qt_app, lambda: tree_volumes(window) == ["DRUMS", "BASS", "MY SYNTH"])  # reloaded, as it was
+    assert pump(qt_app, lambda: window._volume is not None and window.table.rowCount() == 2)
+
+
+def test_deleting_a_volume_asks_how_many_files_go_with_it(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window._delete_volume(window._volume)
+    assert pump(qt_app, lambda: "DRUMS" not in tree_volumes(window) and tree_volumes(window))
+    title, text, detail, action, _ = next(a for a in answers.asked if a[0] == "Delete volume?")
+    assert text == "Delete the volume “DRUMS”?" and "2 files" in detail and action == "Delete"
+    assert tree_volumes(window) == ["BASS", "MY SYNTH"]
+    # nothing is left selected that doesn't exist: the partition it was in is
+    assert pump(qt_app, lambda: window._volume is None and window.tree.current_object() is not None)
+    assert window.tree.current_object().name == "A"
+    assert window.table.rowCount() == 0
+
+
+def test_saying_no_to_a_delete_changes_nothing(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    answers.confirm = False
+    window._delete_volume(window._volume)
+    qt_app.processEvents()
+    assert tree_volumes(window) == ["DRUMS", "BASS", "MY SYNTH"] and window._pending == 0
+
+
+def test_a_new_volume_appears_selected_in_the_tree(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    part = window.tree.partition(0, "A")
+    answers.new_volume = ("FRESH KIT", 5, "S3000", 9)
+    window._new_volume(part)
+    assert pump(qt_app, lambda: "FRESH KIT" in tree_volumes(window))
+    assert pump(qt_app, lambda: window._volume is not None and window._volume.name == "FRESH KIT")
+    assert window._volume.index == 5 and window._volume.load_number == "009"
+    assert pump(qt_app, lambda: window.table.rowCount() == 0 and window._pending == 0)
+    assert tree_volumes(window) == ["DRUMS", "BASS", "MY SYNTH", "FRESH KIT"]
+    used, limit, types, default, taken = next(a for a in answers.asked if a[0] == "new")[1][1:6]
+    assert (used, limit, types, default, sorted(taken)) == ([1, 2, 3], 100, ["S3000", "S1000", "CD3000"], "S3000", ["BASS", "DRUMS", "MY SYNTH"])
+
+
+def test_the_suggested_volume_type_is_what_the_partition_mostly_holds(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    part = window.tree.partition(0, "A")
+    assert window._volume_types(part) == (["S3000", "S1000", "CD3000"], "S3000")
+    assert window._volume_types(window.tree.partition(0, "B")) == (["S3000", "S1000", "CD3000"], "S3000")  # empty: the usual
+
+
+def test_new_volume_is_only_offered_where_a_volume_can_go(qt_app, window, images, editable_hd, answers):
+    window.open_images([str(editable_hd), str(images["fl1"])])
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 2)
+    assert pump(qt_app, lambda: window.tree.partition(0, "A") is not None and window.tree.partition(1, "A") is not None)
+    hd_part, floppy_part = window.tree.partition(0, "A"), window.tree.partition(1, "A")
+    assert window._can_hold_volumes(hd_part) and not window._can_hold_volumes(floppy_part)
+    assert window._tree_menu(hd_part) is not None
+    assert window._tree_menu(floppy_part) is None
+    assert [a.text() for a in window._tree_menu(window.tree.disk(0)).actions()] == ["Format Disk…"]
+
+
+# ----------------------------------------------------------------------- files
+def test_renaming_a_file_keeps_it_selected_under_its_new_name(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    kick = next(f for f in window._volume_files if f.name == "KICK.S3")
+    answers.name = "thump"
+    window._rename_file(window._volume, kick)
+    assert pump(qt_app, lambda: window._writable and "THUMP.S3" in [window.table.item(r, 1).text() for r in range(window.table.rowCount())])
+    asked = next(a for a in answers.asked if a[0] == "name")
+    assert asked[1:] == ("file", "KICK", ["SNARE"], ".S3")  # the type isn't part of what's typed; other names of that type are taken
+    assert pump(qt_app, lambda: [f.name for _, f in window.table.selected_rows()] == ["THUMP.S3"])
+    assert pump(qt_app, lambda: 'THUMP' in window.info.toPlainText())  # its details were read again, not left from before
+    assert "Renamed “KICK.S3” to “THUMP.S3”" in window.statusBar().currentMessage()
+
+
+def test_deleting_selected_files_asks_once_for_all_of_them(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window.table.selectAll()
+    rows = window._selected_rows()
+    window._delete_files(rows)
+    assert pump(qt_app, lambda: window.table.rowCount() == 0 and window._writable)
+    title, text, detail, action, lines = next(a for a in answers.asked if a[0] == "Delete files?")
+    assert text == "Delete 2 files from DRUMS?" and sorted(lines) == ["DRUMS: KICK.S3", "DRUMS: SNARE.S3"]
+    assert "Deleted 2 files." in window.statusBar().currentMessage()
+    # the volume is still there, empty, and the space it used is free again
+    assert tree_volumes(window) == ["DRUMS", "BASS", "MY SYNTH"]
+    assert pump(qt_app, lambda: window._index_ready() and not [e for e in window._catalog if e.volume.name == "DRUMS"])
+
+
+def test_deleting_one_file_names_it(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    snare = next(f for f in window._volume_files if f.name == "SNARE.S3")
+    window._delete_files([(window._volume, snare)])
+    assert pump(qt_app, lambda: window._writable and window.table.rowCount() == 1)
+    assert next(a for a in answers.asked if a[0] == "Delete files?")[1] == "Delete “SNARE.S3” from DRUMS?"
+    assert window.table.item(0, 1).text() == "KICK.S3"
+
+
+def test_the_usage_bar_and_tree_notice_the_space_that_deleting_freed(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    free_before = window.tree.partition(0, "A").free_blocks
+    window._delete_volume(window._volume)
+    assert pump(qt_app, lambda: window.tree.partition(0, "A") is not None and window.tree.partition(0, "A").free_blocks > free_before)
+    assert pump(qt_app, lambda: window.tree.disk(0).free_blocks > 0 and window._index_ready())
+
+
+# ----------------------------------------------------------------------- search
+def test_editing_a_search_result_keeps_the_search_showing(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window.search.setText("kick")
+    assert pump(qt_app, lambda: window._in_results and window.table.rowCount() == 1)
+    v, f = window._selected_rows()[0] if window._selected_rows() else (None, None)
+    window.table.selectRow(0)
+    (v, f), = window._selected_rows()
+    answers.name = "thump"
+    window._rename_file(v, f)
+    assert pump(qt_app, lambda: window._writable and window._in_results and window.table.rowCount() == 0)  # "kick" no longer matches
+    assert window.search.text() == "kick"
+    window.search.setText("thump")
+    assert pump(qt_app, lambda: window._in_results and window.table.rowCount() == 1 and window.table.item(0, 1).text() == "THUMP.S3")
+    window.search.clear()
+    assert pump(qt_app, lambda: not window._in_results and window.table.rowCount() == 2)
+    assert sorted(window.table.item(r, 1).text() for r in range(2)) == ["SNARE.S3", "THUMP.S3"]
+
+
+def test_deleting_search_results_from_several_volumes(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window.search.setText(".s3")
+    assert pump(qt_app, lambda: window._in_results and window.table.rowCount() == 4)
+    window.table.selectAll()
+    window._delete_files(window._selected_rows())
+    assert pump(qt_app, lambda: window._writable and window._in_results and window.table.rowCount() == 0)
+    assert next(a for a in answers.asked if a[0] == "Delete files?")[1] == "Delete 4 files from 3 volumes?"
+    window.search.clear()
+    assert pump(qt_app, lambda: not window._in_results)
+    assert window.table.rowCount() == 0 and tree_volumes(window) == ["DRUMS", "BASS", "MY SYNTH"]
+
+
+# ----------------------------------------------------------------- menus & keys
+def test_the_edit_menu_says_what_rename_and_delete_would_act_on(qt_app, window, editable_hd, answers, monkeypatch):
+    open_and_show(qt_app, window, editable_hd)
+
+    monkeypatch.setattr(type(window), "_focus_in", lambda self, widget: widget is self.tree)
+    window._update_edit_actions()
+    assert (window.act_rename.text(), window.act_delete.text()) == ("&Rename Volume…", "&Delete Volume…")
+    assert window.act_rename.isEnabled() and window.act_delete.isEnabled()
+
+    monkeypatch.setattr(type(window), "_focus_in", lambda self, widget: widget is self.table)
+    window._update_edit_actions()
+    assert not window.act_rename.isEnabled() and not window.act_delete.isEnabled()  # nothing selected in the list
+    window.table.selectRow(0)
+    window._update_edit_actions()
+    assert (window.act_rename.text(), window.act_delete.text()) == ("&Rename File…", "&Delete File…")
+    window.table.selectAll()
+    window._update_edit_actions()
+    assert window.act_rename.text() == "&Rename…" and not window.act_rename.isEnabled()  # which of two?
+    assert window.act_delete.text() == "&Delete 2 Files…" and window.act_delete.isEnabled()
+
+
+def test_the_edit_menu_is_off_without_an_image(qt_app, window):
+    window._update_edit_actions()
+    assert not any(a.isEnabled() for a in (window.act_rename, window.act_delete, window.act_new_volume, window.act_allow_edit))
+
+
+def test_context_menus_offer_what_fits_what_was_clicked(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    texts = lambda menu: [a.text().replace("&", "") for a in menu.actions() if not a.isSeparator()]  # noqa: E731
+    assert texts(window._tree_menu(window._volume)) == ["Rename…", "Delete…"]
+    assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…"]
+
+    window.table.selectRow(0)
+    rows = window._selected_rows()
+    menu = window._file_menu(rows)
+    assert texts(menu) == ["Export…", "Export as WAV…", "Rename…", "Delete…"]
+    window.table.selectAll()
+    menu = window._file_menu(window._selected_rows())
+    rename = next(a for a in menu.actions() if a.text() == "Rename…")
+    assert not rename.isEnabled()
+    assert "Delete 2 Files…" in texts(menu)
+
+
+def test_edit_keys_do_nothing_when_there_is_nothing_to_act_on(qt_app, window, editable_hd, answers, monkeypatch):
+    window._rename_focused()  # no image open
+    window._delete_focused()
+    open_and_show(qt_app, window, editable_hd)
+    monkeypatch.setattr(type(window), "_focus_in", lambda self, widget: widget is self.table)
+    window._delete_focused()  # focus in the list, nothing selected there
+    qt_app.processEvents()
+    assert not answers.asked and not window._writable
+
+
+def test_the_edit_keys_act_on_the_focused_pane(qt_app, window, editable_hd, answers, monkeypatch):
+    open_and_show(qt_app, window, editable_hd)
+    answers.name = None
+    monkeypatch.setattr(type(window), "_focus_in", lambda self, widget: widget is self.table)
+    window.table.selectRow(0)
+    window._rename_focused()
+    assert pump(qt_app, lambda: any(a[0] == "name" for a in answers.asked))
+    assert next(a for a in answers.asked if a[0] == "name")[1] == "file"
+
+    answers.asked.clear()
+    monkeypatch.setattr(type(window), "_focus_in", lambda self, widget: widget is self.tree)
+    window._rename_focused()
+    assert pump(qt_app, lambda: any(a[0] == "name" for a in answers.asked))
+    assert next(a for a in answers.asked if a[0] == "name")[1] == "volume"
+
+
+def test_the_f2_and_delete_keys_are_wired_to_both_panes(qt_app, window, editable_hd):
+    from PySide6.QtGui import QKeySequence, QShortcut
+
+    for widget in (window.table, window.tree):
+        keys = {s.key().toString() for s in widget.findChildren(QShortcut)}
+        assert {"F2", "Del", "Backspace"} <= keys
+
+
+# ----------------------------------------------------------------- the dialogs
+def ok_enabled(dialog):
+    return dialog.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
+
+
+def test_the_rename_dialog_only_accepts_a_real_change_to_a_good_unused_name(qt_app):
+    d = edit_dialogs.RenameDialog(None, "volume", "DRUMS", "S3000", taken=["BASS"])
+    assert d.edit.text() == "DRUMS" and not ok_enabled(d)  # unchanged
+    d.edit.setText("drum kit")
+    assert ok_enabled(d) and d.name == "DRUM KIT" and d.problem.text() == ""
+    d.edit.setText("bass")
+    assert not ok_enabled(d) and "already one called “BASS”" in d.problem.text()
+    d.edit.setText("A/B")
+    assert not ok_enabled(d) and "Not allowed" in d.problem.text()
+    d.edit.setText("")
+    assert not ok_enabled(d)
+    d.edit.setText("THIS IS TOO LONG")
+    assert not ok_enabled(d) and "At most 12" in d.problem.text()
+
+
+def test_the_rename_dialog_shows_a_files_type_next_to_the_box(qt_app):
+    from PySide6.QtWidgets import QLabel
+
+    d = edit_dialogs.RenameDialog(None, "file", "KICK", "S3000", suffix=".S3")
+    assert ".S3" in [lab.text() for lab in d.findChildren(QLabel)]
+    d.edit.setText("snare")
+    assert d.name == "SNARE" and ok_enabled(d)
+
+
+def test_the_new_volume_dialog_suggests_the_first_free_number_and_wants_a_name(qt_app):
+    d = edit_dialogs.NewVolumeDialog(None, "A", used=[1, 2, 4], limit=100, types=["S3000", "S1000", "CD3000"], default_type="S1000", taken=["DRUMS"])
+    assert d.volume_number == 3 and d.volume_type == "S1000" and d.load_number is None
+    assert not ok_enabled(d)  # no name yet
+    d.name_edit.setText("pads")
+    assert ok_enabled(d) and d.name == "PADS"
+    d.name_edit.setText("drums")
+    assert not ok_enabled(d) and "already a volume called “DRUMS”" in d.problem.text()
+    d.name_edit.setText("pads")
+    d.number.setValue(4)
+    assert not ok_enabled(d) and "Volume number 4 is already used" in d.problem.text()
+    d.number.setValue(5)
+    d.load.setValue(12)
+    assert ok_enabled(d) and d.load_number == 12
+    d.load.setValue(0)
+    assert d.load_number is None and d.load.text() == "Off"
+
+
+def test_the_new_volume_dialog_for_s900_has_only_one_type_and_a_shorter_name(qt_app):
+    d = edit_dialogs.NewVolumeDialog(None, "A", used=[], limit=10, types=["S900"], default_type="S900")
+    assert not d.type_combo.isEnabled() and d.volume_type == "S900"
+    d.name_edit.setText("ELEVEN CHRS")
+    assert not ok_enabled(d) and "At most 10" in d.problem.text()
+
+
+def test_a_full_partition_has_no_free_number_to_suggest(qt_app):
+    d = edit_dialogs.NewVolumeDialog(None, "A", used=[1, 2], limit=2, types=["S3000"], default_type="S3000")
+    d.name_edit.setText("one more")
+    assert not ok_enabled(d)  # the only number is taken
+
+
+def test_the_confirm_question_defaults_to_cancel_and_names_the_action(qt_app, monkeypatch):
+    seen = {}
+
+    def fake_exec(self):
+        seen["default"] = self.defaultButton().text()
+        seen["escape"] = self.escapeButton().text()
+        seen["buttons"] = sorted(b.text() for b in self.buttons() if b.text() != "Show Details...")
+        seen["detail"] = self.detailedText()
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    assert edit_dialogs.confirm(None, "Delete files?", "Delete 2 files?", "No undo.", details_lines=["a", "b"]) is False
+    assert seen["default"] == "Cancel" and seen["escape"] == "Cancel"
+    assert seen["buttons"] == ["Cancel", "Delete"] and seen["detail"] == "a\nb"
+
+
+# ------------------------------------------------------- formatting and new images
+def test_formatting_a_disk_erases_it_after_saying_what_will_be_lost(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window.tree.setCurrentItem(window.tree.topLevelItem(0))
+    assert pump(qt_app, lambda: window.tree.current_object() is not None and window._pending == 0)
+    answers.format = (formats.by_key("hd1"), 10)
+    window._format_disk()
+    assert pump(qt_app, lambda: window._writable and window.tree.topLevelItem(0).childCount() == 2)
+    title, text, detail, action, _ = next(a for a in answers.asked if a[0] == "Format disk?")
+    assert text == "Erase everything on “edit.img” and format it as S1000 hard disk?"
+    assert "4 files in 3 volumes" in detail and "can't be undone" in detail and action == "Erase and Format"
+    assert next(a for a in answers.asked if a[0] == "format")[1:] == (0, "HD")
+    top = window.tree.topLevelItem(0)
+    assert [top.child(i).text(0).split("  ·")[0] for i in range(top.childCount())] == ["A", "B"]
+    assert window.tree.current_object().index == 0 and "S1000 hard disk" in window.statusBar().currentMessage()
+    assert pump(qt_app, lambda: window._index_ready() and window._catalog == [])
+    assert pump(qt_app, lambda: window.table.rowCount() == 0)
+
+
+def test_saying_no_to_a_format_changes_nothing(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window.act_allow_edit.trigger()
+    assert pump(qt_app, lambda: window._writable)
+    window.tree.setCurrentItem(window.tree.topLevelItem(0))
+    pump(qt_app, lambda: window._pending == 0)
+    answers.format = (formats.by_key("hd3"), 60)
+    answers.confirm = False
+    window._format_disk()
+    qt_app.processEvents()
+    assert window.tree.topLevelItem(0).childCount() == 4
+    assert len(window._engine.list_partitions(window._engine.list_disks()[0])) == 4  # and the disk itself is as it was
+
+
+def test_formatting_a_blank_image_gives_it_a_filesystem(qt_app, window, tmp_path, answers):
+    blank = tmp_path / "blank.img"
+    blank.write_bytes(bytes(8192 * 2500))
+    window.open_images([str(blank)])
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1)
+    assert "no Akai filesystem found" in window.tree.topLevelItem(0).text(0)
+    answers.format = (formats.by_key("hd3"), 5)
+    window._format_disk(window.tree.disk(0))
+    assert pump(qt_app, lambda: window._writable and window.tree.topLevelItem(0).childCount() == 4)
+    assert pump(qt_app, lambda: "no Akai filesystem found" not in window.tree.topLevelItem(0).text(0))
+    top = window.tree.topLevelItem(0)
+    assert [top.child(i).text(0).split("  ·")[0] for i in range(4)] == ["A", "B", "C", "D"]
+
+
+def test_format_disk_is_in_the_edit_menu_and_the_disks_context_menu(qt_app, window, editable_hd, answers):
+    window._update_edit_actions()
+    assert not window.act_format.isEnabled()  # nothing open
+    open_and_show(qt_app, window, editable_hd)
+    window._update_edit_actions()
+    assert window.act_format.isEnabled()  # any selection on a disk will do
+    assert window._selected_disk().index == 0
+
+
+def test_a_new_image_is_created_and_opened(qt_app, window, tmp_path, answers):
+    target = tmp_path / "brand new.img"
+    answers.new_image = (formats.by_key("hd3"), 10, 5)
+    answers.save_path = str(target)
+    window._new_image()
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1 and window._images == [str(target)])
+    assert target.stat().st_size == 10 * formats.MB
+    assert pump(qt_app, lambda: window.tree.topLevelItem(0).childCount() == 2)
+    assert window.windowTitle().startswith("brand new.img")
+    assert next(a for a in answers.asked if a[0] == "save")[1].endswith("S3000 hard disk.img")
+    assert not window._writable  # it opens like any other image
+
+
+def test_a_new_image_joins_the_ones_already_open(qt_app, window, editable_hd, tmp_path, answers):
+    open_and_show(qt_app, window, editable_hd)
+    answers.new_image = (formats.by_key("fl1h"), 0, 0)
+    answers.save_path = str(tmp_path / "floppy")  # no extension typed: .img is added
+    window._new_image()
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 2)
+    assert [__import__("pathlib").Path(p).name for p in window._images] == ["edit.img", "floppy.img"]
+    assert (tmp_path / "floppy.img").stat().st_size == 1600 * 1024
+
+
+def test_cancelling_either_question_creates_nothing(qt_app, window, tmp_path, answers):
+    answers.new_image = None
+    window._new_image()
+    answers.new_image = (formats.by_key("hd3"), 10, 5)
+    answers.save_path = None
+    window._new_image()
+    qt_app.processEvents()
+    assert list(tmp_path.iterdir()) == [] and window.tree.topLevelItemCount() == 0
+
+
+def test_a_new_image_cant_replace_one_that_is_open(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    answers.new_image = (formats.by_key("hd3"), 10, 5)
+    answers.save_path = str(editable_hd)
+    before = editable_hd.stat().st_size
+    window._new_image()
+    qt_app.processEvents()
+    assert answers.warnings and answers.warnings[-1][0] == "That image is open"
+    assert editable_hd.stat().st_size == before
+
+
+def test_a_new_image_that_cant_be_created_says_so(qt_app, window, tmp_path, answers):
+    answers.new_image = (formats.by_key("hd3"), 10, 5)
+    answers.save_path = str(tmp_path / "missing folder" / "x.img")
+    window._new_image()
+    assert pump(qt_app, lambda: bool(answers.warnings))
+    assert "Couldn't create x.img" in answers.warnings[-1][1]
+    assert window.tree.topLevelItemCount() == 0
+
+
+def test_the_disk_format_dialog_for_a_new_image(qt_app):
+    d = edit_dialogs.DiskFormatDialog(None)
+    assert [d.type_combo.itemData(i) for i in range(d.type_combo.count())] == [f.key for f in formats.FORMATS]
+    assert d.format.key == "hd3" and d.size_mb == 128 and d.partition_mb == 60
+    assert d.summary.text() == "3 partitions of up to 60 MB, 128 MB in all."
+    d.size_spin.setValue(20)
+    d.partition_spin.setValue(5)
+    assert d.summary.text() == "4 partitions of up to 5 MB, 20 MB in all."
+    d.partition_spin.setValue(1)
+    assert "leaving 2 MB unused (at most 18 partitions)" in d.summary.text()
+    d.type_combo.setCurrentIndex(d.type_combo.findData("fl1h"))
+    assert d.summary.text() == "A 1.6 MB floppy image."
+    assert d.size_row[1].isHidden() and d.partition_row[1].isHidden()  # a floppy has one size
+    d.type_combo.setCurrentIndex(d.type_combo.findData("hd9"))
+    assert not d.size_row[1].isHidden() and d.partition_row[1].isHidden()  # an S900 disk has one partition
+    assert d.size_spin.maximum() == 64
+    assert d.buttons.button(QDialogButtonBox.StandardButton.Ok).text() == "Create…"
+
+
+def test_the_disk_format_dialog_for_an_existing_disk_keeps_its_size_and_density(qt_app, window, images, editable_hd):
+    from akaiutil_gui.engine.models import Disk
+
+    hd = Disk(0, "HD", 4, 8192, 2500, 2400, 19.5, 18.0, 90.0)
+    d = edit_dialogs.DiskFormatDialog(None, hd)
+    assert d.windowTitle() == "Format disk0" and d.size_row[1].isHidden()
+    assert [d.type_combo.itemData(i) for i in range(d.type_combo.count())] == ["hd3", "hd1", "hd3cd", "hd9"]
+    d.partition_spin.setValue(10)
+    assert d.summary.text() == "2 partitions of up to 10 MB, 19.5 MB in all."
+    assert d.buttons.button(QDialogButtonBox.StandardButton.Ok).text() == "Format…"
+
+    low = Disk(1, "FLL", 1, 1024, 800, 796, 0.8, 0.8, 99.5)
+    f = edit_dialogs.DiskFormatDialog(None, low)
+    assert [f.type_combo.itemData(i) for i in range(f.type_combo.count())] == ["fl3l", "fl1l", "fl9l"]

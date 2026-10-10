@@ -679,6 +679,17 @@ QLabel#usageLabel[level="critical"] {
     color: ${critical};
 }
 
+/* the status bar's Read-only / Editing indicator: Editing is the state to be careful in */
+QLabel#modeLabel {
+    color: ${text_disabled};
+    background: transparent;
+}
+
+QLabel#modeLabel[editing="true"] {
+    color: ${warning};
+    font-weight: 600;
+}
+
 QLabel#emptyState {
     color: ${text_disabled};
     font-size: 15px;

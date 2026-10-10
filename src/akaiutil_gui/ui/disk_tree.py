@@ -13,6 +13,7 @@ from .volume_colors import swatch_icon
 
 _ROLE_OBJ = Qt.ItemDataRole.UserRole
 _ROLE_LOADED = Qt.ItemDataRole.UserRole + 1
+_ROLE_TOKEN = Qt.ItemDataRole.UserRole + 2  # numbers the load that is wanted for an item; older answers are ignored
 
 _DISK_LABELS = {
     "HD": "S1000/S3000 hard disk",
@@ -22,8 +23,16 @@ _DISK_LABELS = {
 }
 
 
+def _disk_text(d: Disk) -> str:
+    text = f"disk{d.index}  ·  {_DISK_LABELS.get(d.type, d.type)}  ·  {d.total_mb:g} MB"
+    if d.partitions == 0:
+        text += "  ·  no Akai filesystem found"
+    return text
+
+
 class DiskTree(QTreeWidget):
     nodeSelected = Signal(object)  # Disk | Partition | Volume | None
+    contextRequested = Signal(object, object)  # (Disk | Partition | Volume | None, global QPoint): a right-click
     disksLoaded = Signal(list)  # list[Disk], once the top level is built
     failed = Signal(str)
 
@@ -36,10 +45,17 @@ class DiskTree(QTreeWidget):
         self._engine: AkaiEngine | None = None
         self._disks: dict[int, Disk] = {}
         self._volume_order: dict[int, dict[tuple[str, int], int]] = {}  # disk -> DiskUsage.volume_order()
-        self._reveal: tuple[int, str, int] | None = None  # a volume to select once its levels have loaded
+        # what to select once the levels down to it have loaded: (disk, partition or None, volume number or None)
+        self._reveal: tuple[int, str | None, int | None] | None = None
+        self._expand_after_load: set[tuple[int, str]] = set()  # partitions to open again when a disk is reloaded
+        self._refreshing = False  # a disk's children are being thrown away: the selection jumping about is noise
+        self._announce = True  # False: the next selection made by a reload is silent (nodeSelected isn't emitted)
+        self._load_seq = 0
         self._generation = 0  # bumped on every reload so stale async results are dropped
         self.itemExpanded.connect(self._on_expanded)
         self.currentItemChanged.connect(self._on_current)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         theme.notifier.changed.connect(self._refresh_swatches)  # swatch pixmaps bake the colour in
 
     def mouseDoubleClickEvent(self, event) -> None:
@@ -110,22 +126,40 @@ class DiskTree(QTreeWidget):
         self._reveal = (vol.disk, vol.partition, vol.index)
         self._try_reveal()
 
+    def _disk_item(self, disk_index: int) -> QTreeWidgetItem | None:
+        for i in range(self.topLevelItemCount()):
+            item = self.topLevelItem(i)
+            obj = item.data(0, _ROLE_OBJ)
+            if isinstance(obj, Disk) and obj.index == disk_index:
+                return item
+        return None
+
     def _try_reveal(self) -> None:
         target = self._reveal
         if target is None:
             return
         disk_index, part_name, vnr = target
-        disk_item = next(
-            (it for it in map(self.topLevelItem, range(self.topLevelItemCount())) if getattr(it.data(0, _ROLE_OBJ), "index", None) == disk_index and isinstance(it.data(0, _ROLE_OBJ), Disk)),
-            None,
-        )
+        disk_item = self._disk_item(disk_index)
         if disk_item is None:
+            return
+        if part_name is None:  # just the disk
+            self._reveal = None
+            if self.currentItem() is disk_item:
+                if self._announce:
+                    self.nodeSelected.emit(disk_item.data(0, _ROLE_OBJ))  # already current, so no signal would say it changed
+                self._announce = True
+            else:
+                self._select(disk_item)
             return
         if not disk_item.isExpanded():
             disk_item.setExpanded(True)
         part_item = next((c for c in map(disk_item.child, range(disk_item.childCount())) if isinstance(c.data(0, _ROLE_OBJ), Partition) and c.data(0, _ROLE_OBJ).name == part_name), None)
         if part_item is None:
             return  # the partitions are still loading
+        if vnr is None:  # just the partition
+            self._reveal = None
+            self._select(part_item)
+            return
         if not part_item.isExpanded():
             part_item.setExpanded(True)
         vol_item = next(
@@ -134,10 +168,101 @@ class DiskTree(QTreeWidget):
             None,
         )
         if vol_item is None:
-            return  # the volumes are still loading
+            loading = part_item.childCount() == 1 and part_item.child(0).data(0, _ROLE_OBJ) is None
+            if loading or not part_item.data(0, _ROLE_LOADED):
+                return  # the volumes are still loading
+            self._reveal = None  # it's gone (deleted): the partition it was in is the next best thing
+            self._select(part_item)
+            return
         self._reveal = None
-        self.setCurrentItem(vol_item)
+        self._select(vol_item)
         self.scrollToItem(vol_item)
+
+    def _select(self, item: QTreeWidgetItem) -> None:
+        if self._announce:
+            self.setCurrentItem(item)
+            return
+        self._announce = True
+        self._refreshing = True  # selecting without telling anyone: the window already shows what's wanted
+        try:
+            self.setCurrentItem(item)
+        finally:
+            self._refreshing = False
+
+    def refresh_disk(self, disk_index: int, select: Disk | Partition | Volume | None = None, announce: bool = True) -> None:
+        """Read a disk's partitions and volumes again (after it was changed), keeping the same partitions open and
+        selecting `select` (default: whatever is selected now) once it has loaded, or the nearest thing that's left.
+        With announce=False that selection doesn't emit nodeSelected."""
+        disk_item = self._disk_item(disk_index)
+        engine = self._engine
+        if disk_item is None or engine is None:
+            return
+        current = select if select is not None else self.current_object()
+        self._expand_after_load = {
+            (disk_index, c.data(0, _ROLE_OBJ).name)
+            for c in map(disk_item.child, range(disk_item.childCount()))
+            if isinstance(c.data(0, _ROLE_OBJ), Partition) and c.isExpanded()
+        }
+        if isinstance(current, Volume) and current.disk == disk_index:
+            self._reveal = (disk_index, current.partition, current.index)
+        elif isinstance(current, Partition) and current.disk == disk_index:
+            self._reveal = (disk_index, current.name, None)
+        elif isinstance(current, Disk) and current.index == disk_index:
+            self._reveal = (disk_index, None, None)
+        else:
+            self._reveal = None
+        self._announce = announce if self._reveal is not None else True
+        gen = self._generation
+        self._refreshing = True
+        try:
+            disk_item.takeChildren()
+            disk_item.setExpanded(False)
+            self._mark_expandable(disk_item)
+            disk_item.setData(0, _ROLE_LOADED, False)
+        finally:
+            self._refreshing = False
+        disk_item.setExpanded(True)  # loads the partitions again; they reopen their volumes and the selection follows
+        run_async(engine.list_disks, lambda disks: self._update_disks(gen, disks), self.failed.emit)
+
+    def _update_disks(self, gen: int, disks: list[Disk]) -> None:
+        """Sizes and free space of the disks as they are now (the labels and tooltips)."""
+        if gen != self._generation:
+            return
+        for d in disks:
+            item = self._disk_item(d.index)
+            if item is not None:
+                self._disks[d.index] = d
+                item.setData(0, _ROLE_OBJ, d)
+                item.setText(0, _disk_text(d))
+                item.setToolTip(0, f"{d.partitions} partition(s), {d.free_mb:g} MB free ({d.free_pct:g}%)")
+
+    def current_object(self):
+        item = self.currentItem()
+        return item.data(0, _ROLE_OBJ) if item is not None else None
+
+    def _on_context_menu(self, pos) -> None:
+        item = self.itemAt(pos)
+        if item is not None:
+            self.setCurrentItem(item)  # as in Finder, a right-click selects what it's about
+        obj = item.data(0, _ROLE_OBJ) if item is not None else None
+        self.contextRequested.emit(obj, self.viewport().mapToGlobal(pos))
+
+    def partition(self, disk_index: int, name: str) -> Partition | None:
+        disk_item = self._disk_item(disk_index)
+        if disk_item is None:
+            return None
+        return next((p for p in (c.data(0, _ROLE_OBJ) for c in map(disk_item.child, range(disk_item.childCount()))) if isinstance(p, Partition) and p.name == name), None)
+
+    def volumes_in(self, disk_index: int, partition: str) -> list[Volume]:
+        """The volumes shown in a partition (as far as they have been loaded)."""
+        disk_item = self._disk_item(disk_index)
+        if disk_item is None:
+            return []
+        for c in map(disk_item.child, range(disk_item.childCount())):
+            part = c.data(0, _ROLE_OBJ)
+            if isinstance(part, Partition) and part.name == partition:
+                return [v for v in (g.data(0, _ROLE_OBJ) for g in map(c.child, range(c.childCount()))) if isinstance(v, Volume)]
+        return []
 
     def disk(self, index: int) -> Disk | None:
         return self._disks.get(index)
@@ -159,11 +284,7 @@ class DiskTree(QTreeWidget):
         for d in disks:
             self._disks[d.index] = d
             floppy = d.type.startswith("FL")
-            label = _DISK_LABELS.get(d.type, d.type)
-            text = f"disk{d.index}  ·  {label}  ·  {d.total_mb:g} MB"
-            if d.partitions == 0:
-                text += "  ·  no Akai filesystem found"
-            item = QTreeWidgetItem([text])
+            item = QTreeWidgetItem([_disk_text(d)])
             item.setIcon(0, self._icon(QStyle.StandardPixmap.SP_DriveFDIcon if floppy else QStyle.StandardPixmap.SP_DriveHDIcon))
             item.setToolTip(0, f"{d.partitions} partition(s), {d.free_mb:g} MB free ({d.free_pct:g}%)")
             item.setData(0, _ROLE_OBJ, d)
@@ -190,16 +311,26 @@ class DiskTree(QTreeWidget):
         if item.data(0, _ROLE_LOADED) or self._engine is None:
             return
         item.setData(0, _ROLE_LOADED, True)
+        self._load_seq += 1
+        token = self._load_seq
+        item.setData(0, _ROLE_TOKEN, token)
         obj, eng, gen = item.data(0, _ROLE_OBJ), self._engine, self._generation
         if isinstance(obj, Disk):
-            run_async(lambda: eng.list_partitions(obj), lambda r: self._add_partitions(gen, item, r), self.failed.emit)
+            run_async(lambda: eng.list_partitions(obj), lambda r: self._add_partitions(gen, item, r, token), self.failed.emit)
         elif isinstance(obj, Partition):
-            run_async(lambda: eng.list_volumes(obj), lambda r: self._add_volumes(gen, item, r), self.failed.emit)
+            run_async(lambda: eng.list_volumes(obj), lambda r: self._add_volumes(gen, item, r, token), self.failed.emit)
 
-    def _add_partitions(self, gen: int, disk_item: QTreeWidgetItem, parts: list[Partition]) -> None:
-        if gen != self._generation:
+    def _stale(self, gen: int, item: QTreeWidgetItem, token: int) -> bool:
+        """True if this answer is to a question that no longer matters: the tree was reloaded, or the item was
+        thrown away or asked again since."""
+        return gen != self._generation or item.treeWidget() is not self or item.data(0, _ROLE_TOKEN) != token
+
+    def _add_partitions(self, gen: int, disk_item: QTreeWidgetItem, parts: list[Partition], token: int) -> None:
+        if self._stale(gen, disk_item, token):
             return
         disk_item.takeChildren()
+        if not parts:  # a disk with nothing on it (not formatted, or just erased): nothing to open
+            disk_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator)
         for p in parts:
             if p.is_dd:
                 text = f"{p.name}  ·  direct-to-disk  ·  {p.size_mb:g} MB"
@@ -213,10 +344,17 @@ class DiskTree(QTreeWidget):
             disk_item.addChild(item)
         if len(parts) == 1 and not parts[0].is_dd:  # a floppy: save the user a click
             disk_item.child(0).setExpanded(True)
+        disk_index = disk_item.data(0, _ROLE_OBJ).index
+        for i in range(disk_item.childCount()):  # the partitions that were open before a reload
+            child = disk_item.child(i)
+            obj = child.data(0, _ROLE_OBJ)
+            if (disk_index, obj.name) in self._expand_after_load and child.childCount():
+                child.setExpanded(True)
+        self._expand_after_load = {k for k in self._expand_after_load if k[0] != disk_index}
         self._try_reveal()
 
-    def _add_volumes(self, gen: int, part_item: QTreeWidgetItem, vols: list[Volume]) -> None:
-        if gen != self._generation:
+    def _add_volumes(self, gen: int, part_item: QTreeWidgetItem, vols: list[Volume], token: int) -> None:
+        if self._stale(gen, part_item, token):
             return
         part_item.takeChildren()
         for v in vols:
@@ -253,5 +391,7 @@ class DiskTree(QTreeWidget):
             stack.extend(item.child(i) for i in range(item.childCount()))
 
     def _on_current(self, current: QTreeWidgetItem | None, _previous) -> None:
+        if self._refreshing:
+            return
         obj = current.data(0, _ROLE_OBJ) if current is not None else None
         self.nodeSelected.emit(obj)

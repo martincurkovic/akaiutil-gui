@@ -17,8 +17,8 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import describe
-from . import parse
+from .. import akai_names, describe
+from . import formats, parse
 from .models import Disk, DiskUsage, ExportResult, FileEntry, Partition, SampleInfo, Volume
 from .session import EngineError, Session, TrafficCallback
 
@@ -35,11 +35,15 @@ class AkaiEngine:
     def is_open(self) -> bool:
         return self._session is not None and self._session.alive
 
-    def open(self, images: list[str | os.PathLike]) -> str:
-        """(Re)start akaiutil on the given disk images, read-only."""
+    @property
+    def is_writable(self) -> bool:
+        return self.is_open and self._session.writable
+
+    def open(self, images: list[str | os.PathLike], writable: bool = False) -> str:
+        """(Re)start akaiutil on the given disk images. Read-only unless `writable` says otherwise."""
         with self._lock:
             self.close()
-            session = Session(self._binary, images, self._on_traffic)
+            session = Session(self._binary, images, self._on_traffic, writable=writable)
             try:
                 banner = session.start()
             except EngineError:
@@ -47,6 +51,24 @@ class AkaiEngine:
                 raise
             self._session = session
             return banner
+
+    def set_writable(self, writable: bool) -> str:
+        """Restart akaiutil on the same images in read/write (or read-only) mode. What is shown stays valid:
+        nothing about the images changes, only what akaiutil will let us do to them."""
+        with self._lock:
+            session = self._need_session()
+            if session.writable == writable:
+                return session.banner
+            images = session.images
+            try:
+                return self.open(images, writable)
+            except EngineError:
+                if writable:  # open() has closed the old session: get back to where we were if we can
+                    try:
+                        self.open(images, False)
+                    except EngineError:
+                        pass
+                raise
 
     def close(self) -> None:
         with self._lock:
@@ -72,6 +94,13 @@ class AkaiEngine:
         with self._lock:
             self._enter_volume(vol)
             return parse.parse_files(self._run("dir").text)
+
+    def volume_slots(self, part: Partition) -> tuple[list[int], int]:
+        """(the volume numbers in use, the highest number the partition allows)."""
+        with self._lock:
+            text = self._run(f"dir {part.path}").text
+            used = [v.index for v in parse.parse_volumes(text, part.disk, part.name)]
+            return used, parse.parse_volume_limit(text) or 100
 
     def disk_usage(self, disk: Disk) -> DiskUsage:
         """Partitions plus the space each volume uses, from a single recursive listing."""
@@ -172,7 +201,171 @@ class AkaiEngine:
                     result.exported.append(str(target))
         return result
 
+    # ---------------------------------------------------------------- editing
+    # Every one of these needs a writable session (set_writable), changes the image straight away, and
+    # raises EngineError, with akaiutil's own explanation, if akaiutil refused. They check afterwards
+    # that the image really looks the way it should: akaiutil's messages are all we'd otherwise have.
+    def rename_volume(self, vol: Volume, new_name: str) -> Volume:
+        name, problem = akai_names.check_name(new_name, vol.type)
+        if problem:
+            raise EngineError(problem)
+        with self._lock:
+            self._need_writable()
+            siblings = self._volumes_at(vol.disk, vol.partition)
+            if sum(akai_names.same_name(v.name, vol.name) for v in siblings) != 1:
+                # akaiutil finds a volume by its name, so it couldn't tell which of two to rename
+                raise EngineError(f"More than one volume in partition {vol.partition} is called “{vol.name}”.")
+            if any(v.index != vol.index and akai_names.same_name(v.name, name) for v in siblings):
+                raise EngineError(f"There is already a volume called “{name}” in partition {vol.partition}.")
+            old_path = f"/disk{vol.disk}/{vol.partition}/{akai_names.command_token(vol.name)}"
+            self._write(f"renvol {old_path} {akai_names.command_token(name)}")
+            renamed = self._find_volume(vol.disk, vol.partition, vol.index)
+            if renamed is None or not akai_names.same_name(renamed.name, name):
+                raise EngineError(f"akaiutil didn't rename “{vol.name}”.")
+            return renamed
+
+    def create_volume(self, part: Partition, index: int, name: str, volume_type: str, load_number: int | None = None) -> Volume:
+        command = _MKVOL_COMMANDS.get(volume_type)
+        if command is None:
+            raise EngineError(f"Can't create a {volume_type} volume.")
+        clean, problem = akai_names.check_name(name, volume_type)
+        if problem:
+            raise EngineError(problem)
+        if load_number is not None and not 1 <= load_number <= 128:
+            raise EngineError("A load number is 1 to 128.")
+        with self._lock:
+            self._need_writable()
+            used, limit = self.volume_slots(part)
+            if not 1 <= index <= limit:
+                raise EngineError(f"A volume number in this partition is 1 to {limit}.")
+            if index in used:
+                raise EngineError(f"Volume number {index} is already taken.")
+            if any(akai_names.same_name(v.name, clean) for v in self._volumes_at(part.disk, part.name)):
+                raise EngineError(f"There is already a volume called “{clean}” in partition {part.name}.")
+            self._run(f"cd {part.path}")
+            lnum = f" {load_number}" if load_number is not None else ""
+            self._write(f"{command} {index} {akai_names.command_token(clean)}{lnum}")
+            created = self._find_volume(part.disk, part.name, index)
+            if created is None:
+                raise EngineError("akaiutil didn't create the volume.")
+            return created
+
+    def delete_volume(self, vol: Volume) -> None:
+        """Delete a volume and every file in it."""
+        with self._lock:
+            self._need_writable()
+            current = self._find_volume(vol.disk, vol.partition, vol.index)
+            if current is None or not akai_names.same_name(current.name, vol.name):
+                raise EngineError(f"“{vol.name}” isn't volume {vol.index} of partition {vol.partition} any more.")
+            self._run(f"cd /disk{vol.disk}/{vol.partition}")
+            self._write(f"delvoli {vol.index}")
+            if self._find_volume(vol.disk, vol.partition, vol.index) is not None:
+                raise EngineError(f"akaiutil didn't delete “{vol.name}”.")
+
+    def rename_file(self, vol: Volume, file: FileEntry, new_name: str) -> FileEntry:
+        """Give a file a new name. Its type is part of its name (".S3") and stays what it was."""
+        _, ext = akai_names.split_extension(file.name)
+        base, problem = akai_names.check_name(new_name, vol.type)
+        if problem:
+            raise EngineError(problem)
+        with self._lock:
+            self._need_writable()
+            self._enter_volume(vol)
+            files = parse.parse_files(self._run("dir").text)
+            if not any(f.index == file.index and f.name == file.name for f in files):
+                raise EngineError(f"“{file.name}” isn't file {file.index} of {vol.name} any more.")
+            if any(f.index != file.index and akai_names.same_name(f.name, base + ext) for f in files):
+                raise EngineError(f"There is already a file called “{base + ext}” in {vol.name}.")
+            self._write(f"reni {file.index} {akai_names.command_token(base + ext)}")
+            renamed = next((f for f in parse.parse_files(self._run("dir").text) if f.index == file.index), None)
+            if renamed is None or not akai_names.same_name(renamed.name, base + ext):
+                raise EngineError(f"akaiutil didn't rename “{file.name}”.")
+            return renamed
+
+    def delete_files(self, vol: Volume, files: list[FileEntry]) -> list[str]:
+        """Delete files. Returns "NAME: reason" for each one that couldn't be."""
+        failed = []
+        with self._lock:
+            self._need_writable()
+            self._enter_volume(vol)
+            present = {f.index: f.name for f in parse.parse_files(self._run("dir").text)}
+            for f in files:
+                if present.get(f.index) != f.name:
+                    failed.append(f"{f.name}: it isn't file {f.index} of {vol.name} any more")
+                    continue
+                try:
+                    self._write(f"deli {f.index}")
+                except EngineError as e:
+                    failed.append(f"{f.name}: {e}")
+        return failed
+
+    def format_disk(self, disk: Disk, fmt: formats.DiskFormat, partition_mb: int = formats.PARTITION_MAX_MB) -> None:
+        """Erase a disk and make it an empty one of the given kind. Everything on it is lost.
+
+        A floppy keeps its size, so only a kind of the same density fits; a hard disk is formatted over its
+        whole image (up to 512 MB), cut into partitions of `partition_mb`."""
+        if disk.type == "FLL" and fmt.floppy_kb != 800 or disk.type == "FLH" and fmt.floppy_kb != 1600:
+            raise EngineError(f"A {'low' if disk.type == 'FLL' else 'high'}-density floppy can't be formatted as “{fmt.label}”.")
+        if not disk.type.startswith("FL") and fmt.is_floppy:
+            raise EngineError(f"A hard disk image can't be formatted as “{fmt.label}”.")
+        with self._lock:
+            self._need_writable()
+            self._run(f"cd {disk.path}")
+            command = fmt.akaiutil_command(partition_mb)
+            text = self._run(command, timeout=600).text
+            # on success akaiutil restarts itself and prints the new disk list; on failure it says "format error"
+            now = next((d for d in parse.parse_disks(self._run("dir /").text) if d.index == disk.index), None)
+            if now is None or now.partitions == 0 or "format error" in text:
+                # (the banner of a restart also says "invalid format" about any other blank disk, so only look at what failed)
+                reason = " ".join(ln.strip() for ln in text.splitlines() if "error" in ln.lower() or ln.strip().startswith("invalid"))
+                raise EngineError(f"akaiutil couldn't format the disk. {reason}".strip())
+
+    def create_image(self, path: str | os.PathLike, fmt: formats.DiskFormat, size_mb: int = 0, partition_mb: int = formats.PARTITION_MAX_MB) -> Path:
+        """Make a new, empty disk image file. Nothing needs to be open; an existing file at `path` is only replaced
+        once the new one is complete."""
+        path = Path(path)
+        if not fmt.is_floppy and not 1 <= size_mb <= fmt.max_mb:
+            raise EngineError(f"A {fmt.label} image is 1 to {fmt.max_mb} MB.")
+        if fmt.partitions and not formats.PARTITION_MIN_MB <= partition_mb <= formats.PARTITION_MAX_MB:
+            raise EngineError(f"A partition is {formats.PARTITION_MIN_MB} to {formats.PARTITION_MAX_MB} MB.")
+        part = path.with_name(f".{path.name}.part")
+        try:
+            with open(part, "wb") as f:
+                f.truncate(fmt.image_bytes(size_mb))  # zeros; a sparse file where the filesystem has them
+            session = Session(self._binary, [part], self._on_traffic, writable=True)
+            try:
+                session.start()
+                session.run("cd /disk0")
+                text = session.run(fmt.akaiutil_command(partition_mb, None if fmt.is_floppy else size_mb), timeout=600).text
+                disks = parse.parse_disks(session.run("dir /").text)
+            finally:
+                session.close()
+            if not disks or disks[0].partitions == 0 or "format error" in text:
+                raise EngineError("akaiutil couldn't format the new image.")
+            os.replace(part, path)
+        except OSError as e:
+            raise EngineError(f"Couldn't create {path.name}: {e}") from e
+        finally:
+            part.unlink(missing_ok=True)
+        return path
+
     # ------------------------------------------------------------- internal
+    def _need_writable(self) -> None:
+        if not self._need_session().writable:
+            raise EngineError("Editing is switched off.")
+
+    def _write(self, command: str, timeout: float = 120) -> None:
+        """Run a command that changes the image. They print nothing when they work, so anything printed is the reason they didn't."""
+        text = self._run(command, timeout).text.strip()
+        if text:
+            raise EngineError(text)
+
+    def _volumes_at(self, disk: int, partition: str) -> list[Volume]:
+        return parse.parse_volumes(self._run(f"dir /disk{disk}/{partition}").text, disk, partition)
+
+    def _find_volume(self, disk: int, partition: str, index: int) -> Volume | None:
+        return next((v for v in self._volumes_at(disk, partition) if v.index == index), None)
+
     def _need_session(self) -> Session:
         if self._session is None:
             raise EngineError("No disk image is open")
@@ -189,6 +382,10 @@ class AkaiEngine:
         resp = self._run(f"cdi {vol.index}")
         if resp.cwd.rstrip() != vol.path.rstrip():
             raise EngineError(f"Couldn't open volume {vol.path}: {resp.text.strip() or resp.cwd}")
+
+
+# akaiutil's "create volume" command for each volume type
+_MKVOL_COMMANDS = {"S900": "mkvoli9", "S1000": "mkvoli1", "S3000": "mkvoli3", "CD3000": "mkvoli3cd"}
 
 
 def _clear_dir(path: Path) -> None:

@@ -97,6 +97,12 @@ def parse_volumes(text: str, disk: int, partition: str) -> list[Volume]:
     return vols
 
 
+def parse_volume_limit(text: str) -> int | None:
+    """The most volumes the partition can hold: "total:   3 volume(s) (max. 100)"."""
+    m = re.search(r"\(max\. (\d+)\)", text)
+    return int(m.group(1)) if m else None
+
+
 def parse_files(text: str) -> list[FileEntry]:
     # akaiutil_file.c: "%3u  %-16s %9u    0x%04x  " + osver/uncompr + tags
     files = []

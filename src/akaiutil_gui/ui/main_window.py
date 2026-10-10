@@ -1,5 +1,6 @@
 """The main window."""
 
+import os
 import re
 import shutil
 import tempfile
@@ -11,6 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QActionGroup, QFontDatabase, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDockWidget,
     QFileDialog,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -30,15 +33,15 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QSettings, QThreadPool
 
-from akaiutil_gui import __version__, describe, search, settings
+from akaiutil_gui import __version__, akai_names, describe, search, settings
 from akaiutil_gui.audio.sample import LoadedSample, load_wav
 from akaiutil_gui.formatting import human_size
-from akaiutil_gui.engine import fetch
+from akaiutil_gui.engine import fetch, formats
 from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.locate import candidates, find_akaiutil
 from akaiutil_gui.engine.models import CatalogEntry, Disk, DiskUsage, ExportResult, FileEntry, Partition, Volume
 
-from . import theme
+from . import edit_dialogs, theme
 from .details_view import DetailsView
 from .disk_tree import DiskTree
 from .notices_dialog import NoticesDialog
@@ -157,8 +160,12 @@ class MainWindow(QMainWindow):
         self._volume_token = 0  # the request for the selected volume's own details
         self._files_token = 0
         self._usage_token = 0
-        self._usage_cache: dict[int, DiskUsage] = {}  # images are read-only, so this never goes stale
+        self._usage_cache: dict[int, DiskUsage] = {}  # dropped for a disk whenever it is edited
         self._usage_waiting: dict[int, list] = {}  # disk -> callbacks for a load that's under way
+        self._usage_epoch: dict[int, int] = {}  # bumped when a disk is changed: a load that started earlier is out of date
+        self._writable = False  # akaiutil is running read/write (Edit > Allow Editing)
+        self._writing = 0  # edits to a disk that are under way (only one at a time)
+        self._status_hold = 0.0  # until then the status bar keeps the message about an edit (a file count would replace it)
 
         self._traffic = _TrafficRelay(self)
         self._traffic.text.connect(self._append_console)
@@ -197,6 +204,9 @@ class MainWindow(QMainWindow):
         self.export_wav_btn.clicked.connect(lambda: self._export(as_wav=True))
         self.table = FileTable()
         self.table.selectionFilesChanged.connect(self._on_files_selected)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_table_context)
+        self.tree.contextRequested.connect(self._on_tree_context)
         top = QWidget()
         tv = QVBoxLayout(top)
         tv.setContentsMargins(0, 0, 0, 0)
@@ -235,6 +245,14 @@ class MainWindow(QMainWindow):
         space.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         space.activated.connect(self.preview.toggle)
         self.table.itemActivated.connect(lambda _item: self._activate_result())  # double-click or Enter
+        for widget in (self.table, self.tree):  # F2 and Delete work where the thing to rename or delete is
+            rename_key = QShortcut(QKeySequence(Qt.Key.Key_F2), widget)
+            rename_key.setContext(Qt.ShortcutContext.WidgetShortcut)
+            rename_key.activated.connect(self._rename_focused)
+            for key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                delete_key = QShortcut(QKeySequence(key), widget)
+                delete_key.setContext(Qt.ShortcutContext.WidgetShortcut)
+                delete_key.activated.connect(self._delete_focused)
         find = QShortcut(QKeySequence.StandardKey.Find, self)
         find.activated.connect(self._focus_search)
         escape = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.search)
@@ -319,7 +337,7 @@ class MainWindow(QMainWindow):
         self.busy_bar.setTextVisible(False)
         self.busy_bar.hide()
         self.mode_label = QLabel("Read-only")
-        self.mode_label.setToolTip("Disk images are opened read-only; this proof of concept can't modify them.")
+        self.mode_label.setObjectName("modeLabel")
         self.statusBar().setSizeGripEnabled(False)  # the corner square; macOS windows have no grip
         self.statusBar().addPermanentWidget(self.busy_bar)
         self.statusBar().addPermanentWidget(self.mode_label)
@@ -337,9 +355,10 @@ class MainWindow(QMainWindow):
         self.act_close = self._action("&Close Images", self.close_images, QKeySequence("Ctrl+W"))
         self.act_export = self._action("&Export…", lambda: self._export(False), QKeySequence("Ctrl+E"))
         self.act_export_wav = self._action("Export as &WAV…", lambda: self._export(True), QKeySequence("Ctrl+Shift+E"))
+        self.act_new_image = self._action("&New Disk Image…", self._new_image, QKeySequence.StandardKey.New)
         act_quit = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
         act_quit.setMenuRole(QAction.MenuRole.QuitRole)
-        file_menu.addActions([self.act_open, self.act_close])
+        file_menu.addActions([self.act_new_image, self.act_open, self.act_close])
         file_menu.addSeparator()
         file_menu.addActions([self.act_export, self.act_export_wav])
         file_menu.addSeparator()
@@ -348,6 +367,21 @@ class MainWindow(QMainWindow):
         file_menu.addAction(settings_action)
         file_menu.addSeparator()
         file_menu.addAction(act_quit)
+
+        self.edit_menu = mb.addMenu("&Edit")
+        self.act_allow_edit = QAction("Allow &Editing", self, checkable=True)
+        self.act_allow_edit.setToolTip("Let the app change the disk images (rename, delete, create). Off: they are only read.")
+        self.act_allow_edit.triggered.connect(self._toggle_editing)
+        self.act_new_volume = self._action("New &Volume…", self._new_volume)
+        self.act_rename = self._action("&Rename…", self._rename_focused)
+        self.act_delete = self._action("&Delete…", self._delete_focused)
+        self.act_format = self._action("&Format Disk…", self._format_disk)
+        self.edit_menu.addAction(self.act_allow_edit)
+        self.edit_menu.addSeparator()
+        self.edit_menu.addActions([self.act_new_volume, self.act_rename, self.act_delete])
+        self.edit_menu.addSeparator()
+        self.edit_menu.addAction(self.act_format)
+        self.edit_menu.aboutToShow.connect(self._update_edit_actions)
 
         view_menu = mb.addMenu("&View")
         theme_menu = view_menu.addMenu("&Theme")
@@ -396,6 +430,8 @@ class MainWindow(QMainWindow):
             w.setEnabled(can_export)
         for w in (self.act_export_wav, self.export_wav_btn):
             w.setEnabled(can_wav)
+        self._update_edit_actions()
+        self._sync_mode()
 
     # ------------------------------------------------------------- opening
     def open_dialog(self) -> None:
@@ -415,6 +451,7 @@ class MainWindow(QMainWindow):
             self._engine.close()
         self._engine = AkaiEngine(binary, on_traffic=self._traffic.feed)
         self._engine_binary = binary
+        self._writable = False  # every image opens read-only; editing is something to switch on deliberately
         self._reset_views()
         self._images = [str(p) for p in paths]
         engine = self._engine
@@ -450,6 +487,7 @@ class MainWindow(QMainWindow):
         if engine is not None:
             run_async(engine.close)  # can take a moment; keep the GUI responsive
         self._images = []
+        self._writable = False
         self._reset_views()
         self.stack.setCurrentIndex(0)
         self.setWindowTitle("akaiutil-gui")
@@ -472,6 +510,7 @@ class MainWindow(QMainWindow):
         self._usage_token += 1
         self._usage_cache.clear()
         self._usage_waiting.clear()
+        self._usage_epoch.clear()
         self.usage.clear()
         self.tree.unload()
         self.table.clear_files()
@@ -578,10 +617,11 @@ class MainWindow(QMainWindow):
             waiting.append(then)
         if started:
             return
+        epoch = self._usage_epoch.get(disk.index, 0)
 
         def done(usage: DiskUsage) -> None:
-            if engine is not self._engine:
-                return  # the image was closed or replaced meanwhile
+            if engine is not self._engine or epoch != self._usage_epoch.get(disk.index, 0):
+                return  # the image was closed or replaced meanwhile, or the disk was edited since this was asked
             self._usage_cache[disk.index] = usage
             self._rebuild_catalog()
             self.tree.set_volume_order(disk.index, usage.volume_order())
@@ -589,7 +629,7 @@ class MainWindow(QMainWindow):
                 callback(usage)
 
         def failed(message: str) -> None:
-            if engine is self._engine:
+            if engine is self._engine and epoch == self._usage_epoch.get(disk.index, 0):
                 self._usage_waiting.pop(disk.index, None)
                 self._report_error(message)
 
@@ -749,7 +789,8 @@ class MainWindow(QMainWindow):
             self.table.set_files(files, self._volume)
         n = len(files)
         total = human_size(sum(f.size for f in files))
-        self.statusBar().showMessage(f"{n} file{'s' if n != 1 else ''}, {total}", 8000)
+        if time.monotonic() >= self._status_hold:
+            self.statusBar().showMessage(f"{n} file{'s' if n != 1 else ''}, {total}", 8000)
         self._select_pending_file()
         self._update_actions()
 
@@ -921,6 +962,495 @@ class MainWindow(QMainWindow):
                               "Export finished", "  ·  ".join(parts), parent=self)
             box.setDetailedText("\n".join(lines))
             box.exec()
+
+    # -------------------------------------------------------------- editing
+    def _sync_mode(self) -> None:
+        """The status bar's Read-only / Editing label and the Allow Editing tick."""
+        self.mode_label.setText("Editing" if self._writable else "Read-only")
+        self.mode_label.setToolTip(
+            "Changes are written to the disk image straight away. There is no undo."
+            if self._writable
+            else "The disk images are only read. Edit > Allow Editing lets the app change them."
+        )
+        if self.mode_label.property("editing") != self._writable:
+            self.mode_label.setProperty("editing", self._writable)
+            self.mode_label.style().unpolish(self.mode_label)
+            self.mode_label.style().polish(self.mode_label)
+        self.act_allow_edit.setEnabled(self._engine is not None)
+        if self.act_allow_edit.isChecked() != self._writable:
+            self.act_allow_edit.setChecked(self._writable)
+
+    def _toggle_editing(self, checked: bool) -> None:
+        if checked:
+            self._ensure_editing(lambda: None)
+        else:
+            self._set_editing(False)
+        self._sync_mode()  # a question that was answered "no" puts the tick back
+
+    def _ensure_editing(self, then) -> None:
+        """Run `then` once akaiutil is able to write, asking first if it isn't yet."""
+        if self._engine is None:
+            return
+        if self._writable:
+            then()
+            return
+        locked = [Path(p).name for p in self._images if not os.access(p, os.W_OK)]
+        if locked:
+            QMessageBox.warning(
+                self,
+                "Can't edit this image",
+                "These files can't be written to, so they can't be edited:\n\n" + "\n".join(locked)
+                + "\n\nChange their permissions (or copy them somewhere writable) and open them again.",
+            )
+            self._sync_mode()
+            return
+        if not edit_dialogs.confirm(
+            self,
+            "Allow editing?",
+            "Editing changes the disk image files themselves.",
+            "There is no undo. Keep a copy of anything you can't afford to lose.",
+            action="Allow Editing",
+        ):
+            self._sync_mode()
+            return
+        self._set_editing(True, then)
+
+    def _set_editing(self, on: bool, then=None) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+
+        def done(_banner: str) -> None:
+            if engine is not self._engine:
+                return
+            self._writable = on
+            self._sync_mode()
+            self.statusBar().showMessage(
+                "Editing is on: changes are written to the disk image straight away." if on else "Editing is off.", 8000
+            )
+            if then is not None:
+                then()
+
+        def failed(message: str) -> None:
+            if engine is not self._engine:
+                return
+            QMessageBox.critical(self, "Couldn't change the editing mode", message)
+            if not engine.is_open:
+                self.close_images()
+                return
+            self._writable = engine.is_writable
+            self._sync_mode()
+
+        self._run(lambda: engine.set_writable(on), done, failed)
+
+    def _busy(self) -> bool:
+        """True (and says so) while another edit is still being written."""
+        if self._writing:
+            self.statusBar().showMessage("Wait for the current change to finish.", 4000)
+        return self._writing > 0
+
+    def _run_edit(self, fn, on_done, on_error) -> None:
+        """_run for work that changes a disk: while it runs, no other edit can start."""
+        self._writing += 1
+        self._update_actions()
+
+        def finish(handler):
+            def wrapped(result):
+                self._writing -= 1
+                self._update_actions()
+                handler(result)
+
+            return wrapped
+
+        self._run(fn, finish(on_done), finish(on_error))
+
+    def _selected_volume(self) -> Volume | None:
+        obj = self.tree.current_object()
+        return obj if isinstance(obj, Volume) else None
+
+    def _selected_rows(self) -> list[tuple[Volume, FileEntry]]:
+        return [(v, f) for v, f in self.table.selected_rows() if v is not None]
+
+    def _focus_in(self, widget: QWidget) -> bool:
+        focus = QApplication.focusWidget()
+        return focus is not None and (focus is widget or widget.isAncestorOf(focus))
+
+    def _edit_target(self) -> tuple[str, object] | None:
+        """What Rename and Delete would act on: the files selected in the list if that is where you are,
+        the volume selected in the tree if that is where you are, else whichever of them there is."""
+        rows, volume = self._selected_rows(), self._selected_volume()
+        if self._focus_in(self.table):
+            return ("files", rows) if rows else None
+        if self._focus_in(self.tree):
+            return ("volume", volume) if volume else None
+        if rows:
+            return ("files", rows)
+        return ("volume", volume) if volume else None
+
+    def _selected_disk(self) -> Disk | None:
+        obj = self.tree.current_object()
+        index = obj.index if isinstance(obj, Disk) else getattr(obj, "disk", None)
+        return self.tree.disk(index) if index is not None else None
+
+    def _partition_for_new_volume(self) -> Partition | None:
+        obj = self.tree.current_object()
+        if isinstance(obj, Volume):
+            obj = self.tree.partition(obj.disk, obj.partition)
+        return obj if isinstance(obj, Partition) and self._can_hold_volumes(obj) else None
+
+    @staticmethod
+    def _can_hold_volumes(part: Partition) -> bool:
+        return not part.is_dd and not part.type.startswith("FL")  # a floppy's one volume is always there
+
+    def _update_edit_actions(self) -> None:
+        """Edit menu: say what Rename and Delete would do right now, and switch off what can't be done."""
+        has = self._engine is not None and self._writing == 0
+        target = self._edit_target() if has else None
+        rename_text, delete_text, can_rename, can_delete = "&Rename…", "&Delete…", False, False
+        if target is not None:
+            kind, what = target
+            if kind == "volume":
+                rename_text, delete_text, can_rename, can_delete = "&Rename Volume…", "&Delete Volume…", True, True
+            else:
+                n = len(what)
+                rename_text = "&Rename File…" if n == 1 else "&Rename…"
+                delete_text = "&Delete File…" if n == 1 else f"&Delete {n} Files…"
+                can_rename, can_delete = n == 1, True
+        self.act_rename.setText(rename_text)
+        self.act_delete.setText(delete_text)
+        self.act_rename.setEnabled(can_rename)
+        self.act_delete.setEnabled(can_delete)
+        self.act_new_volume.setEnabled(has and self._partition_for_new_volume() is not None)
+        self.act_format.setEnabled(has and self._selected_disk() is not None)
+
+    def _rename_focused(self) -> None:
+        target = self._edit_target()
+        if target is None:
+            return
+        kind, what = target
+        if kind == "volume":
+            self._rename_volume(what)
+        elif len(what) == 1:
+            self._rename_file(*what[0])
+
+    def _delete_focused(self) -> None:
+        target = self._edit_target()
+        if target is None:
+            return
+        kind, what = target
+        if kind == "volume":
+            self._delete_volume(what)
+        else:
+            self._delete_files(what)
+
+    def _ask_name(self, what: str, current: str, volume_type: str, taken: list[str], suffix: str = "") -> str | None:
+        dialog = edit_dialogs.RenameDialog(self, what, current, volume_type, taken, suffix)
+        return dialog.name if dialog.exec() == dialog.DialogCode.Accepted else None
+
+    def _rename_volume(self, vol: Volume) -> None:
+        if self._engine is None or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_rename_volume(vol))
+
+    def _do_rename_volume(self, vol: Volume) -> None:
+        engine = self._engine
+        taken = [v.name for v in self.tree.volumes_in(vol.disk, vol.partition) if v.index != vol.index]
+        name = self._ask_name("volume", vol.name, vol.type, taken)
+        if engine is None or name is None:
+            return
+        self._run_edit(
+            lambda: engine.rename_volume(vol, name),
+            lambda new: self._edited(vol.disk, select=new, message=f"Renamed “{vol.name}” to “{new.name}”."),
+            lambda message: self._edit_failed(vol.disk, message),
+        )
+
+    def _rename_file(self, vol: Volume, f: FileEntry) -> None:
+        if self._engine is None or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_rename_file(vol, f))
+
+    def _do_rename_file(self, vol: Volume, f: FileEntry) -> None:
+        engine = self._engine
+        base, ext = akai_names.split_extension(f.name)
+        taken: list[str] = []
+        v = self._volume
+        if not self._in_results and v is not None and (v.disk, v.partition, v.index) == (vol.disk, vol.partition, vol.index):
+            taken = [  # the other files of the same type in this volume (the type is part of a file's name)
+                akai_names.split_extension(o.name)[0]
+                for o in self._volume_files
+                if o.index != f.index and akai_names.split_extension(o.name)[1].casefold() == ext.casefold()
+            ]
+        name = self._ask_name("file", base, vol.type, taken, suffix=ext)
+        if engine is None or name is None:
+            return
+
+        def done(new: FileEntry) -> None:
+            self._pending_reveal = (vol, new.index) if not self._in_results else None
+            self._edited(vol.disk, message=f"Renamed “{f.name}” to “{new.name}”.")
+
+        self._run_edit(lambda: engine.rename_file(vol, f, name), done, lambda message: self._edit_failed(vol.disk, message))
+
+    def _delete_files(self, rows: list[tuple[Volume, FileEntry]]) -> None:
+        if self._engine is None or not rows or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_delete_files(rows))
+
+    def _do_delete_files(self, rows: list[tuple[Volume, FileEntry]]) -> None:
+        engine = self._engine
+        groups: dict[tuple, tuple[Volume, list[FileEntry]]] = {}
+        for vol, f in rows:
+            groups.setdefault((vol.disk, vol.partition, vol.index), (vol, []))[1].append(f)
+        if len(rows) == 1:
+            vol, f = rows[0]
+            text = f"Delete “{f.name}” from {vol.name}?"
+        elif len(groups) == 1:
+            text = f"Delete {len(rows)} files from {rows[0][0].name}?"
+        else:
+            text = f"Delete {len(rows)} files from {len(groups)} volumes?"
+        lines = [f"{vol.name}: {f.name}" for vol, f in rows] if len(rows) > 1 else []
+        if engine is None or not edit_dialogs.confirm(self, "Delete files?", text, "This can't be undone.", details_lines=lines):
+            return
+
+        def work() -> list[str]:
+            failed: list[str] = []
+            for vol, files in groups.values():
+                failed += engine.delete_files(vol, files)
+            return failed
+
+        disks = sorted({vol.disk for vol, _ in groups.values()})
+
+        def done(failed: list[str]) -> None:
+            for disk in disks:
+                self._edited(disk)
+            n = len(rows) - len(failed)
+            self._status_hold = time.monotonic() + 8
+            self.statusBar().showMessage(f"Deleted {n} file{'s' if n != 1 else ''}.", 8000)
+            if failed:
+                self._warn("Some files weren't deleted", f"{len(failed)} of {len(rows)} files couldn't be deleted.", failed)
+
+        self._run_edit(work, done, lambda message: self._edit_failed(disks[0], message))
+
+    def _delete_volume(self, vol: Volume) -> None:
+        if self._engine is None or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_delete_volume(vol))
+
+    def _do_delete_volume(self, vol: Volume) -> None:
+        engine = self._engine
+        usage = self._usage_cache.get(vol.disk)
+        count = next((u.files for u in usage.volumes if (u.partition, u.index) == (vol.partition, vol.index)), None) if usage else None
+        detail = "Every file in it goes too. This can't be undone."
+        if count is not None:
+            detail = f"It holds {count} file{'s' if count != 1 else ''}, and they go too. This can't be undone."
+        if engine is None or not edit_dialogs.confirm(self, "Delete volume?", f"Delete the volume “{vol.name}”?", detail):
+            return
+        self._run_edit(
+            lambda: engine.delete_volume(vol),
+            lambda _none: self._edited(vol.disk, message=f"Deleted the volume “{vol.name}”."),
+            lambda message: self._edit_failed(vol.disk, message),
+        )
+
+    def _new_volume(self, part: Partition | None = None) -> None:
+        part = part or self._partition_for_new_volume()
+        if self._engine is None or part is None or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_new_volume(part))
+
+    def _volume_types(self, part: Partition) -> tuple[list[str], str]:
+        """The kinds of volume a partition can hold, and the one to suggest (what it mostly holds already)."""
+        if part.type == "HD9":
+            return ["S900"], "S900"
+        types = ["S3000", "S1000", "CD3000"]
+        existing = [v.type for v in self.tree.volumes_in(part.disk, part.name)]
+        common = max((t for t in types if t in existing), key=existing.count, default="S3000")
+        return types, common
+
+    def _do_new_volume(self, part: Partition) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+
+        def show(slots: tuple[list[int], int]) -> None:
+            used, limit = slots
+            if len(used) >= limit:
+                QMessageBox.information(self, "New Volume", f"Partition {part.name} already holds the most volumes it can ({limit}).")
+                return
+            types, default = self._volume_types(part)
+            taken = [v.name for v in self.tree.volumes_in(part.disk, part.name)]
+            answer = self._ask_new_volume(part, used, limit, types, default, taken)
+            if answer is None:
+                return
+            name, number, volume_type, load_number = answer
+            self._run_edit(
+                lambda: engine.create_volume(part, number, name, volume_type, load_number),
+                lambda new: self._edited(part.disk, select=new, announce=True, message=f"Created the volume “{new.name}”."),
+                lambda message: self._edit_failed(part.disk, message),
+            )
+
+        self._run(lambda: engine.volume_slots(part), show)
+
+    def _ask_new_volume(self, part, used, limit, types, default, taken) -> tuple[str, int, str, int | None] | None:
+        dialog = edit_dialogs.NewVolumeDialog(self, part.name, used, limit, types, default, taken)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return None
+        return dialog.name, dialog.volume_number, dialog.volume_type, dialog.load_number
+
+    def _ask_format(self, disk: Disk) -> tuple[formats.DiskFormat, int] | None:
+        dialog = edit_dialogs.DiskFormatDialog(self, disk)
+        return (dialog.format, dialog.partition_mb) if dialog.exec() == dialog.DialogCode.Accepted else None
+
+    def _format_disk(self, disk: Disk | None = None) -> None:
+        disk = disk or self._selected_disk()
+        if self._engine is None or disk is None or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_format_disk(disk))
+
+    def _do_format_disk(self, disk: Disk) -> None:
+        engine = self._engine
+        answer = self._ask_format(disk)
+        if engine is None or answer is None:
+            return
+        fmt, partition_mb = answer
+        usage = self._usage_cache.get(disk.index)
+        held = ""
+        if usage is not None:
+            files = sum(v.files for v in usage.volumes)
+            held = f"It holds {files:,} file{'s' if files != 1 else ''} in {len(usage.volumes)} volume{'s' if len(usage.volumes) != 1 else ''}, and they all go. "
+        name = Path(self._images[disk.index]).name if disk.index < len(self._images) else f"disk{disk.index}"
+        if not edit_dialogs.confirm(
+            self,
+            "Format disk?",
+            f"Erase everything on “{name}” and format it as {fmt.label}?",
+            held + "This can't be undone.",
+            action="Erase and Format",
+        ):
+            return
+        self._run_edit(
+            lambda: engine.format_disk(disk, fmt, partition_mb),
+            lambda _none: self._edited(disk.index, select=disk, announce=True, message=f"Formatted disk{disk.index} as {fmt.label}."),
+            lambda message: self._edit_failed(disk.index, message),
+        )
+
+    def _ask_new_image(self) -> tuple[formats.DiskFormat, int, int] | None:
+        dialog = edit_dialogs.DiskFormatDialog(self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return None
+        return dialog.format, dialog.size_mb, dialog.partition_mb
+
+    def _ask_save_path(self, suggestion: str) -> str | None:
+        path, _ = QFileDialog.getSaveFileName(self, "Create disk image", suggestion, IMAGE_FILTER)
+        return path or None
+
+    def _new_image(self) -> None:
+        """File > New Disk Image: make an empty formatted image file, and open it (with whatever is open already)."""
+        binary = find_akaiutil(settings.get_akaiutil_path())
+        if binary is None:
+            self._set_up_akaiutil(then=self._new_image)
+            return
+        answer = self._ask_new_image()
+        if answer is None:
+            return
+        fmt, size_mb, partition_mb = answer
+        start = settings.get_last_dir("open") or str(Path.home())
+        path = self._ask_save_path(str(Path(start) / f"{fmt.label}.img".replace("(", "").replace(")", "")))
+        if path is None:
+            return
+        if not Path(path).suffix:
+            path += ".img"
+        if any(Path(path).resolve() == Path(p).resolve() for p in self._images):
+            QMessageBox.warning(self, "That image is open", f"{Path(path).name} is open in the window. Close it first if you want to replace it.")
+            return
+        settings.set_last_dir("open", str(Path(path).parent))
+        engine = AkaiEngine(binary, on_traffic=self._traffic.feed)
+        self.statusBar().showMessage(f"Creating {Path(path).name}…")
+        self._run(
+            lambda: engine.create_image(path, fmt, size_mb, partition_mb),
+            lambda made: self.open_images([*self._images, str(made)]),
+            lambda message: QMessageBox.critical(self, "Couldn't create the disk image", message),
+        )
+
+    def _edited(self, disk_index: int, select=None, announce: bool | None = None, message: str = "") -> None:
+        """A disk has just been changed: forget what we knew about it and show it as it is now.
+
+        The tree reloads the disk and puts the selection back (`select` says what to select, if not what was);
+        with a search showing, nothing is re-selected (that would end the search): the results are redone
+        from the fresh index instead."""
+        if announce is None:
+            announce = not self._in_results
+        self._preview_token += 1  # a sample being converted for preview may be of a file that no longer exists
+        self.preview.stop()
+        self._preview_cache.clear()
+        self._usage_epoch[disk_index] = self._usage_epoch.get(disk_index, 0) + 1
+        self._usage_cache.pop(disk_index, None)
+        callbacks = self._usage_waiting.pop(disk_index, [])
+        self._rebuild_catalog()  # the old entries for this disk are gone; searching waits for the new ones
+        self.tree.refresh_disk(disk_index, select, announce=announce)
+        disk = self.tree.disk(disk_index)
+        if disk is not None:
+            self._ensure_usage(disk)
+            for callback in callbacks:
+                self._ensure_usage(disk, callback)
+        if not announce:
+            current = self.tree.current_object()
+            if current is not None:
+                self._update_usage(current)
+            volume, engine = self._volume, self._engine
+            if engine is not None and volume is not None and volume.disk == disk_index:
+                token = self._files_token  # keep the volume's list current for when the search ends
+                self._run(lambda: engine.list_files(volume), lambda files: self._files_loaded(token, files))
+        if message:
+            self._status_hold = time.monotonic() + 8
+            self.statusBar().showMessage(message, 8000)
+
+    def _edit_failed(self, disk_index: int, message: str) -> None:
+        self._warn("Couldn't change the disk image", message.splitlines()[0] if message else "akaiutil refused.", message.splitlines()[1:])
+        engine = self._engine
+        if engine is None:
+            return
+        if not engine.is_open:
+            self.close_images()
+            return
+        self._edited(disk_index)  # whatever it managed to do, show the disk as it is now
+
+    def _warn(self, title: str, text: str, details: list[str] | None = None) -> None:
+        box = QMessageBox(QMessageBox.Icon.Warning, title, text, parent=self)
+        if details:
+            box.setDetailedText("\n".join(details))
+        box.exec()
+
+    def _tree_menu(self, obj) -> QMenu | None:
+        menu = QMenu(self)
+        if isinstance(obj, Volume):
+            menu.addAction("Rename…", lambda: self._rename_volume(obj))
+            menu.addAction("Delete…", lambda: self._delete_volume(obj))
+        elif isinstance(obj, Partition) and self._can_hold_volumes(obj):
+            menu.addAction("New Volume…", lambda: self._new_volume(obj))
+        elif isinstance(obj, Disk):
+            menu.addAction("Format Disk…", lambda: self._format_disk(obj))
+        return None if menu.isEmpty() else menu
+
+    def _on_tree_context(self, obj, pos) -> None:
+        menu = self._tree_menu(obj) if self._engine is not None else None
+        if menu is not None:
+            menu.exec(pos)
+
+    def _file_menu(self, rows: list[tuple[Volume, FileEntry]]) -> QMenu:
+        menu = QMenu(self)
+        menu.addAction(self.act_export)
+        menu.addAction(self.act_export_wav)
+        menu.addSeparator()
+        rename = menu.addAction("Rename…", lambda: self._rename_file(*rows[0]))
+        rename.setEnabled(len(rows) == 1)
+        menu.addAction("Delete…" if len(rows) == 1 else f"Delete {len(rows)} Files…", lambda: self._delete_files(rows))
+        return menu
+
+    def _on_table_context(self, pos) -> None:
+        row = self.table.rowAt(pos.y())
+        if row >= 0 and not self.table.item(row, 0).isSelected():
+            self.table.selectRow(row)
+        rows = self._selected_rows()
+        if self._engine is not None and rows:
+            self._file_menu(rows).exec(self.table.viewport().mapToGlobal(pos))
 
     # --------------------------------------------------------------- misc
     def _run(self, fn, on_done=None, on_error=None) -> None:
