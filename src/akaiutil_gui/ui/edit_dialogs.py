@@ -693,6 +693,18 @@ class DiskFormatDialog(QDialog):
         self.summary.setText(text)
 
 
+def fit_wrapped_text(dialog: QDialog) -> None:
+    """Make a dialog at least as tall as its layout needs at its minimum width. A layout holding word-wrapped text reports
+    a minimum height for one line of it, so a dialog shown at that height squeezes its widgets together (a list sliding under
+    the row below it); asking the layout for the minimum height it needs at the width the dialog really has fixes that."""
+    layout = dialog.layout()
+    width = max(dialog.minimumWidth(), dialog.sizeHint().width())
+    needed = layout.minimumHeightForWidth(width)
+    if needed > 0:
+        dialog.setMinimumHeight(needed)
+        dialog.resize(max(dialog.width(), width), max(dialog.minimumSizeHint().height(), needed))
+
+
 class ImportDialog(QDialog):
     """What to make of the audio being imported: which sampler's kind of sample, and what to do with stereo. Lists every file
     in the order it will be added, with what will be done to it."""
@@ -767,12 +779,14 @@ class ImportDialog(QDialog):
         self.type_combo.currentIndexChanged.connect(self._refresh)
         self.stereo_combo.currentIndexChanged.connect(self._refresh)
         self._refresh()
+        fit_wrapped_text(self)
 
     @staticmethod
     def _row(*widgets):
         from PySide6.QtWidgets import QWidget
 
         holder = QWidget()
+        holder.setObjectName("transparentContainer")  # (a plain QWidget would otherwise paint the window colour behind the combo box)
         row = QHBoxLayout(holder)
         row.setContentsMargins(0, 0, 0, 0)
         for w in widgets:

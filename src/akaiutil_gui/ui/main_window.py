@@ -420,7 +420,7 @@ class MainWindow(QMainWindow):
         self.recent_rows = QVBoxLayout()
         self.recent_rows.setSpacing(0)
         recent_layout.addLayout(self.recent_rows)
-        ev.addStretch(3)
+        ev.addStretch(2)
         ev.addWidget(self.empty_logo)
         ev.addSpacing(28)
         ev.addWidget(label)
@@ -428,9 +428,11 @@ class MainWindow(QMainWindow):
         ev.addLayout(buttons)
         ev.addSpacing(8)
         ev.addWidget(hint)
-        ev.addSpacing(26)
+        ev.addSpacing(12)  # (never closer than this to the hint above or the links below)
+        ev.addStretch(1)  # the same stretch above and below: the list sits halfway between the hint and the links
         ev.addWidget(self.recent_box, 0, Qt.AlignmentFlag.AlignHCenter)
-        ev.addStretch(4)
+        ev.addStretch(1)
+        ev.addSpacing(12)
         ev.addLayout(footer)
 
         self.stack = QStackedWidget()

@@ -17,7 +17,7 @@ _ROLE_VOLUME = Qt.ItemDataRole.UserRole + 2
 
 COLUMNS = ["#", "Name", "Type", "Size", "Start block", "OS ver", "Tags", "Location"]
 LOCATION = COLUMNS.index("Location")  # only shown for search results, which span volumes
-DEFAULT_WIDTHS = {"#": 48, "Name": 300, "Type": 130, "Size": 90, "Start block": 100, "OS ver": 80, "Tags": 110, "Location": 180}
+DEFAULT_WIDTHS = {"#": 48, "Name": 200, "Type": 100, "Size": 80, "Start block": 95, "OS ver": 72, "Tags": 90, "Location": 180}
 ALWAYS_SHOWN = {"Name"}  # the column that says what a row is can't be hidden
 MENU_LABELS = {"#": "#  (file number)"}
 

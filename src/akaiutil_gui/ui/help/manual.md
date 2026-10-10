@@ -40,6 +40,8 @@ inside. Powered by Klaus Michael Indlekofer's **akaiutil** program.
 3. Click around. Nothing you do in the browsing views can change the image: **every image opens read-only**. Changing things
    is something you switch on deliberately (see [Editing disk images](#editing-disk-images)).
 
+![The start screen](screenshots/start-screen.png "The start screen")
+
 ---
 
 ## The main window
@@ -166,6 +168,8 @@ Everything in the next sections needs editing to be on, and asks to switch it on
 
 ### Backups and reverting
 
+![The backup question](screenshots/backup-question.png "The question asked when editing is switched on")
+
 The first time you switch editing on, the app asks whether to **Back Up and Edit**, or **Edit Without Backup** (or Cancel;
 **Show Details…** lists the images and their sizes). A backup is a full copy of each open image (a hard disk image can be hundreds of MB; on a Mac with APFS the copy is
 instant and takes no extra space). It is kept in the app's own data folder, not next to your image, so it can't be mistaken for
@@ -255,7 +259,11 @@ hard disk, and the other kinds only to the other hard disks.
 
 ### Changing a sample's settings
 
-Select one S1000 or S3000 sample and choose **Edit > Sample Settings…** (or right-click it). The dialog shows and changes:
+Select one S1000 or S3000 sample and choose **Edit > Sample Settings…** (or right-click it).
+
+![The sample settings dialog](screenshots/sample-settings.png "Sample Settings, with loop 1 switched on")
+
+The dialog shows and changes:
 
 - **Root key** (shown as a note name, middle C being C3), **tuning** in semitones and **fine tuning** in cents (each up to 50
   either way).

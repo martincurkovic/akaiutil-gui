@@ -239,6 +239,14 @@ QComboBox[inherited="true"], QSpinBox[inherited="true"] {
   background: transparent;
 }
 
+/* ---------- Radio buttons: the strip behind each option, with ends as round as the button's own circle ---------- */
+QRadioButton {
+    background-color: ${bg};
+    border-radius: 11px;
+    padding: 3px 10px 3px 4px;
+    spacing: 8px;
+}
+
 /* ---------- Checkboxes (hardware panel rows) ---------- */
 QCheckBox {
     background: transparent;
