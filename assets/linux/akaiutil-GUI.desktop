@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=akaiutil-GUI
+Exec=main.bin
+Icon=icon_512x512
+Categories=AudioVideo;Audio;Utility;
+Comment=Browse and export files from Akai S900/S1000/S3000 disk images
+Terminal=false
