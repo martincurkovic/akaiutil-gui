@@ -14,6 +14,7 @@ Last updated 2026-10-10. Items are in the order I'd do them; nothing here is pro
 | Smart import | Loop points and root note from a WAV `smpl` chunk (and an AIFF root note), root note from a name like `Piano_C3`, trim silence, normalise |
 | Sorting | Sort a volume's files by name (all, or samples only) by moving them between slots; optional automatic sort after import/paste |
 | Moving files | Copy / Cut / Paste and drag onto a volume (Shift/Cmd to move); drag files out to Finder/Explorer as WAV (Option for raw Akai) |
+| Export | Files as they are, or samples as WAV with the root note and loops in a `smpl` chunk; right-click a volume, partition or disk to export all its samples |
 | Tags | A Tags column with the partition's names for them; copies keep an S3000 file's tags (matched by name, through a tar import) |
 | App | Settings, update check against GitHub releases, CI builds mirroring AKAISDS |
 
@@ -42,14 +43,13 @@ akaiutil reading its own output back:
 3. **Programs and multis.** Today akaiutil's raw info text. A readable keygroup view, "which samples does this program use?",
    and "samples no program uses" for library cleanup.
 4. **Copy a whole volume or partition** to another disk (new volume + copy of every file; `pget`/`pput` for partitions).
-5. **Export a volume/disk** as a folder of WAVs with loop points written into the WAV `smpl` chunk so DAWs see them.
-6. **Editing tags** (setting, clearing, renaming a partition's tag names). Showing them and keeping them on copy are done.
+5. **Editing tags** (setting, clearing, renaming a partition's tag names). Showing them and keeping them on copy are done.
    akaiutil's `settagi` & co crash (see akaiutil-notes.md), so editing means either patching akaiutil or rewriting a file's tags
    with the same tar trick (delete + import, which moves the file's slot), or `rentag` for the names.
-7. **Import polish:** AIFF loop points (INST + MARK chunks: the end-marker convention needs checking), fade in/out, a pitch
+6. **Import polish:** AIFF loop points (INST + MARK chunks: the end-marker convention needs checking), fade in/out, a pitch
    fraction from `smpl`, per-file overrides in the import dialog, a progress dialog for big batches.
-8. **Safety net:** optional "snapshot the image before the first edit" and a revert. Decided against for now.
-9. **ctypes/cffi engine** to replace the subprocess and the text parsing in `engine/parse.py`. `engine/api.py` is the seam
+7. **Safety net:** optional "snapshot the image before the first edit" and a revert. Decided against for now.
+8. **ctypes/cffi engine** to replace the subprocess and the text parsing in `engine/parse.py`. `engine/api.py` is the seam
    (see the README). Worth doing once the feature set settles: it removes the restart-on-add/close and the text fragility.
 
 ## Known limitations
