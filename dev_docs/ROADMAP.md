@@ -1,0 +1,59 @@
+# Roadmap
+
+Last updated 2026-10-10. Items are in the order I'd do them; nothing here is promised.
+
+## Built
+
+| Area | What works |
+|---|---|
+| Browsing | Disks, partitions, volumes, files across several images at once; space bars; readable details; search across all open disks |
+| Audio | Sample preview with loops (same miniaudio backend and macOS loop fixes as AKAISDS), waveform, Space to play |
+| Images | Add, close and reveal single images; disk rows show their file; New Disk Image (floppy up to 512 MB hard disk); Format Disk |
+| Editing (opt-in, no undo) | Rename and delete files and volumes; new volume; **Allow Editing** switches akaiutil from `-r` to read/write |
+| Import | Drop or pick WAV/AIFF/FLAC (also OGG/MP3/CAF/W64): converted to 16-bit, resampled with our own windowed-sinc, stereo split or mixed, S1000/S3000/S900 (+ S900 compressed), alphabetical order, numbered names instead of overwrites; raw Akai files (`.S3`, `.P3`...) as they are |
+| Smart import | Loop points and root note from a WAV `smpl` chunk (and an AIFF root note), root note from a name like `Piano_C3`, trim silence, normalise |
+| Moving files | Copy / Cut / Paste and drag onto a volume (Shift/Cmd to move); drag files out to Finder/Explorer as WAV (Option for raw Akai) |
+| App | Settings, update check against GitHub releases, CI builds mirroring AKAISDS |
+
+## Verification debt (do this before trusting any of it)
+
+None of these could be checked from the development machine's test runs, which use a fake audio device, offscreen Qt and
+akaiutil reading its own output back:
+
+- [ ] **A real sampler.** Load an edited, imported or copied image into an S3000/S1000/S900 (or Gotek/SCSI2SD setup). Especially:
+      imported loops and root notes, stereo `-L`/`-R` pairs, S900 samples and compressed S9C, copied files in a new volume.
+- [ ] **Dragging files out to Finder / Explorer / a Linux file manager.** The drag carries lazily-created files; this works in
+      the unit tests (`QMimeData.urls()`), but how each platform's drop target asks for them hasn't been seen.
+- [ ] **Hearing the preview** on macOS, Windows and Linux (the loop fixes ported from AKAISDS were verified only by their logic).
+- [ ] **The CI legs**: Linux AppImage, Windows installer, Intel Mac. Only the Apple-silicon build has ever been run, and not
+      since editing, importing and copying were added.
+- [ ] Opening very large or many images (restarting akaiutil on every add/close takes time on 512 MB images).
+
+## Next
+
+1. **Sample header editor.** Loop points, root key, tuning and play mode, with the preview for instant feedback. akaiutil can't
+   set these, but `akai_header.py` already knows the 150-byte header layout and the app already writes headers on import.
+   Needs a way to rewrite an existing sample's header in the image (akaiutil has `paramgeti`/`paramputi` to try first), and a
+   clear "this edits the sample itself" warning.
+2. **Open an SD card / physical drive directly.** akaiutil can open raw devices. Needs OS permissions per platform and safety
+   rails against picking the wrong disk; start read-only, add editing later.
+3. **Programs and multis.** Today akaiutil's raw info text. A readable keygroup view, "which samples does this program use?",
+   and "samples no program uses" for library cleanup.
+4. **Copy a whole volume or partition** to another disk (new volume + copy of every file; `pget`/`pput` for partitions).
+5. **Export a volume/disk** as a folder of WAVs with loop points written into the WAV `smpl` chunk so DAWs see them.
+6. **Tags.** Copies currently lose a file's tags (`put` doesn't carry them; `reni` moves do). Preserve or let the user edit
+   them (`puttags`, `copytags`).
+7. **Import polish:** AIFF loop points (INST + MARK chunks: the end-marker convention needs checking), fade in/out, a pitch
+   fraction from `smpl`, per-file overrides in the import dialog, a progress dialog for big batches.
+8. **Safety net:** optional "snapshot the image before the first edit" and a revert. Decided against for now.
+9. **ctypes/cffi engine** to replace the subprocess and the text parsing in `engine/parse.py`. `engine/api.py` is the seam
+   (see the README). Worth doing once the feature set settles: it removes the restart-on-add/close and the text fragility.
+
+## Known limitations
+
+- Editing is all-or-nothing across the open images (one shared akaiutil process).
+- Adding or closing an image restarts akaiutil on the new set, so disk numbers change and the search index is rebuilt.
+- S900 samples are previewed as one-shots (their loop start isn't known to the app) and get no loops on import.
+- Only mono and stereo audio; more than two channels is refused.
+- 24-bit to 16-bit is plain rounding (no dither), so digital silence stays silent.
+- DD takes (direct-to-disk) are listed as text only.
