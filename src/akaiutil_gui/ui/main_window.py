@@ -745,7 +745,7 @@ class MainWindow(QMainWindow):
             "Editing is on, so this image can be changed as soon as it is open.",
             "There is no undo. Back it up first? The backup is kept in the app's folder, and File > Revert to Backup… puts it back.",
             action="Back Up and Add",
-            other_action="Add Without a Backup",
+            other_action="Add Without Backup",
             details_lines=[Path(p).name for p in need],
             default_is_action=True,
         )
@@ -1506,8 +1506,8 @@ class MainWindow(QMainWindow):
                 "Editing changes the disk image files themselves.",
                 f"There is no undo. Back up {'this image' if len(sizes) == 1 else f'these {len(sizes)} images'} first ({total:.0f} MB)? "
                 "The backups are kept in the app's folder, and File > Revert to Backup… puts one back.",
-                action="Back Up and Allow Editing",
-                other_action="Allow Editing Without a Backup",
+                action="Back Up and Edit",
+                other_action="Edit Without Backup",
                 details_lines=[f"{p.name}  ·  {size / 2**20:.1f} MB" for p, size in sizes],
                 default_is_action=True,
             )

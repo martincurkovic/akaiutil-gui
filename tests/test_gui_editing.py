@@ -124,7 +124,7 @@ def test_allow_editing_asks_first_and_then_switches_the_mode(qt_app, window, edi
     answers.confirm = False
     window.act_allow_edit.trigger()
     assert not window._writable and not window.act_allow_edit.isChecked()
-    assert answers.asked[-1][0] == "Allow editing?" and answers.asked[-1][3] == "Back Up and Allow Editing"
+    assert answers.asked[-1][0] == "Allow editing?" and answers.asked[-1][3] == "Back Up and Edit"
     assert answers.asked[-1][4] == [f"edit.img  ·  {window._images and __import__('pathlib').Path(window._images[0]).stat().st_size / 2**20:.1f} MB"]
 
     answers.confirm = True
@@ -873,3 +873,50 @@ def test_a_new_image_needs_no_backup_but_one_added_while_editing_is_asked_about(
     window.add_images([str(images["fl9"])])
     assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 3 and window._writable)
     assert answers.asked[-1][0] == "Back up the new image?" and backups_of(images["fl9"]) == []  # (not asked again)
+
+
+# ------------------------------------------------------------------- the backup question
+def three_way(lines=("HD5.img  ·  512.0 MB",)):
+    from akaiutil_gui.ui import edit_dialogs
+
+    return edit_dialogs.ThreeWayDialog(None, "Allow editing?", "Editing changes the disk image files themselves.",
+                                       "There is no undo. Back up this image first?", "Back Up and Edit", "Edit Without Backup", list(lines))
+
+
+def test_the_backup_question_has_its_buttons_in_this_order_and_the_last_is_the_default(qt_app):
+    d = three_way()
+    d.show()
+    buttons = sorted((b for b in d.findChildren(__import__("PySide6.QtWidgets", fromlist=["QPushButton"]).QPushButton)), key=lambda b: b.mapTo(d, b.rect().topLeft()).x())
+    assert [b.text() for b in buttons] == ["Show Details…", "Cancel", "Edit Without Backup", "Back Up and Edit"]
+    assert buttons[-1].isDefault() and not any(b.isDefault() for b in buttons[:-1])
+    assert d.width() == d.WIDTH and d.WIDTH < 600  # (narrow: the text wraps)
+    d.deleteLater()
+
+
+def test_the_backup_question_answers_true_other_or_false(qt_app):
+    from akaiutil_gui.ui import edit_dialogs
+    from PySide6.QtCore import QTimer
+
+    def answer(click):
+        d = three_way()
+        QTimer.singleShot(0, lambda: getattr(d, click).click() if click else d.reject())
+        out = d.ask()
+        d.deleteLater()
+        return out
+
+    assert answer("go_button") is True
+    assert answer("other_button") == edit_dialogs.OTHER
+    assert answer("cancel_button") is False
+    assert answer(None) is False  # (Escape, or closing the window)
+
+
+def test_the_details_stay_hidden_until_asked_for_and_can_be_hidden_again(qt_app):
+    d = three_way()
+    d.show()
+    assert d.details.isHidden() and d.details_button.text() == "Show Details…"
+    d.details_button.click()
+    assert not d.details.isHidden() and d.details_button.text() == "Hide Details" and "HD5.img" in d.details.toPlainText()
+    d.details_button.click()
+    assert d.details.isHidden()
+    d.deleteLater()
+    assert three_way(lines=()).details_button.isHidden()  # nothing to show: no button

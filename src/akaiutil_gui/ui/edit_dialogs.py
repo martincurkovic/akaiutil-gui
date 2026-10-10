@@ -16,8 +16,11 @@ from PySide6.QtWidgets import (
     QListWidget,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
     QRadioButton,
     QSpinBox,
+    QStyle,
     QVBoxLayout,
 )
 
@@ -586,6 +589,8 @@ def confirm(parent, title: str, text: str, detail: str = "", action: str = "Dele
 
     Returns True for `action`, False for Cancel, and (only if `other_action` was given) OTHER for that one. With
     `default_is_action` the first button is the default instead of Cancel: for a question where the safe choice is to go ahead."""
+    if other_action:
+        return ThreeWayDialog(parent, title, text, detail, action, other_action, list(details_lines)).ask()
     box = QMessageBox(QMessageBox.Icon.Warning, title, text, parent=parent)
     if detail:
         box.setInformativeText(detail)
@@ -593,12 +598,91 @@ def confirm(parent, title: str, text: str, detail: str = "", action: str = "Dele
     if lines:
         box.setDetailedText("\n".join(lines))
     go = box.addButton(action, QMessageBox.ButtonRole.DestructiveRole if not default_is_action else QMessageBox.ButtonRole.AcceptRole)
-    other = box.addButton(other_action, QMessageBox.ButtonRole.DestructiveRole) if other_action else None
     cancel = box.addButton(QMessageBox.StandardButton.Cancel)
     box.setDefaultButton(go if default_is_action else cancel)
     box.setEscapeButton(cancel)
     box.exec()
-    clicked = box.clickedButton()
-    if other is not None and clicked is other:
-        return OTHER
-    return clicked is go
+    return box.clickedButton() is go
+
+
+class ThreeWayDialog(QDialog):
+    """A question with two ways forward and a way out, laid out the same on every platform (a QMessageBox puts its buttons
+    where the platform's rules say, and on a Mac that isn't an order anyone would choose):
+
+        [Show Details…]                  [Cancel] [other action] [action]
+
+    The details (a list of what it is about) stay hidden until asked for. The last button is the default."""
+
+    WIDTH = 540
+
+    def __init__(self, parent, title: str, text: str, detail: str, action: str, other_action: str, lines: list[str]):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setFixedWidth(self.WIDTH)
+        self._result: bool | str = False
+
+        icon = QLabel()
+        icon.setPixmap(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning).pixmap(48, 48))
+        icon.setAlignment(Qt.AlignmentFlag.AlignTop)
+        heading = QLabel(text)
+        heading.setWordWrap(True)
+        font = heading.font()
+        font.setBold(True)
+        heading.setFont(font)
+        body = QLabel(detail)
+        body.setWordWrap(True)
+        body.setVisible(bool(detail))
+        words = QVBoxLayout()
+        words.addWidget(heading)
+        words.addWidget(body)
+        words.addStretch(1)
+        top = QHBoxLayout()
+        top.setSpacing(16)
+        top.addWidget(icon)
+        top.addLayout(words, 1)
+
+        self.details = QPlainTextEdit("\n".join(lines))
+        self.details.setReadOnly(True)
+        self.details.setFixedHeight(min(120, 22 * max(1, len(lines)) + 16))
+        self.details.hide()
+        self.details_button = QPushButton("Show Details…")
+        self.details_button.setVisible(bool(lines))
+        self.details_button.setAutoDefault(False)
+        self.details_button.clicked.connect(self._toggle_details)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setAutoDefault(False)
+        self.cancel_button.clicked.connect(self.reject)
+        self.other_button = QPushButton(other_action)
+        self.other_button.setAutoDefault(False)
+        self.other_button.clicked.connect(lambda: self._finish(OTHER))
+        self.go_button = QPushButton(action)
+        self.go_button.setDefault(True)
+        self.go_button.clicked.connect(lambda: self._finish(True))
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.details_button)
+        buttons.addStretch(1)
+        for b in (self.cancel_button, self.other_button, self.go_button):
+            buttons.addWidget(b)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.addLayout(top)
+        layout.addWidget(self.details)
+        layout.addLayout(buttons)
+        self.go_button.setFocus()
+
+    def _toggle_details(self) -> None:
+        show = self.details.isHidden()
+        self.details.setVisible(show)
+        self.details_button.setText("Hide Details" if show else "Show Details…")
+        self.adjustSize()
+
+    def _finish(self, result) -> None:
+        self._result = result
+        self.accept()
+
+    def ask(self) -> bool | str:
+        """True for the main action, OTHER for the other, False for Cancel (or closing the window)."""
+        self.exec()
+        return self._result if self.result() == QDialog.DialogCode.Accepted else False
