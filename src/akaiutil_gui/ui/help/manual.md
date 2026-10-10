@@ -162,8 +162,8 @@ Everything in the next sections needs editing to be on, and asks to switch it on
 
 ### Backups and reverting
 
-The first time you switch editing on, the app asks whether to **Back Up and Allow Editing**, or **Allow Editing Without a
-Backup**. A backup is a full copy of each open image (a hard disk image can be hundreds of MB; on a Mac with APFS the copy is
+The first time you switch editing on, the app asks whether to **Back Up and Edit**, or **Edit Without Backup** (or Cancel;
+**Show Details…** lists the images and their sizes). A backup is a full copy of each open image (a hard disk image can be hundreds of MB; on a Mac with APFS the copy is
 instant and takes no extra space). It is kept in the app's own data folder, not next to your image, so it can't be mistaken for
 a disk you opened. The app asks once per image per session: switch editing off and on again and it doesn't ask again, and an
 image you add while editing is on gets its own question. A brand-new image from **File > New Disk Image…** has nothing to lose,
