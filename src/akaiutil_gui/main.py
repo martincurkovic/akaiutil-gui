@@ -123,6 +123,22 @@ def smoke_test(report_path: str | None = None) -> int:
         PreviewPanel().deleteLater()
         return "settings dialog and preview panel build"
 
+    def manual() -> str:
+        """The user manual and its pictures are bundled data, like the notices: a build that lost them would show an empty window."""
+        from akaiutil_gui.ui.manual_dialog import ManualDialog
+        from akaiutil_gui.ui.about_dialog import AboutDialog
+
+        dialog = ManualDialog()
+        assert dialog.loaded, dialog.viewer.toPlainText()[:100]
+        images = sum(1 for _ in dialog.viewer.document().toHtml().split("<img")) - 1
+        missing = [n for n in ("main-window-dark.png", "sort-dialog.png", "import-dialog.png") if dialog._natural_size(f"screenshots/{n}") is None]
+        assert images >= 5 and not missing, (images, missing)
+        dialog.deleteLater()
+        about = AboutDialog()
+        assert "█" in about.logo_label.text()
+        about.deleteLater()
+        return f"manual with {images} pictures, About logo"
+
     def window() -> str:
         w = MainWindow()
         w.show()
@@ -138,6 +154,7 @@ def smoke_test(report_path: str | None = None) -> int:
     check("audio devices", audio_devices)
     check("dialogs", dialogs)
     check("notices", notices)
+    check("manual", manual)
     check("bundled akaiutil", bundled_akaiutil)
     check("akaiutil round trip", talks_to_akaiutil)
     check("main window", window)

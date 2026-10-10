@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QSettings, QThreadPool
 
-from akaiutil_gui import __version__, akai_names, describe, importing, search, settings, sorting, transfer
+from akaiutil_gui import akai_names, describe, importing, search, settings, sorting, transfer
 from akaiutil_gui.audio.sample import LoadedSample, load_wav
 from akaiutil_gui.formatting import human_size
 from akaiutil_gui.engine import fetch, formats
@@ -44,7 +44,8 @@ from akaiutil_gui.engine.models import CatalogEntry, Disk, DiskUsage, ExportResu
 from . import edit_dialogs, file_drag, reveal, theme
 from .details_view import DetailsView
 from .disk_tree import DiskTree
-from .notices_dialog import NoticesDialog
+from .about_dialog import AboutDialog
+from .manual_dialog import show_manual_dialog
 from .preview_panel import PreviewPanel
 from .settings_dialog import SettingsDialog
 from .file_table import FileTable
@@ -423,11 +424,13 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self._action("Locate &akaiutil…", self.locate_binary))
 
         help_menu = mb.addMenu("&Help")
-        about = self._action("&About akaiutil-gui", self._about)
-        about.setMenuRole(QAction.MenuRole.AboutRole)
+        self.act_manual = self._action("&User Manual…", lambda: show_manual_dialog(self), QKeySequence.StandardKey.HelpContents)
+        help_menu.addAction(self.act_manual)
+        help_menu.addSeparator()
+        about = self._action("&About akaiutil-GUI…", self._about)
+        about.setMenuRole(QAction.MenuRole.AboutRole)  # macOS moves it to the app menu
         help_menu.addAction(about)
         help_menu.addAction(self._action("Check for &Updates…", lambda: self._update_runner.start(manual=True)))
-        help_menu.addAction(self._action("Third-party &notices…", lambda: NoticesDialog(self).exec()))
 
     def _action(self, text, slot, shortcut=None) -> QAction:
         act = QAction(text, self)
@@ -1860,15 +1863,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(2000, lambda: self._update_runner.start(manual=False))
 
     def _about(self) -> None:
-        QMessageBox.about(
-            self,
-            "About akaiutil-gui",
-            f"<b>akaiutil-gui {__version__}</b><br>"
-            "A cross-platform Qt front end for akaiutil.<br><br>"
-            "Does its work by running <b>akaiutil</b> by Klaus Michael Indlekofer, "
-            "which is licensed under the GNU GPL v2 or later.<br><br>"
-            "akaiutil-gui is licensed under the GNU GPL v2 or later (see Help ▸ Third-party notices).",
-        )
+        AboutDialog(self).exec()
 
     def _restore_geometry(self) -> None:
         geometry = QSettings().value("window/geometry")
