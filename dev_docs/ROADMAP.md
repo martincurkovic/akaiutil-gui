@@ -12,6 +12,7 @@ Last updated 2026-10-10. Items are in the order I'd do them; nothing here is pro
 | Editing (opt-in, no undo) | Rename and delete files and volumes; new volume; **Allow Editing** switches akaiutil from `-r` to read/write |
 | Import | Drop or pick WAV/AIFF/FLAC (also OGG/MP3/CAF/W64): converted to 16-bit, resampled with our own windowed-sinc, stereo split or mixed, S1000/S3000/S900 (+ S900 compressed), alphabetical order, numbered names instead of overwrites; raw Akai files (`.S3`, `.P3`...) as they are |
 | Smart import | Loop points and root note from a WAV `smpl` chunk (and an AIFF root note), root note from a name like `Piano_C3`, trim silence, normalise |
+| Sorting | Sort a volume's files by name (all, or samples only) by moving them between slots; optional automatic sort after import/paste |
 | Moving files | Copy / Cut / Paste and drag onto a volume (Shift/Cmd to move); drag files out to Finder/Explorer as WAV (Option for raw Akai) |
 | App | Settings, update check against GitHub releases, CI builds mirroring AKAISDS |
 
