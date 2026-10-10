@@ -17,6 +17,7 @@ there is no undo (see [Editing](#editing)).
   S1000/S3000 loops are previewed as loops; S900 samples play once.
 - **Search** every open disk at once (Ctrl+F): type words (they all have to match, in the file's or its volume's name), and
   filter by type. Double-click a result to show it in its volume. Results can be previewed and exported like any file.
+- **Recent images** on the start screen (and File > Open Recent): click one to open it.
 - **Resizable, hideable columns** in the file list: drag a heading's edge to resize it, right-click a heading to choose which columns
   are shown. Both are remembered.
 - **Export** files as they are, or samples as WAV (with the root note and loop points in a `smpl` chunk, so a DAW sees them).
