@@ -33,7 +33,7 @@ inside. Powered by Klaus Michael Indlekofer's **akaiutil** program.
 
 ## Getting started
 
-1. **Open an image.** Choose **File > Open Disk Image…**, or drag the image file onto the window. (The start screen has buttons for this, and for **New Disk Image…** if you want to make an empty one, and lists the images you opened lately: click one to open it, or **Clear List** to forget them. **File > Open Recent** has the same list, up to ten. An image that has been moved or deleted drops off the list.)
+1. **Open an image.** Choose **File > Open Disk Image…**, or drag the image file onto the window. (The start screen has buttons for this, and for **New Disk Image…** if you want to make an empty one, and lists the images you opened lately: click one to open it, right-click one to **Remove from Recent Files**, or **Clear List** to forget them all. **File > Open Recent** has the same list, up to ten. An image that has been moved or deleted drops off the list.)
 2. The first time, the app needs akaiutil. If it isn't installed it offers to download it (the download is checked against a
    known checksum) or lets you point at a copy you already have. Built apps include akaiutil, so this only happens when running
    from source.

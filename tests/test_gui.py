@@ -6,7 +6,7 @@ import time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings, Qt
 from PySide6.QtWidgets import QApplication
 
 from akaiutil_gui import search, settings
@@ -1401,6 +1401,51 @@ def test_clicking_a_recent_image_opens_it(app, window, images):
     rows_of(window)[0].click()
     assert pump(app, lambda: window.tree.topLevelItemCount() == 1)
     assert [p for p in window._images] == [str(images["fl1"].resolve())] or len(window._images) == 1
+
+
+def remove_recent(window, row):
+    """What right-click > Remove from Recent Files does to a row of the start screen's list."""
+    menu = window._recent_row_menu(rows_of(window)[row].property("path"))
+    (action,) = menu.actions()
+    assert action.text() == "Remove from Recent Files"
+    action.trigger()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # (the rows that were replaced go at the next event loop)
+
+
+def test_right_clicking_a_recent_image_offers_to_remove_it(app, window, images):
+    import os
+
+    settings.add_recent_image(str(images["fl1"]))
+    settings.add_recent_image(str(images["fl9"]))
+    window._refresh_recent()
+    assert rows_of(window)[0].contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+    remove_recent(window, 0)  # the top row: fl9
+    assert [b.property("path") for b in rows_of(window)] == [os.path.realpath(images["fl1"])]
+    assert settings.get_recent_images() == [os.path.realpath(images["fl1"])]
+    assert images["fl9"].exists()  # only the list entry goes, never the image
+
+
+def test_removing_the_last_recent_image_hides_the_list(app, window, images):
+    settings.add_recent_image(str(images["fl1"]))
+    window._refresh_recent()
+    remove_recent(window, 0)
+    assert window.recent_box.isHidden() and settings.get_recent_images() == []
+
+
+def test_removing_a_recent_image_lets_an_older_one_take_its_place(app, window, images, tmp_path):
+    import shutil
+
+    from akaiutil_gui.ui import main_window
+
+    for n in range(main_window.RECENT_SHOWN + 1):  # one more than the start screen shows
+        copy = tmp_path / f"disk{n}.img"
+        shutil.copy(images["fl1"], copy)
+        settings.add_recent_image(str(copy))
+    window._refresh_recent()
+    assert len(rows_of(window)) == main_window.RECENT_SHOWN
+    remove_recent(window, 0)
+    assert len(rows_of(window)) == main_window.RECENT_SHOWN  # the oldest, which was out of sight, comes up
+    assert rows_of(window)[-1].property("path").endswith("disk0.img")
 
 
 def test_a_recent_image_that_has_gone_is_not_listed_and_is_forgotten(app, window, images, tmp_path):

@@ -1589,7 +1589,21 @@ class MainWindow(QMainWindow):
         row.addWidget(folder)
         button.setMinimumHeight(max(30, name.sizeHint().height() + 10))
         button.clicked.connect(lambda _checked=False, p=path: self._open_recent(p))
+        button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        button.customContextMenuRequested.connect(lambda pos, b=button, p=path: self._recent_menu_for(b, p, pos))
         return button
+
+    def _recent_row_menu(self, path: str) -> QMenu:
+        menu = QMenu(self)
+        menu.addAction("Remove from Recent Files", lambda: self._forget_recent(path))
+        return menu
+
+    def _recent_menu_for(self, button: QPushButton, path: str, pos) -> None:
+        self._recent_row_menu(path).exec(button.mapToGlobal(pos))
+
+    def _forget_recent(self, path: str) -> None:
+        settings.remove_recent_image(path)
+        self._refresh_recent()  # (the next remembered image, if any, takes its place)
 
     def _open_recent(self, path: str) -> None:
         if not os.path.isfile(path):
