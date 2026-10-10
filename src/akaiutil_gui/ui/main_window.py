@@ -1402,6 +1402,56 @@ class MainWindow(QMainWindow):
             lambda message: self._edit_failed(vol.disk, message),
         )
 
+    def _copy_volume(self, vol: Volume) -> None:
+        if self._engine is None or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_copy_volume(vol))
+
+    def _do_copy_volume(self, vol: Volume) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+
+        def survey() -> tuple[int, int, list[edit_dialogs.CopyTarget]]:
+            files = engine.list_files(vol)
+            targets = []
+            for disk in engine.list_disks():
+                for part in engine.list_partitions(disk):
+                    if self._can_hold_volumes(part) and (part.type == "HD9") == (vol.type == "S900"):
+                        targets.append(edit_dialogs.CopyTarget(part, tuple(v.name for v in engine.list_volumes(part))))
+            block = targets[0].partition.block_size if targets else 8192
+            return len(files), sum(-(-f.size // block) * block for f in files), targets
+
+        def show(found: tuple[int, int, list[edit_dialogs.CopyTarget]]) -> None:
+            count, need, targets = found
+            if not targets:
+                QMessageBox.information(self, "Copy Volume", "There is no hard disk partition to copy it to.")
+                return
+            answer = self._ask_copy_volume(vol, count, need, targets)
+            if answer is None:
+                return
+            target, name = answer
+            self.statusBar().showMessage(f"Copying “{vol.name}”…")
+
+            def done(copied) -> None:
+                self._edited(target.disk, select=copied.volume, announce=True, message=f"Copied “{vol.name}” to “{copied.volume.name}” (partition {target.name}).")
+                if copied.notes:
+                    self._warn("About the copy", f"“{copied.volume.name}” was copied.", copied.notes)
+
+            self._run_edit(
+                lambda: engine.copy_volume(vol, target, name),
+                done,
+                lambda message: self._edit_failed(target.disk, message),
+            )
+
+        self._run(survey, show)
+
+    def _ask_copy_volume(self, vol: Volume, count: int, need: int, targets) -> tuple[Partition, str] | None:
+        dialog = edit_dialogs.CopyVolumeDialog(self, vol, count, need, targets)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return None
+        return dialog.target.partition, dialog.name
+
     def _new_volume(self, part: Partition | None = None) -> None:
         part = part or self._partition_for_new_volume()
         if self._engine is None or part is None or self._busy():
@@ -1817,6 +1867,7 @@ class MainWindow(QMainWindow):
             menu.addAction("Sort Files by Name…", lambda: self._sort_volume(obj))
             menu.addSeparator()
             menu.addAction("Export Samples as WAV…", lambda: self._export_node(obj))
+            menu.addAction("Copy Volume To…", lambda: self._copy_volume(obj))
             menu.addSeparator()
             menu.addAction("Rename…", lambda: self._rename_volume(obj))
             menu.addAction("Delete…", lambda: self._delete_volume(obj))

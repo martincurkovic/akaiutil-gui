@@ -222,6 +222,18 @@ reads the file out and puts it back unchanged (the original is deleted only afte
 any tag the target doesn't have. A name that already exists in the target gets a number, and files of the wrong sampler for the
 target volume are refused, as for importing.
 
+### Copying a whole volume
+
+Right-click a volume and choose **Copy Volume To…** to copy it, with every file in it, into a hard disk partition: another
+partition of the same disk, or one on any other open disk. Pick the partition and a name for the copy; the name starts out as
+the original's, with COPY added if the partition already has one. The dialog tells you if the partition hasn't got room.
+
+The copy keeps the volume's settings and each file's OS version and tags. It does **not** take over a load number that another
+volume in the partition already uses (the samplers would have two volumes answering to one number): the copy gets none, and you
+are told. Tags are copied by number, so if the other partition names its tags differently you are told that as well. If a copy
+can't be finished, what was started is removed again, so no half-copied volume is left behind. An S900 volume only goes to an S900
+hard disk, and the other kinds only to the other hard disks.
+
 ---
 
 ## Sorting a volume

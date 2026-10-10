@@ -112,3 +112,29 @@ def test_a_move_and_a_copy_both_keep_a_files_tags(binary, tmp_path):
         assert next(f for f in eng.list_files(vols[3]) if f.name == tagged.name).tags == tagged.tags  # a move keeps them
     finally:
         eng.close()
+
+
+def test_a_real_volume_copies_whole_with_its_tags_into_another_partition(binary, tmp_path):
+    """On a copy of HD5: every file of a volume arrives in a new volume of another partition, tags and all."""
+    import shutil
+
+    image = next((p for p in REAL if "HD5" in p.name), None)
+    if image is None:
+        pytest.skip("needs the HD5 image")
+    work = tmp_path / "copy.img"
+    shutil.copy(image, work)
+    eng = AkaiEngine(binary)
+    eng.open([work])
+    eng.set_writable(True)
+    try:
+        parts = {p.name: p for p in eng.list_partitions(eng.list_disks()[0])}
+        src = eng.list_volumes(parts["A"])[0]
+        before = eng.list_files(src)
+        copy = eng.copy_volume(src, parts["E"], "WHOLE COPY")
+        after = eng.list_files(copy.volume)
+        assert [(f.name, f.size, f.os_version, f.tags) for f in after] == [(f.name, f.size, f.os_version, f.tags) for f in before]
+        assert eng.tag_names(src)[10] == "TAG J" and eng.tag_names(copy.volume).get(10, "") == ""  # partition E has no names for its tags
+        assert len(copy.notes) == 1 and "named differently in partition E" in copy.notes[0] and "“TAG J” became “”" in copy.notes[0]
+        assert eng.list_files(src) == before
+    finally:
+        eng.close()

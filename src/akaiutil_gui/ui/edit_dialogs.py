@@ -1,6 +1,7 @@
 """The questions asked before a disk image is changed: a new name, a new volume, "are you sure?"."""
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from akaiutil_gui import akai_names, importing, settings, sorting
 from akaiutil_gui.engine import formats
-from akaiutil_gui.engine.models import Disk
+from akaiutil_gui.engine.models import Disk, Partition, Volume
 
 
 class AkaiNameEdit(QLineEdit):
@@ -197,6 +198,88 @@ class NewVolumeDialog(QDialog):
                 problem, ok = f"Volume number {self.number.value()} is already used.", False
             elif any(akai_names.same_name(name, t) for t in self._taken):
                 problem, ok = f"There is already a volume called “{name}”.", False
+        self.problem.setText(problem or "")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
+
+
+@dataclass(frozen=True)
+class CopyTarget:
+    """A partition a volume could be copied into, and the names its volumes already have."""
+
+    partition: Partition
+    volume_names: tuple[str, ...]
+
+    @property
+    def label(self) -> str:
+        p = self.partition
+        return f"disk{p.disk}  ·  partition {p.name}  ·  {p.free_mb:.1f} MB free"
+
+    @property
+    def free_bytes(self) -> int:
+        return self.partition.free_blocks * self.partition.block_size
+
+
+class CopyVolumeDialog(QDialog):
+    """Where to copy a volume to and what to call the copy."""
+
+    def __init__(self, parent, volume: Volume, files: int, need_bytes: int, targets: list[CopyTarget]):
+        super().__init__(parent)
+        self.setWindowTitle("Copy Volume")
+        self.setMinimumWidth(420)
+        self._volume = volume
+        self._need = need_bytes
+        self._targets = targets
+        self._suggested = ""
+
+        self.where = QComboBox()
+        for t in targets:
+            self.where.addItem(t.label)
+        elsewhere = next((i for i, t in enumerate(targets) if (t.partition.disk, t.partition.name) != (volume.disk, volume.partition)), 0)
+        self.where.setCurrentIndex(elsewhere)
+        self.name_edit = AkaiNameEdit("", volume.type)
+        self.problem = _problem_label()
+        self.name_edit.rejected.connect(lambda note: self.problem.setText(note))
+        self.where.currentIndexChanged.connect(self._target_changed)
+        self.name_edit.textChanged.connect(self._validate)
+
+        form = QFormLayout()
+        form.addRow("Copy to", self.where)
+        form.addRow("Name", self.name_edit)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        what = f"“{volume.name}”: {files} file{'s' if files != 1 else ''}, about {need_bytes / 2**20:.1f} MB."
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(what))
+        layout.addLayout(form)
+        layout.addWidget(self.problem)
+        layout.addWidget(self.buttons)
+        self._target_changed()
+
+    @property
+    def target(self) -> CopyTarget:
+        return self._targets[self.where.currentIndex()]
+
+    @property
+    def name(self) -> str:
+        return akai_names.check_name(self.name_edit.text(), self._volume.type)[0]
+
+    def _target_changed(self) -> None:
+        """Suggest a name that is free there, unless the user has typed their own."""
+        if self.name_edit.text() in ("", self._suggested):
+            self._suggested = akai_names.unique_name(self._volume.name, self.target.volume_names, self._volume.type)
+            self.name_edit.setText(self._suggested)
+        self._validate()
+
+    def _validate(self) -> None:
+        name, problem = akai_names.check_name(self.name_edit.text(), self._volume.type)
+        ok = problem is None and bool(self.name_edit.text().strip())
+        if not self.name_edit.text().strip():
+            problem = None
+        elif ok and any(akai_names.same_name(name, t) for t in self.target.volume_names):
+            problem, ok = f"There is already a volume called “{name}” there.", False
+        if ok and self._need > self.target.free_bytes:
+            problem, ok = f"That partition only has {self.target.free_bytes / 2**20:.1f} MB free.", False
         self.problem.setText(problem or "")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
 

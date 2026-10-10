@@ -22,7 +22,7 @@ from pathlib import Path
 from .. import akai_names, describe, sorting, tags as filetags
 from ..audio import wavfile
 from . import formats, parse
-from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, SampleInfo, Volume
+from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, SampleInfo, Volume, VolumeCopy
 from .session import EngineError, Session, TrafficCallback
 
 
@@ -264,6 +264,65 @@ class AkaiEngine:
             if created is None:
                 raise EngineError("akaiutil didn't create the volume.")
             return created
+
+    def copy_volume(self, src: Volume, part: Partition, new_name: str) -> VolumeCopy:
+        """Copy a whole volume (every file, its load number and settings) into a hard disk partition, on any open disk, as a
+        new volume called `new_name`. akaiutil's `copyvoli` does the work, but it would silently merge into a volume that
+        already has the name, copy a load number that another volume already uses, and leave half a volume behind if the
+        partition filled up: so this checks first, fixes the load number, and removes a copy that didn't come out whole."""
+        clean, problem = akai_names.check_name(new_name, src.type)
+        if problem:
+            raise EngineError(problem)
+        if part.is_dd or part.type.startswith("FL"):
+            raise EngineError("A volume can only be copied into a hard disk partition.")
+        if (part.type == "HD9") != (src.type == "S900"):
+            raise EngineError("An S900 volume only fits an S900 hard disk, and other volumes don't.")
+        notes: list[str] = []
+        with self._lock:
+            self._need_writable()
+            current = self._find_volume(src.disk, src.partition, src.index)
+            if current is None or not akai_names.same_name(current.name, src.name):
+                raise EngineError(f"“{src.name}” isn't volume {src.index} of partition {src.partition} any more.")
+            files = self.list_files(src)
+            used, limit = self.volume_slots(part)
+            if len(used) >= limit:
+                raise EngineError(f"Partition {part.name} already holds the most volumes it can ({limit}).")
+            if any(akai_names.same_name(v.name, clean) for v in self._volumes_at(part.disk, part.name)):
+                raise EngineError(f"There is already a volume called “{clean}” in partition {part.name}.")
+            free_blocks = next(
+                (p.free_blocks for p in parse.parse_partitions(self._run(f"dir /disk{part.disk}").text, part.disk, part.block_size) if p.name == part.name),
+                part.free_blocks,
+            )
+            needed = sum(-(-f.size // part.block_size) for f in files) + COPY_SPARE_BLOCKS
+            if needed > free_blocks:
+                raise EngineError(
+                    f"Partition {part.name} hasn't got room: the volume needs about {needed * part.block_size / 2**20:.1f} MB "
+                    f"and {free_blocks * part.block_size / 2**20:.1f} MB is free."
+                )
+            self._run(f"cd /disk{src.disk}/{src.partition}")
+            text = self._run(f"copyvoli {src.index} /disk{part.disk}/{part.name}/{akai_names.command_token(clean)}", timeout=3600).text
+            created = next((v for v in self._volumes_at(part.disk, part.name) if akai_names.same_name(v.name, clean)), None)
+            copied = self.list_files(created) if created is not None else []
+            if created is None or any(m in text for m in COPY_FAILED) or len(copied) != len(files):
+                if created is not None:  # (it's the one we just made: the name was free a moment ago)
+                    self._run(f"cd /disk{part.disk}/{part.name}")
+                    self._run(f"delvoli {created.index}")
+                said = " ".join(ln.strip() for ln in text.splitlines() if any(m in ln for m in COPY_FAILED))
+                raise EngineError(f"akaiutil couldn't copy the volume{': ' + said if said else ''}. Nothing was left behind.")
+            if created.load_number not in ("-", ""):
+                others = [v for v in self._volumes_at(part.disk, part.name) if v.index != created.index]
+                if any(v.load_number == created.load_number for v in others):
+                    self._run(f"cd /disk{part.disk}/{part.name}")
+                    self._write(f"setlnumi {created.index} OFF")
+                    notes.append(f"Load number {created.load_number} is already used in partition {part.name}, so the copy has none.")
+                    created = self._find_volume(part.disk, part.name, created.index) or created
+            if src.type in ("S3000", "CD3000") and any(f.tags for f in files):
+                here, there = self.tag_names(src), self.tag_names(created)
+                differing = sorted({n for f in files for n in f.tag_numbers if here.get(n) != there.get(n)})
+                if differing:
+                    notes.append("Some files are tagged with tags that are named differently in partition " + part.name
+                                 + " (" + ", ".join(f"{n}: “{here.get(n, '')}” became “{there.get(n, '')}”" for n in differing[:5]) + ").")
+            return VolumeCopy(created, notes)
 
     def delete_volume(self, vol: Volume) -> None:
         """Delete a volume and every file in it."""
@@ -542,6 +601,9 @@ class AkaiEngine:
         if resp.cwd.rstrip() != vol.path.rstrip():
             raise EngineError(f"Couldn't open volume {vol.path}: {resp.text.strip() or resp.cwd}")
 
+
+COPY_SPARE_BLOCKS = 4  # what a new volume itself takes, with a little to spare
+COPY_FAILED = ("copy error", "not enough space", "cannot create", "read error", "write error")  # what copyvoli says when it gives up
 
 # akaiutil's command for each kind of import (see models.ImportJob)
 _IMPORT_COMMANDS = {"wav1": "wav2sample1", "wav3": "wav2sample3", "wav9": "wav2sample9", "wav9c": "wav2sample9c", "put": "put"}

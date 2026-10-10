@@ -71,6 +71,19 @@ def split_extension(file_name: str) -> tuple[str, str]:
     return m.group("base"), "." + m.group("ext")
 
 
+def unique_name(name: str, taken, volume_type: str = "S3000") -> str:
+    """`name` if nothing in `taken` has it, else "NAME COPY", "NAME COPY 2"... cut so the whole thing still fits."""
+    limit = name_limit(volume_type)
+    if not any(same_name(name, t) for t in taken):
+        return name[:limit]
+    for n in range(1, 1000):
+        suffix = " COPY" if n == 1 else f" COPY {n}"
+        candidate = name[: max(1, limit - len(suffix))].rstrip() + suffix
+        if not any(same_name(candidate, t) for t in taken):
+            return candidate
+    return name[:limit]
+
+
 def command_token(name: str) -> str:
     """The name as akaiutil's command line wants it: spaces written as '_'."""
     return name.replace(" ", "_")

@@ -184,6 +184,14 @@ class CatalogEntry:
 
 
 @dataclass(frozen=True)
+class VolumeCopy:
+    """A volume that was copied: where it is now, and anything about the copy the user should know."""
+
+    volume: Volume
+    notes: list[str]
+
+
+@dataclass(frozen=True)
 class VolumeUsage:
     """Space a volume's files take, in whole allocation blocks (as akaiutil allocates them)."""
 

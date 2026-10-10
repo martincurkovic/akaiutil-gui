@@ -77,6 +77,7 @@ def answers(monkeypatch):
         confirm = True
         name = None
         new_volume = None
+        copy_volume = None
         format = None
         new_image = None
         save_path = None
@@ -98,6 +99,7 @@ def answers(monkeypatch):
 
     monkeypatch.setattr(MainWindow, "_ask_name", lambda self, what, current, vtype, taken, suffix="": (a.asked.append(("name", what, current, list(taken), suffix)), a.name)[1])
     monkeypatch.setattr(MainWindow, "_ask_new_volume", lambda self, *args: (a.asked.append(("new", args)), a.new_volume)[1])
+    monkeypatch.setattr(MainWindow, "_ask_copy_volume", lambda self, vol, count, need, targets: (a.asked.append(("copy", vol.name, count, [t.label for t in targets])), a.copy_volume(targets) if callable(a.copy_volume) else None)[1])
     monkeypatch.setattr(MainWindow, "_ask_format", lambda self, disk: (a.asked.append(("format", disk.index, disk.type)), a.format)[1])
     monkeypatch.setattr(MainWindow, "_ask_new_image", lambda self: (a.asked.append(("newimage",)), a.new_image)[1])
     monkeypatch.setattr(MainWindow, "_ask_save_path", lambda self, suggestion: (a.asked.append(("save", suggestion)), a.save_path)[1])
@@ -367,7 +369,7 @@ def test_the_edit_menu_is_off_without_an_image(qt_app, window):
 def test_context_menus_offer_what_fits_what_was_clicked(qt_app, window, editable_hd, answers):
     open_and_show(qt_app, window, editable_hd)
     texts = lambda menu: [a.text().replace("&", "") for a in menu.actions() if not a.isSeparator()]  # noqa: E731
-    assert texts(window._tree_menu(window._volume)) == ["Import Files…", "Paste Files", "Sort Files by Name…", "Export Samples as WAV…", "Rename…", "Delete…"]
+    assert texts(window._tree_menu(window._volume)) == ["Import Files…", "Paste Files", "Sort Files by Name…", "Export Samples as WAV…", "Copy Volume To…", "Rename…", "Delete…"]
     assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…", "Export Samples as WAV…"]
 
     window.table.selectRow(0)
@@ -711,3 +713,51 @@ def test_the_new_volume_dialogs_name_field_follows_the_volume_type(qt_app):
     d.type_combo.setCurrentIndex(d.type_combo.findText("S900"))
     assert d.name_edit.text() == "TWELVE CHAR" or len(d.name_edit.text()) == 10
     assert d.name_edit.placeholderText() == "up to 10 characters"
+
+
+# ------------------------------------------------------------------- copying a volume
+def test_a_volume_is_copied_from_its_context_menu(qt_app, window, images, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    texts = [a.text() for a in window._tree_menu(window._volume).actions() if not a.isSeparator()]
+    assert "Copy Volume To…" in texts
+    answers.copy_volume = lambda targets: (targets[0].partition, "DRUMS COPY")
+    window._copy_volume(window._volume)
+    assert pump(qt_app, lambda: window._writable and "Copied “DRUMS”" in window.statusBar().currentMessage())
+    asked = next(a for a in answers.asked if a[0] == "copy")
+    assert asked[1:3] == ("DRUMS", 2) and asked[3][0].startswith("disk0")
+    assert pump(qt_app, lambda: window._volume is not None and window._volume.name == "DRUMS COPY" and window.table.rowCount() == 2)
+    assert answers.warnings == []
+
+
+def test_cancelling_the_copy_dialog_changes_nothing(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    window._copy_volume(window._volume)
+    assert pump(qt_app, lambda: any(a[0] == "copy" for a in answers.asked))
+    assert [v.name for v in window.tree.volumes_in(0, "A")] == ["DRUMS", "BASS", "MY SYNTH"]
+
+
+def test_a_copy_that_cant_be_done_says_why(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    answers.copy_volume = lambda targets: (targets[0].partition, "BASS")  # a name the partition already has
+    window._copy_volume(window._volume)
+    assert pump(qt_app, lambda: any("already a volume called" in str(w) for w in answers.warnings))
+
+
+def test_the_copy_dialog_suggests_a_free_name_and_checks_the_room(qt_app, editable_hd):
+    from akaiutil_gui.engine.models import Partition, Volume
+    from akaiutil_gui.ui import edit_dialogs
+
+    vol = Volume(0, "A", 1, "DRUMS", "-", "0x0003", "17.00", "S3000")
+    big = Partition(0, "A", "HD", 8192, 7680, 2000, 60.0, 15.6, 26.0)
+    full = Partition(0, "B", "HD", 8192, 7680, 4, 60.0, 0.03, 0.1)
+    targets = [edit_dialogs.CopyTarget(big, ("DRUMS", "DRUMS COPY")), edit_dialogs.CopyTarget(full, ("OTHER",))]
+    dialog = edit_dialogs.CopyVolumeDialog(None, vol, 2, 1_000_000, targets)
+    assert dialog.where.currentIndex() == 1  # (not back into the same partition, if there is another)
+    ok = dialog.buttons.button(dialog.buttons.StandardButton.Ok)
+    assert "only has" in dialog.problem.text() and not ok.isEnabled()  # (the second one is full)
+    dialog.where.setCurrentIndex(0)
+    assert dialog.name_edit.text() == "DRUMS COPY 2" and ok.isEnabled()  # a name that is free there
+    dialog.name_edit.setText("drums")
+    assert not ok.isEnabled() and "already a volume called" in dialog.problem.text()
+    dialog.name_edit.setText("kit")
+    assert ok.isEnabled() and dialog.name == "KIT" and dialog.target.partition is big
