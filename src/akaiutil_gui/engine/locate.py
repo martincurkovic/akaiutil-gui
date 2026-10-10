@@ -1,7 +1,9 @@
 """Finding the akaiutil executable."""
 
 import os
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -62,3 +64,15 @@ def find_akaiutil(configured: str | None = None) -> Path | None:
         if path.is_file() and os.access(path, os.X_OK):
             return path
     return None
+
+
+def binary_version(path: Path) -> str | None:
+    """The version akaiutil says it is ("4.6.8"), read from the banner `akaiutil -h` prints before it exits; None if
+    it can't be run or says nothing recognisable."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash on Windows
+    try:
+        result = subprocess.run([str(path), "-h"], capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL, creationflags=flags)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    found = re.search(r"Rev\.\s*([\w.]+)", result.stdout + result.stderr)
+    return found.group(1) if found else None

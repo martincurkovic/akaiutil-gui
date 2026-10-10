@@ -21,6 +21,17 @@ def fake_binary(folder: Path, executable: bool = True) -> Path:
     return path
 
 
+def test_the_version_comes_from_the_banner_akaiutil_prints(tmp_path):
+    path = fake_binary(tmp_path)
+    path.write_text("#!/bin/sh\necho '*  AKAI S900/S1000/S3000 File Manager, Rev. 9.8.7  *'\n")
+    assert locate.binary_version(path) == "9.8.7"
+
+
+def test_no_version_when_it_cant_be_run_or_says_nothing(tmp_path):
+    assert locate.binary_version(tmp_path / "missing") is None
+    assert locate.binary_version(fake_binary(tmp_path)) is None  # prints "usage" only
+
+
 @pytest.fixture
 def frozen(monkeypatch, tmp_path):
     """Pretend to be a built app unpacked into tmp_path/app."""

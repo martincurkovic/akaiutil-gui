@@ -108,6 +108,10 @@ class FileEntry:
     def is_sample(self) -> bool:
         return self.kind == "Sample"
 
+    @property
+    def is_program(self) -> bool:
+        return self.kind == "Program"
+
 
 # What akaiutil appends to file names: a type letter, then a digit for the sampler
 # generation (9 = S900, 1 = S1000, 3 = S3000; none for types shared by S1000/S3000).

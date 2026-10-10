@@ -208,6 +208,22 @@ class FileTable(QTableWidget):
     def selected_files(self) -> list[FileEntry]:
         return [f for _, f in self.selected_rows()]
 
+    def select_files(self, indexes: set[int]) -> int:
+        """Select the rows of these files (by file number) and nothing else, scrolling to the first; returns how many."""
+        self.clearSelection()
+        first = None
+        chosen = 0
+        for row in range(self.rowCount()):
+            item = self.item(row, 0)
+            if item.data(_ROLE_FILE).index in indexes:
+                for column in range(self.columnCount()):
+                    self.item(row, column).setSelected(True)
+                chosen += 1
+                first = first or item
+        if first is not None:
+            self.scrollToItem(first)
+        return chosen
+
     def select_file(self, volume: Volume | None, file_index: int) -> bool:
         """Select (and scroll to) the row for a file; False if it isn't in the table."""
         for row in range(self.rowCount()):

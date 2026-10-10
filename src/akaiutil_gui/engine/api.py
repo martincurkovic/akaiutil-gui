@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from .. import akai_header, akai_names, describe, sorting, tags as filetags
+from .. import akai_header, akai_names, describe, references, sorting, tags as filetags
 from ..audio import wavfile
 from . import formats, parse
 from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, SampleInfo, Volume, VolumeCopy
@@ -165,6 +165,15 @@ class AkaiEngine:
             if info is not None:
                 infos[number] = info
         return infos
+
+    def volume_references(self, vol: Volume) -> references.VolumeReferences:
+        """The volume's files and which samples each of its programs uses (one `infoi` per program, so a volume of many
+        samples and few programs is quick)."""
+        with self._lock:
+            self._enter_volume(vol)
+            files = parse.parse_files(self._run("dir").text)
+            used = {f.index: tuple(references.sample_names(self._run(f"infoi {f.index}").text)) for f in files if f.is_program}
+        return references.VolumeReferences(tuple(files), used)
 
     def export_sample_wav(self, vol: Volume, file: FileEntry, dest_dir: str | os.PathLike) -> Path:
         """Convert one sample to a WAV file in dest_dir (replacing one that's already there)."""

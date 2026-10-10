@@ -17,8 +17,12 @@ knowing about: in akaiutil's own names `ctune` is the *cents* (fine) tune and
 
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .engine.models import DiskUsage, FileEntry, Loop, SampleInfo
+
+if TYPE_CHECKING:
+    from .references import VolumeReferences
 from .formatting import human_size, note_name, percent, plural
 
 
@@ -233,7 +237,7 @@ def _size_text(n: int) -> str:
 
 
 # ----------------------------------------------------------------------- files
-def describe_file(text: str) -> Details:
+def describe_file(text: str, entry: FileEntry | None = None, refs: "VolumeReferences | None" = None) -> Details:
     path, root, other = parse_info(text)
     ftype = root.get("type")
     name = root.get("ramname") or (path.rsplit("/", 1)[-1] if path else "File")
@@ -260,10 +264,37 @@ def describe_file(text: str) -> Details:
         if extra:
             body = [Block("As reported by akaiutil", text="\n".join(extra))]
 
-    details.blocks = [Block(rows=head), *body]
+    used = _file_reference_blocks(entry, refs) if entry is not None and refs is not None else []  # (up top: the details run long)
+    details.blocks = [Block(rows=head), *used, *body]
     if technical:
         details.blocks.append(Block("Technical", rows=technical, muted=True))
     return details
+
+
+_LIST_LIMIT = 30  # names listed before "and N more"
+
+
+def _names(files: list[FileEntry]) -> list[str]:
+    names = [f.name for f in files]
+    return names[:_LIST_LIMIT] + ([f"and {len(names) - _LIST_LIMIT} more"] if len(names) > _LIST_LIMIT else [])
+
+
+def _file_reference_blocks(entry: FileEntry, refs: "VolumeReferences") -> list[Block]:
+    """Who plays a sample, or what a program plays (only samples in the same volume count)."""
+    if entry.is_sample:
+        users = refs.programs_using(entry)
+        if users:
+            return [Block("Used by", [Row("Program" if len(users) == 1 else f"Program {n}", u.name) for n, u in enumerate(users, 1)])]
+        if refs.has_programs:
+            return [Block("Used by", [Row("Programs", "None: no program in this volume plays this sample")])]
+        return [Block("Used by", [Row("Programs", "This volume has no programs")], muted=True)]
+    if entry.is_program:
+        found, missing = refs.samples_of(entry)
+        if not found and not missing:
+            return [Block("Samples used", [Row("Samples", "None")])]
+        rows = [["In this volume", name] for name in _names(found)] + [["Not in this volume", name] for name in missing]
+        return [Block("Samples used", headers=["", "Sample"], table=rows)]
+    return []
 
 
 _HEADER_LINE = re.compile(r"^(fnr|start|size|type|ramname):")
@@ -570,7 +601,20 @@ def _volume_contents(root: Node, path: str, usage: DiskUsage | None) -> Block | 
     )
 
 
-def describe_volume(text: str, usage: DiskUsage | None = None) -> Details:
+def _volume_programs(refs: "VolumeReferences") -> Block | None:
+    """How many programs there are, and which samples none of them plays (for tidying a library)."""
+    if not refs.has_programs:
+        return None
+    programs = [f for f in refs.files if f.is_program]
+    unused = refs.unused_samples()
+    block = Block("Programs and samples", [Row("Programs", str(len(programs))), Row("Samples not in any program", str(len(unused)))])
+    if unused:
+        block.headers = ["Not played by any program"]
+        block.table = [[name] for name in _names(unused)]
+    return block
+
+
+def describe_volume(text: str, usage: DiskUsage | None = None, refs: "VolumeReferences | None" = None) -> Details:
     path, root, _ = parse_info(text)
     name = root.get("vname") or path.rsplit("/", 1)[-1]
     vtype = _VOLUME_TYPES.get(root.get("voltype"), root.get("voltype"))
@@ -586,6 +630,8 @@ def describe_volume(text: str, usage: DiskUsage | None = None) -> Details:
     blocks = [Block(rows=rows)]
     if (contents := _volume_contents(root, path, usage)) is not None:
         blocks.append(contents)
+    if refs is not None and (programs := _volume_programs(refs)) is not None:
+        blocks.append(programs)
     if root.has("parttype"):  # a floppy: its one volume fills the disk, so show its space too
         blocks.append(Block("Disk space", _space_rows(root)))
     if technical:

@@ -97,6 +97,12 @@ Which columns are hidden and how wide each one is are remembered. Click a headin
 they were renamed on the sampler, and a file can carry up to four). The list shows them by name. This program shows tags but
 can't set or clear them yet.
 
+**Programs and samples.** A program plays samples by name, from the same volume. Select a sample and **Used by** (at the top of its
+details) lists the programs that play it; select a program and **Samples used** lists its samples, and flags any that aren't in
+the volume. Select a volume that has programs and its details list the samples **not played by any program**. To pick those out
+in the file list (to look them over, or delete them), choose **Edit > Select Unused Samples** or right-click the volume. A volume
+with no programs has nothing to compare against, so nothing is called unused there. Multis aren't shown in detail yet.
+
 Samplers don't have folders: a volume is a flat list of files.
 
 ---

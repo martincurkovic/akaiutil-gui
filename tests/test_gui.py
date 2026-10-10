@@ -1157,10 +1157,19 @@ def test_the_start_screens_manual_and_about_links_open_those_windows(app, window
     assert shown == ["manual", "about"]
 
 
+def test_the_start_screen_version_includes_the_akaiutil_in_use(app, window, binary):
+    from akaiutil_gui import __version__
+    from akaiutil_gui.engine.locate import binary_version
+
+    version = binary_version(binary)
+    assert version
+    assert pump(app, lambda: window.version_label.text() == f"Version {__version__}  ·  akaiutil {version}")
+
+
 def test_the_start_screen_shows_the_version_and_no_read_only_label_until_an_image_is_open(app, window, images):
     from akaiutil_gui import __version__
 
-    assert window.version_label.text() == f"Version {__version__}"
+    assert window.version_label.text().startswith(f"Version {__version__}")
     assert not window.version_label.isHidden() and window.mode_label.isHidden()
     window.open_images([str(images["fl1"])])
     assert pump(app, lambda: window.stack.currentIndex() == 1)

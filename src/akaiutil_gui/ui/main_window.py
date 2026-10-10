@@ -46,8 +46,8 @@ from akaiutil_gui.audio.sample import LoadedSample, load_wav
 from akaiutil_gui.formatting import human_size
 from akaiutil_gui.engine import fetch, formats
 from akaiutil_gui.engine.api import AkaiEngine
-from akaiutil_gui.engine.locate import candidates, find_akaiutil
-from akaiutil_gui import __version__, backup
+from akaiutil_gui.engine.locate import binary_version, candidates, find_akaiutil
+from akaiutil_gui import __version__, backup, references
 from akaiutil_gui.engine.models import (
     CatalogEntry,
     Disk,
@@ -75,6 +75,7 @@ from .usage_bar import UsageSummary
 log = logging.getLogger(__name__)
 
 RECENT_WIDTH = 520  # px: the recent list on the start screen
+STATUS_BAR_MARGIN = 10  # px: the status bar's text keeps this far from the window's sides (and so its rounded corners)
 RECENT_SHOWN = 6  # how many of the remembered images the start screen lists
 
 IMAGE_FILTER = "Disk images (*.img *.iso *.bin *.dsk *.hfe *.fdi *.raw);;All files (*)"
@@ -222,6 +223,7 @@ class MainWindow(QMainWindow):
         self._drag_dir: str | None = (
             None  # where files dragged out of the window are written
         )
+        self._refs_cache: dict[tuple, references.VolumeReferences] = {}  # (disk, partition, volume, disk's epoch) -> which programs use which samples
         self._writing = 0  # edits to a disk that are under way (only one at a time)
         self._status_hold = 0.0  # until then the status bar keeps the message about an edit (a file count would replace it)
 
@@ -465,13 +467,27 @@ class MainWindow(QMainWindow):
         self.statusBar().setSizeGripEnabled(
             False
         )  # the corner square; macOS windows have no grip
+        self.statusBar().setContentsMargins(STATUS_BAR_MARGIN, 0, STATUS_BAR_MARGIN, 0)  # (the window's rounded corners clip text set against the edge)
         self.statusBar().addPermanentWidget(self.busy_bar)
         self.statusBar().addPermanentWidget(self.mode_label)
         self.version_label = QLabel(f"Version {__version__}")  # (bottom left, on the start screen only)
         self.version_label.setObjectName("mutedLabel")
         self.statusBar().addWidget(self.version_label)
+        self._refresh_akaiutil_version()
         self._sync_status_labels()
         self._refresh_recent()
+
+    def _refresh_akaiutil_version(self) -> None:
+        """Add the version of the akaiutil in use to the start screen's version label (once it has been asked)."""
+        binary = find_akaiutil(settings.get_akaiutil_path())
+        if binary is None:
+            return
+
+        def done(version) -> None:
+            if version and find_akaiutil(settings.get_akaiutil_path()) == binary:  # (not changed since)
+                self.version_label.setText(f"Version {__version__}  ·  akaiutil {version}")
+
+        run_async(lambda: binary_version(binary), done)
 
     def _title(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -555,10 +571,13 @@ class MainWindow(QMainWindow):
             "&Import Files…", self._import_dialog, QKeySequence("Ctrl+I")
         )
         self.act_sort = self._action("&Sort Files by Name…", self._sort_volume)
+        self.act_select_unused = self._action("Select &Unused Samples", self._select_unused_samples)
         self.act_format = self._action("&Format Disk…", self._format_disk)
         self.edit_menu.addAction(self.act_allow_edit)
         self.edit_menu.addSeparator()
         self.edit_menu.addActions([self.act_copy, self.act_cut, self.act_paste])
+        self.edit_menu.addSeparator()
+        self.edit_menu.addAction(self.act_select_unused)
         self.edit_menu.addSeparator()
         self.edit_menu.addActions(
             [
@@ -871,6 +890,7 @@ class MainWindow(QMainWindow):
         self.preview.hide()
         self._usage_token += 1
         self._usage_cache.clear()
+        self._refs_cache.clear()
         self._usage_waiting.clear()
         self._usage_epoch.clear()
         self.usage.clear()
@@ -948,6 +968,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"akaiutil {fetch.VERSION} is ready ({path})", 8000
             )
+            self._refresh_akaiutil_version()
             then()
 
         def failed(message: str) -> None:
@@ -973,6 +994,7 @@ class MainWindow(QMainWindow):
             )
             return None
         self.statusBar().showMessage(f"Using akaiutil at {found}", 5000)
+        self._refresh_akaiutil_version()
         return found
 
     # ----------------------------------------------------------- selection
@@ -1183,7 +1205,7 @@ class MainWindow(QMainWindow):
                 usage = cached or (
                     engine.disk_usage(disk) if disk is not None else None
                 )
-                return describe.describe_volume(text, usage)
+                return describe.describe_volume(text, usage, self._references(engine, obj))
 
             self._show_info(
                 lambda: engine.volume_info(obj), volume_details, remember=True
@@ -1304,7 +1326,10 @@ class MainWindow(QMainWindow):
             return
         if len(rows) == 1 and rows[0][0] is not None:
             vol, f = rows[0]
-            self._show_info(lambda: engine.file_info(vol, f), describe.describe_file)
+            self._show_info(
+                lambda: engine.file_info(vol, f),
+                lambda text: describe.describe_file(text, f, self._references(engine, vol) if f.is_sample or f.is_program else None),
+            )
         elif len(rows) > 1:
             self._info_current = 0
             self.info.show_details(describe.describe_selection([f for _, f in rows]))
@@ -1322,6 +1347,46 @@ class MainWindow(QMainWindow):
             # ...which are still on their way. Let that request show itself when it arrives (the file
             # list landing and clearing the selection must not cancel it), but not a file's details.
             self._info_current = self._volume_token
+
+    def _select_unused_samples(self) -> None:
+        """Select, in the file list, the samples that no program in the volume plays (to look them over, or delete them)."""
+        vol, engine = self._selected_volume(), self._engine
+        if vol is None or engine is None or self._in_results:
+            return
+        token = self._files_token
+
+        def done(refs) -> None:
+            if token != self._files_token or refs is None:  # (another volume was picked meanwhile, or it couldn't be worked out)
+                return
+            if not refs.has_programs:
+                message = f"“{vol.name}” has no programs, so there is nothing to say which samples are unused."
+            elif not refs.unused_samples():
+                message = f"Every sample in “{vol.name}” is played by a program."
+            else:
+                n = self.table.select_files({f.index for f in refs.unused_samples()})
+                message = f"Selected {n} sample{'s' if n != 1 else ''} that no program plays."
+            self.table.setFocus()
+            self.statusBar().showMessage(message, 8000)
+
+        self._run(lambda: self._references(engine, vol), done)
+
+    def _references(self, engine, vol: Volume) -> references.VolumeReferences | None:
+        """Which programs use which samples in a volume: cached until its disk is edited. Runs on a worker thread; None
+        if it can't be worked out (the details just go without it)."""
+        key = (vol.disk, vol.partition, vol.index, self._usage_epoch.get(vol.disk, 0))
+        cached = self._refs_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            refs = engine.volume_references(vol)
+        except Exception:  # noqa: BLE001  (a nicety on top of the details: never let it take them down)
+            log.exception("couldn't work out which programs use which samples in %s", vol.path)
+            return None
+        if engine is self._engine:
+            for stale in [k for k in self._refs_cache if k[:3] == key[:3]]:  # (older versions of this volume's)
+                del self._refs_cache[stale]
+            self._refs_cache[key] = refs
+        return refs
 
     def _show_info(self, fetch, describe_it, remember: bool = False) -> None:
         """Ask akaiutil (fetch), turn its text into readable Details (describe_it), show them."""
@@ -1834,6 +1899,7 @@ class MainWindow(QMainWindow):
         self.act_format.setEnabled(has and self._selected_disk() is not None)
         self.act_import.setEnabled(has and self._selected_volume() is not None)
         self.act_sort.setEnabled(has and self._selected_volume() is not None)
+        self.act_select_unused.setEnabled(has and self._selected_volume() is not None and not self._in_results)
         rows = self._selected_rows() if has else []
         self.act_sample_settings.setEnabled(self._editable_sample(rows) is not None)
         self.act_copy.setEnabled(bool(rows))
@@ -2706,6 +2772,7 @@ class MainWindow(QMainWindow):
             paste = menu.addAction("Paste Files", lambda: self._paste(obj))
             paste.setEnabled(self._clip is not None)
             menu.addAction("Sort Files by Name…", lambda: self._sort_volume(obj))
+            menu.addAction("Select Unused Samples", self._select_unused_samples)
             menu.addSeparator()
             menu.addAction("Export Samples as WAV…", lambda: self._export_node(obj))
             menu.addAction("Copy Volume To…", lambda: self._copy_volume(obj))

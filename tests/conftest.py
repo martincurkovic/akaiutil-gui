@@ -158,3 +158,43 @@ def editable_hd(small_hd_template, tmp_path):
     copy = tmp_path / "edit.img"
     shutil.copy(small_hd_template, copy)
     return copy
+
+
+@pytest.fixture(scope="session")
+def program_hd(binary, tmp_path_factory):
+    """A small S3000 hard disk whose partition A holds: LIB (samples SINE and KICK, and TEST PROGRAM, which plays SINE),
+    ORPHAN (KICK and TEST PROGRAM, so the program's SINE is missing) and PLAIN (just a sample, no programs)."""
+    import shutil
+
+    import imagegen
+
+    out = tmp_path_factory.mktemp("programs")
+    wavs = out / "wavs"
+    wavs.mkdir()
+    for name, freq in [("SINE", 220), ("KICK", 60)]:
+        imagegen.write_sine_wav(wavs / f"{name}.wav", freq)
+    shutil.copy(Path(__file__).parent / "data" / "TEST_PROGRAM.P3", wavs / "TEST_PROGRAM.P3")  # a real S3000 program, which plays "SINE"
+    image = out / "programs.img"
+    image.write_bytes(bytes(8192 * 2500))
+    imagegen._script(binary, image, ["formatharddisk3 5M"], wavs)
+    imagegen._script(
+        binary,
+        image,
+        [
+            "cd /disk0/A",
+            "mkvol3 LIB",
+            "mkvol3 ORPHAN",
+            "mkvol3 PLAIN",
+            "cd LIB",
+            "wav2sample3 SINE.wav",
+            "wav2sample3 KICK.wav",
+            "put TEST_PROGRAM.P3",
+            "cd ../ORPHAN",
+            "wav2sample3 KICK.wav",
+            "put TEST_PROGRAM.P3",
+            "cd ../PLAIN",
+            "wav2sample3 KICK.wav",
+        ],
+        wavs,
+    )
+    return image
