@@ -616,3 +616,83 @@ def test_the_setup_dialogs_buttons_mean_what_they_say(app, window):
     for label, expected in [("Download and set up", "download"), ("Locate existing…", "locate"), ("Cancel", "cancel")]:
         press_later(label)
         assert window._ask_setup() == expected
+
+
+# ------------------------------------------------------- packaging: notices + smoke test
+def test_the_notices_dialog_shows_the_licence_information(app, window):
+    from akaiutil_gui.ui.notices_dialog import NoticesDialog
+
+    dialog = NoticesDialog(window)
+    text = dialog.view.toPlainText()
+    assert "akaiutil 4.6.8" in text and "Klaus Michael Indlekofer" in text and "GNU General Public License" in text
+    help_menu = next(a.menu() for a in window.menuBar().actions() if a.text().replace("&", "") == "Help")
+    assert any("notices" in a.text().lower() for a in help_menu.actions())
+
+
+def test_smoke_test_passes_and_writes_its_report(app, binary, tmp_path):
+    from akaiutil_gui import main as main_module
+
+    report = tmp_path / "report.txt"
+    assert main_module.smoke_test(str(report)) == 0
+    text = report.read_text()
+    for check in ("stylesheets", "svg images", "notices", "bundled akaiutil", "akaiutil round trip", "main window"):
+        assert f"ok    {check}" in text, check
+    assert text.strip().endswith("SMOKE TEST PASSED")
+
+
+def test_smoke_test_fails_loudly_when_akaiutil_is_missing(app, tmp_path, monkeypatch):
+    from akaiutil_gui import main as main_module
+
+    monkeypatch.setattr(main_module, "find_akaiutil", lambda configured=None: None)
+    report = tmp_path / "report.txt"
+    assert main_module.smoke_test(str(report)) == 1
+    text = report.read_text()
+    assert "FAIL  bundled akaiutil: AssertionError: no akaiutil binary found" in text
+    assert "FAIL  akaiutil round trip" in text and "ok    stylesheets" in text  # every check still runs
+    assert text.strip().endswith("SMOKE TEST FAILED")
+
+
+def test_the_launcher_runs_the_smoke_test_and_exits_with_its_result(binary, tmp_path):
+    """Exactly how CI runs a built app: the real entry point, offscreen, report in a file, exit code."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    report = tmp_path / "report.txt"
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    for entry in (["-m", "akaiutil_gui"], [str(Path(__file__).resolve().parent.parent / "src" / "main.py")]):
+        result = subprocess.run([sys.executable, *entry, f"--smoke-test={report}"], env=env, capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "SMOKE TEST PASSED" in report.read_text() and "SMOKE TEST PASSED" in result.stdout
+        report.unlink()
+
+
+def test_a_built_apps_smoke_test_demands_the_bundled_akaiutil(app, binary, tmp_path, monkeypatch):
+    """Regression: a built app once passed its smoke test using the akaiutil on the machine's PATH,
+    hiding the fact that its own bundled copy wasn't being found."""
+    from akaiutil_gui import main as main_module
+    from akaiutil_gui import paths
+
+    monkeypatch.setattr(paths, "is_frozen", lambda: True)
+
+    # a PATH copy exists (that's `binary`), but nothing is bundled: this must fail
+    monkeypatch.setattr(main_module, "bundled_binary", lambda: tmp_path / "bin" / binary.name)
+    monkeypatch.setattr(main_module, "find_akaiutil", lambda configured=None: binary)
+    report = tmp_path / "missing.txt"
+    assert main_module.smoke_test(str(report)) == 1
+    assert "no akaiutil is bundled in this app" in report.read_text()
+
+    # bundled and working: passes, and says it used the bundled one
+    monkeypatch.setattr(main_module, "bundled_binary", lambda: binary)
+    report = tmp_path / "ok.txt"
+    assert main_module.smoke_test(str(report)) == 0
+    assert f"{binary} (bundled)" in report.read_text()
+
+    # bundled but not executable
+    if os.name != "nt":
+        stub = tmp_path / "stub"
+        stub.write_text("#!/bin/sh\n")
+        stub.chmod(0o644)
+        monkeypatch.setattr(main_module, "bundled_binary", lambda: stub)
+        report = tmp_path / "noexec.txt"
+        assert main_module.smoke_test(str(report)) == 1 and "isn't executable" in report.read_text()
