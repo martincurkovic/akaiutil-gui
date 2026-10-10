@@ -82,7 +82,7 @@ images again puts the app back in read-only mode.
   the same density; hard disks are cut into partitions of up to 60 MB.
 - **Copy and move files** between volumes, partitions and disks: Copy / Cut / Paste (Edit menu), or drag files from the list onto
   a volume in the tree (hold Shift, or Cmd on a Mac, to move instead of copy). A move inside one partition keeps everything about
-  the file; a copy carries the file but not its tags. A name already in the target gets a number. Drag files out of the list to
+  the file; a copy keeps an S3000 file's tags too (matched by tag name). A name already in the target gets a number. Drag files out of the list to
   Finder, Explorer or your DAW: samples arrive as WAV files, or exactly as Akai stores them if you hold Option/Alt when you start
   the drag.
 - **Sort a volume** (Edit > Sort Files by Name, or right-click a volume): the samplers list a volume's files in the order they
