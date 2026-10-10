@@ -366,13 +366,13 @@ def test_the_edit_menu_is_off_without_an_image(qt_app, window):
 def test_context_menus_offer_what_fits_what_was_clicked(qt_app, window, editable_hd, answers):
     open_and_show(qt_app, window, editable_hd)
     texts = lambda menu: [a.text().replace("&", "") for a in menu.actions() if not a.isSeparator()]  # noqa: E731
-    assert texts(window._tree_menu(window._volume)) == ["Import Files…", "Rename…", "Delete…"]
+    assert texts(window._tree_menu(window._volume)) == ["Import Files…", "Paste Files", "Rename…", "Delete…"]
     assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…"]
 
     window.table.selectRow(0)
     rows = window._selected_rows()
     menu = window._file_menu(rows)
-    assert texts(menu) == ["Export…", "Export as WAV…", "Rename…", "Delete…"]
+    assert texts(menu) == ["Export…", "Export as WAV…", "Copy", "Cut", "Rename…", "Delete…"]
     window.table.selectAll()
     menu = window._file_menu(window._selected_rows())
     rename = next(a for a in menu.actions() if a.text() == "Rename…")

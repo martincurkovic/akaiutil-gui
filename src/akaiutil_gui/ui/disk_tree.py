@@ -10,6 +10,7 @@ from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.models import Disk, Partition, Volume
 
 from . import theme
+from .file_drag import INTERNAL_MIME
 from .tasks import run_async
 from .volume_colors import swatch_icon
 
@@ -35,6 +36,7 @@ def _disk_text(d: Disk, path: str | None = None) -> str:
 
 class DiskTree(QTreeWidget):
     nodeSelected = Signal(object)  # Disk | Partition | Volume | None
+    transferDropped = Signal(object, bool, object)  # (Volume | None, move?, the drag's mime data): files from the list dropped here
     filesDropped = Signal(object, list)  # (Volume | None, paths): files dropped on a volume (None: on anything else)
     contextRequested = Signal(object, object)  # (Disk | Partition | Volume | None, global QPoint): a right-click
     disksLoaded = Signal(list)  # list[Disk], once the top level is built
@@ -84,13 +86,13 @@ class DiskTree(QTreeWidget):
 
     # ------------------------------------------------------------- drag and drop
     def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
+        if event.mimeData().hasFormat(INTERNAL_MIME) or event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event) -> None:
-        if not event.mimeData().hasUrls():
+        if not (event.mimeData().hasFormat(INTERNAL_MIME) or event.mimeData().hasUrls()):
             event.ignore()
             return
         item = self.itemAt(event.position().toPoint())
@@ -106,6 +108,10 @@ class DiskTree(QTreeWidget):
         item = self.itemAt(event.position().toPoint())
         obj = item.data(0, _ROLE_OBJ) if item is not None else None
         self._highlight(None)
+        if event.mimeData().hasFormat(INTERNAL_MIME):  # files from the list: copy them here (Shift/Cmd held: move them)
+            event.acceptProposedAction()
+            self.transferDropped.emit(obj if isinstance(obj, Volume) else None, event.dropAction() == Qt.DropAction.MoveAction, event.mimeData())
+            return
         paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
         event.acceptProposedAction()
         if paths:

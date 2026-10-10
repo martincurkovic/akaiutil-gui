@@ -321,6 +321,56 @@ class AkaiEngine:
                 raise EngineError(said or "akaiutil didn't add anything.")
             return created
 
+    def copy_file(self, src: Volume, f: FileEntry, dst: Volume, new_name: str) -> str:
+        """Copy a file, byte for byte, into another volume (any partition, any open disk) as `new_name` (with its
+        extension). Returns the name it has there. A copy doesn't carry the file's tags: akaiutil's `put` doesn't."""
+        with self._lock:
+            self._need_writable()
+            session = self._need_session()
+            self._enter_volume(src)
+            present = {x.index: x.name for x in parse.parse_files(self._run("dir").text)}
+            if present.get(f.index) != f.name:
+                raise EngineError(f"“{f.name}” isn't file {f.index} of {src.name} any more.")
+            _clear_dir(session.staging_dir)
+            self._run(f"geti {f.index}")
+            produced = [p for p in session.staging_dir.iterdir() if p.is_file()]
+            if len(produced) != 1:
+                raise EngineError(f"akaiutil couldn't read “{f.name}”.")
+            staged = session.staging_dir / new_name
+            produced[0].replace(staged)
+            self._enter_volume(dst)
+            before = {x.name for x in parse.parse_files(self._run("dir").text)}
+            text = self._run(f"put {akai_names.command_token(new_name)}", timeout=600).text
+            _clear_dir(session.staging_dir)
+            created = [x for x in parse.parse_files(self._run("dir").text) if x.name not in before]
+            if not created:
+                said = " ".join(ln.strip() for ln in text.splitlines() if ln.strip())
+                raise EngineError(said or "akaiutil didn't add the copy.")
+            copy = created[0]
+            if new_name.upper().endswith(".S9C") and dst.type == "S900" and copy.os_version != f.os_version:
+                # a compressed S900 sample records how big it is uncompressed: put can't know, but akaiutil can work it out
+                self._write(f"updateuncompri {copy.index}")
+            return copy.name
+
+    def move_file(self, src: Volume, f: FileEntry, dst: Volume, new_name: str) -> str:
+        """Move a file to another volume of the same partition, as `new_name`: nothing about it changes but where it is (tags
+        and all). Returns the name it has now."""
+        if (src.disk, src.partition) != (dst.disk, dst.partition):
+            raise EngineError("A file can only be moved within a partition (copy it, then delete the original).")
+        with self._lock:
+            self._need_writable()
+            self._enter_volume(src)
+            present = {x.index: x.name for x in parse.parse_files(self._run("dir").text)}
+            if present.get(f.index) != f.name:
+                raise EngineError(f"“{f.name}” isn't file {f.index} of {src.name} any more.")
+            target = f"/disk{dst.disk}/{dst.partition}/{akai_names.command_token(dst.name)}/{akai_names.command_token(new_name)}"
+            self._write(f"reni {f.index} {target}")
+            self._enter_volume(dst)
+            moved = next((x for x in parse.parse_files(self._run("dir").text) if akai_names.same_name(x.name, new_name)), None)
+            if moved is None:
+                raise EngineError(f"akaiutil didn't move “{f.name}”.")
+            return moved.name
+
     def format_disk(self, disk: Disk, fmt: formats.DiskFormat, partition_mb: int = formats.PARTITION_MAX_MB) -> None:
         """Erase a disk and make it an empty one of the given kind. Everything on it is lost.
 

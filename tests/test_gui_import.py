@@ -56,7 +56,7 @@ def window(qt_app, binary):
 def answers(monkeypatch):
     class Answers:
         confirm = True
-        import_answer = ("S3000", False, importing.STEREO_SPLIT)
+        import_answer = ("S3000", False, importing.STEREO_SPLIT, importing.ImportOptions())
         asked = []
         warnings = []
         picked = []
@@ -128,7 +128,7 @@ def test_dropped_audio_is_converted_and_added_in_alphabetical_order(qt_app, wind
 
 def test_what_was_chosen_in_the_dialog_is_what_is_made(qt_app, window, editable_hd, audio, answers):
     open_volume(qt_app, window, editable_hd)
-    answers.import_answer = ("S900", True, importing.STEREO_MIX)
+    answers.import_answer = ("S900", True, importing.STEREO_MIX, importing.ImportOptions())
     drop(window, [make(audio / "pad.wav", tone(channels=2))])
     assert pump(qt_app, lambda: "PAD.S9C" in names(window))
     assert "PAD.S9C" in names(window) and not any("-L" in n for n in names(window))

@@ -18,8 +18,9 @@ from pathlib import Path
 import numpy as np
 import soundfile
 
-from . import akai_names
-from .audio import resample
+from . import akai_header, akai_names
+from .audio import markers as audio_markers
+from .audio import resample, wavfile
 from .engine.models import ImportJob
 
 AUDIO_EXTENSIONS = {".wav", ".wave", ".aif", ".aiff", ".aifc", ".flac", ".ogg", ".oga", ".mp3", ".caf", ".w64"}
@@ -33,6 +34,8 @@ AKAI_EXTENSIONS = {
     ".m3", ".m9", ".o9", ".f9", ".cd",
 }
 SAMPLE_TYPES = ("S3000", "S1000", "S900")
+TRIM_THRESHOLD = 10 ** (-60 / 20)  # silence: quieter than -60 dBFS
+NORMALIZE_PEAK = 10 ** (-1 / 20)  # loudest sample at -1 dBFS
 MAX_RATE = {"S3000": 44100, "S1000": 44100, "S900": 40000}
 STEREO_SPLIT, STEREO_MIX = "split", "mix"
 _SAMPLE_EXT = {"S3000": ".S3", "S1000": ".S1", "S900": ".S9"}
@@ -122,6 +125,7 @@ class Source:
     rate: int = 0
     frames: int = 0
     problem: str = ""  # why it can't be imported at all
+    markers: audio_markers.Markers = audio_markers.Markers()  # the root note and loops the file carries
 
     @property
     def bits(self) -> int | None:
@@ -154,10 +158,31 @@ def inspect(path: str | Path) -> Source:
         problem = f"it has {info.channels} channels (samples are mono or stereo)"
     elif info.frames == 0:
         problem = "it has no audio in it"
-    return Source(path, kind, info.format, info.subtype, info.channels, info.samplerate, info.frames, problem)
+    return Source(path, kind, info.format, info.subtype, info.channels, info.samplerate, info.frames, problem, audio_markers.read_markers(path))
 
 
-def conversion_steps(src: Source, sample_type: str, stereo: str = STEREO_SPLIT) -> list[str]:
+@dataclass(frozen=True)
+class ImportOptions:
+    """What else to do to audio on the way in."""
+
+    file_markers: bool = True  # use the root note and loops a file carries
+    root_from_name: bool = False  # a name ending in a note (Piano_C3) is the root note, if the file doesn't say
+    trim: bool = False  # cut silence from the start and end
+    normalize: bool = False  # make the loudest sample -1 dBFS
+
+
+def sample_markers(src: Source, sample_type: str, options: ImportOptions) -> tuple[int | None, tuple[tuple[int, int], ...]]:
+    """(root note, loops) to put in the sample's header: from the file and/or its name; nothing for a file that already has
+    an Akai header (which is kept as it is) or for an S900 sample (its header is different, and has no loops here)."""
+    if sample_type == "S900" or src.markers.has_akai_header:
+        return None, ()
+    root, loops = (src.markers.root, src.markers.loops) if options.file_markers else (None, ())
+    if root is None and options.root_from_name:
+        root = audio_markers.note_from_name(src.path.stem)
+    return root, tuple(loops)
+
+
+def conversion_steps(src: Source, sample_type: str, stereo: str = STEREO_SPLIT, options: ImportOptions = ImportOptions()) -> list[str]:
     """What has to be done to an audio file to import it ([] means it is used as it is)."""
     steps = []
     if src.format != "WAV":
@@ -169,10 +194,19 @@ def conversion_steps(src: Source, sample_type: str, stereo: str = STEREO_SPLIT) 
         steps.append(f"resampled from {src.rate / 1000:g} to {cap / 1000:g} kHz")
     if src.channels == 2 and stereo == STEREO_MIX:
         steps.append("mixed to mono")
+    if not src.markers.has_akai_header:  # (a sample from this app keeps its own header, loops and all, exactly as it is)
+        if options.trim:
+            steps.append("silence trimmed from the ends")
+        if options.normalize:
+            steps.append("normalised to -1 dB")
+        root, loops = sample_markers(src, sample_type, options)
+        parts = ([f"root key {audio_markers.note_name(root)}"] if root is not None else []) + ([f"{len(loops)} loop{'s' if len(loops) != 1 else ''}"] if loops else [])
+        if parts:
+            steps.append("sets " + " and ".join(parts))
     return steps
 
 
-def describe(src: Source, sample_type: str, stereo: str = STEREO_SPLIT) -> str:
+def describe(src: Source, sample_type: str, stereo: str = STEREO_SPLIT, options: ImportOptions = ImportOptions()) -> str:
     """One line for the import dialog."""
     if src.problem:
         return f"skipped: {src.problem}"
@@ -181,7 +215,9 @@ def describe(src: Source, sample_type: str, stereo: str = STEREO_SPLIT) -> str:
     channels = "stereo" if src.channels == 2 else "mono"
     bits = f" · {src.bits}-bit" if src.bits else ""
     what = f"{src.format} · {src.rate / 1000:g} kHz{bits} · {channels}"
-    steps = conversion_steps(src, sample_type, stereo)
+    steps = conversion_steps(src, sample_type, stereo, options)
+    if src.markers.has_akai_header and sample_type != "S900":
+        steps.append("keeps its Akai sample header")
     return f"{what}  →  {', '.join(steps)}" if steps else f"{what}  →  used as it is"
 
 
@@ -216,20 +252,45 @@ def unique_base(base: str, ext: str, channels_out: int, limit: int, taken: set[s
 
 
 # ----------------------------------------------------------------------- converting
-def prepare_audio(src: Source, dest: Path, sample_type: str, stereo: str = STEREO_SPLIT) -> tuple[int, int]:
+def trim_silence(data: np.ndarray, loops: list[tuple[int, int]], threshold: float = TRIM_THRESHOLD) -> tuple[np.ndarray, list[tuple[int, int]]]:
+    """Cut the silence from both ends of (frames, channels) audio, but never into a loop. Returns the audio and the loops moved to match."""
+    loud = np.flatnonzero(np.abs(data).max(axis=1) >= threshold)
+    if loud.size == 0:
+        return data, loops  # all silence: nothing sensible to keep
+    first, last = int(loud[0]), int(loud[-1])
+    if loops:
+        first, last = min(first, min(s for s, _ in loops)), max(last, max(e for _, e in loops))
+    return data[first : last + 1], [(s - first, e - first) for s, e in loops]
+
+
+def prepare_audio(src: Source, dest: Path, sample_type: str, stereo: str = STEREO_SPLIT, options: ImportOptions = ImportOptions()) -> tuple[int, int]:
     """Write the WAV akaiutil will read to `dest`. Returns (channels, sample rate) of what was written."""
-    if not conversion_steps(src, sample_type, stereo):
+    if not conversion_steps(src, sample_type, stereo, options):
         shutil.copyfile(src.path, dest)  # untouched: keeps whatever else the WAV carries (an exported sample's loops)
         return src.channels, src.rate
     data, rate = soundfile.read(str(src.path), dtype="float64", always_2d=True)
+    root, file_loops = sample_markers(src, sample_type, options)
+    loops = [loop for loop in file_loops]
     if data.shape[1] == 2 and stereo == STEREO_MIX:
         data = data.mean(axis=1, keepdims=True)
+    keeps_header = src.markers.has_akai_header
+    if options.trim and not keeps_header:
+        data, loops = trim_silence(data, loops)
     cap = MAX_RATE[sample_type]
     if rate > cap:
+        frames_before = data.shape[0]
         data = resample.resample(data, rate, cap)
+        loops = [(round(s * data.shape[0] / frames_before), round(e * data.shape[0] / frames_before)) for s, e in loops]
         rate = resample.resampled_rate(rate, cap)
+    if options.normalize and not keeps_header:
+        peak = float(np.abs(data).max())
+        if peak > 0:
+            data = data * (NORMALIZE_PEAK / peak)
     pcm = np.clip(np.round(data * 32767.0), -32768, 32767).astype("<i2")
-    soundfile.write(str(dest), pcm, rate, subtype="PCM_16", format="WAV")
+    header = None
+    if sample_type != "S900" and not keeps_header and (root is not None or loops):
+        header = (akai_header.CHUNK_IDS[sample_type], akai_header.build_header(sample_type, rate, pcm.shape[0], 60 if root is None else root, loops))
+    wavfile.write_wav16(dest, pcm, rate, header)
     return pcm.shape[1], rate
 
 
@@ -252,6 +313,7 @@ def run_import(
     compress: bool = False,
     stereo: str = STEREO_SPLIT,
     progress: Callable[[int, int, str], None] | None = None,
+    options: ImportOptions = ImportOptions(),
 ) -> ImportResult:
     """Import `sources` into `volume`, in the order given. Each file succeeds or fails on its own."""
     result = ImportResult()
@@ -263,7 +325,7 @@ def run_import(
             result.failed.append(f"{src.path.name}: {src.problem}")
             continue
         try:
-            job = _make_job(src, volume, work_dir, sample_type, compress, stereo, taken)
+            job = _make_job(src, volume, work_dir, sample_type, compress, stereo, taken, options)
             created = engine.import_job(volume, job)
         except Exception as e:  # one bad file mustn't stop the rest
             result.failed.append(f"{src.path.name}: {e}")
@@ -273,7 +335,7 @@ def run_import(
     return result
 
 
-def _make_job(src, volume, work_dir: Path, sample_type: str, compress: bool, stereo: str, taken: set[str]) -> ImportJob:
+def _make_job(src, volume, work_dir: Path, sample_type: str, compress: bool, stereo: str, taken: set[str], options: ImportOptions) -> ImportJob:
     work_dir.mkdir(parents=True, exist_ok=True)
     for old in work_dir.iterdir():
         old.unlink()
@@ -294,5 +356,5 @@ def _make_job(src, volume, work_dir: Path, sample_type: str, compress: bool, ste
     channels_out = 1 if (src.channels == 1 or stereo == STEREO_MIX) else 2
     base = unique_base(clean_stem(src.path.stem, limit), ext, channels_out, limit, taken)
     local = work_dir / f"{base}.wav"
-    prepare_audio(src, local, sample_type, stereo)
+    prepare_audio(src, local, sample_type, stereo, options)
     return ImportJob(local, "wav9c" if ext == ".S9C" else _WAV_JOB[sample_type])

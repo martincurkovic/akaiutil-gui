@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QSettings, QThreadPool
 
-from akaiutil_gui import __version__, akai_names, describe, importing, search, settings
+from akaiutil_gui import __version__, akai_names, describe, importing, search, settings, transfer
 from akaiutil_gui.audio.sample import LoadedSample, load_wav
 from akaiutil_gui.formatting import human_size
 from akaiutil_gui.engine import fetch, formats
@@ -41,7 +41,7 @@ from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.locate import candidates, find_akaiutil
 from akaiutil_gui.engine.models import CatalogEntry, Disk, DiskUsage, ExportResult, FileEntry, Partition, Volume
 
-from . import edit_dialogs, reveal, theme
+from . import edit_dialogs, file_drag, reveal, theme
 from .details_view import DetailsView
 from .disk_tree import DiskTree
 from .notices_dialog import NoticesDialog
@@ -166,6 +166,8 @@ class MainWindow(QMainWindow):
         self._usage_waiting: dict[int, list] = {}  # disk -> callbacks for a load that's under way
         self._usage_epoch: dict[int, int] = {}  # bumped when a disk is changed: a load that started earlier is out of date
         self._writable = False  # akaiutil is running read/write (Edit > Allow Editing)
+        self._clip: tuple[str, list[tuple[Volume, FileEntry]]] | None = None  # Copy / Cut: ("copy" | "cut", files)
+        self._drag_dir: str | None = None  # where files dragged out of the window are written
         self._writing = 0  # edits to a disk that are under way (only one at a time)
         self._status_hold = 0.0  # until then the status bar keeps the message about an edit (a file count would replace it)
 
@@ -206,10 +208,12 @@ class MainWindow(QMainWindow):
         self.export_wav_btn.clicked.connect(lambda: self._export(as_wav=True))
         self.table = FileTable()
         self.table.selectionFilesChanged.connect(self._on_files_selected)
+        self.table.mime_provider = self._file_drag_mime
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_table_context)
         self.tree.contextRequested.connect(self._on_tree_context)
         self.tree.filesDropped.connect(self._on_tree_drop)
+        self.tree.transferDropped.connect(self._on_transfer_drop)
         top = QWidget()
         tv = QVBoxLayout(top)
         tv.setContentsMargins(0, 0, 0, 0)
@@ -382,9 +386,14 @@ class MainWindow(QMainWindow):
         self.act_new_volume = self._action("New &Volume…", self._new_volume)
         self.act_rename = self._action("&Rename…", self._rename_focused)
         self.act_delete = self._action("&Delete…", self._delete_focused)
+        self.act_copy = self._action("&Copy Files", lambda: self._copy_selection("copy"), QKeySequence.StandardKey.Copy)
+        self.act_cut = self._action("Cu&t Files", lambda: self._copy_selection("cut"), QKeySequence.StandardKey.Cut)
+        self.act_paste = self._action("&Paste Files", self._paste, QKeySequence.StandardKey.Paste)
         self.act_import = self._action("&Import Files…", self._import_dialog, QKeySequence("Ctrl+I"))
         self.act_format = self._action("&Format Disk…", self._format_disk)
         self.edit_menu.addAction(self.act_allow_edit)
+        self.edit_menu.addSeparator()
+        self.edit_menu.addActions([self.act_copy, self.act_cut, self.act_paste])
         self.edit_menu.addSeparator()
         self.edit_menu.addActions([self.act_new_volume, self.act_import, self.act_rename, self.act_delete])
         self.edit_menu.addSeparator()
@@ -1215,6 +1224,10 @@ class MainWindow(QMainWindow):
         self.act_new_volume.setEnabled(has and self._partition_for_new_volume() is not None)
         self.act_format.setEnabled(has and self._selected_disk() is not None)
         self.act_import.setEnabled(has and self._selected_volume() is not None)
+        rows = self._selected_rows() if has else []
+        self.act_copy.setEnabled(bool(rows))
+        self.act_cut.setEnabled(bool(rows))
+        self.act_paste.setEnabled(has and self._clip is not None and self._selected_volume() is not None)
 
     def _rename_focused(self) -> None:
         target = self._edit_target()
@@ -1462,6 +1475,110 @@ class MainWindow(QMainWindow):
             lambda message: QMessageBox.critical(self, "Couldn't create the disk image", message),
         )
 
+    # --------------------------------------------------- copying and moving files
+    def _copy_selection(self, mode: str) -> None:
+        """Edit > Copy / Cut: remember the selected files until Paste (or a drop) says where they go."""
+        rows = self._selected_rows()
+        if not rows:
+            return
+        self._clip = (mode, rows)
+        n = len(rows)
+        self.statusBar().showMessage(
+            f"{'Copied' if mode == 'copy' else 'Cut'} {n} file{'s' if n != 1 else ''}. Select a volume and choose Paste Files"
+            + (" to move them." if mode == "cut" else "."),
+            8000,
+        )
+        self._update_edit_actions()
+
+    def _paste(self, volume: Volume | None = None) -> None:
+        volume = volume if isinstance(volume, Volume) else self._selected_volume()
+        if self._clip is None or volume is None:
+            return
+        mode, rows = self._clip
+        self.transfer_files(rows, volume, move=(mode == "cut"))
+
+    def _on_transfer_drop(self, volume, move: bool, mime) -> None:
+        if volume is None:
+            self.statusBar().showMessage("Drop the files on a volume.", 5000)
+            return
+        self.transfer_files(list(mime.rows), volume, move)
+
+    def transfer_files(self, rows: list[tuple[Volume, FileEntry]], dst: Volume, move: bool) -> None:
+        """Copy (or move) files into a volume: from Paste, or from a drop on the volume in the tree."""
+        if self._engine is None or not rows or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_transfer(rows, dst, move))
+
+    def _do_transfer(self, rows: list[tuple[Volume, FileEntry]], dst: Volume, move: bool) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+        relay = _ProgressRelay(self)
+        relay.message.connect(lambda text: self.statusBar().showMessage(text))
+        verb = "Moving" if move else "Copying"
+
+        def work() -> transfer.TransferResult:
+            return transfer.transfer_files(
+                engine, rows, dst, move, progress=lambda i, n, name: relay.message.emit(f"{verb} {i + 1} of {n}: {name}…")
+            )
+
+        disks = sorted({dst.disk} | ({src.disk for src, _ in rows} if move else set()))
+
+        def done(result: transfer.TransferResult) -> None:
+            relay.deleteLater()
+            n = len(result.done)
+            what = f"{'Moved' if move else 'Copied'} {n} file{'s' if n != 1 else ''} to “{dst.name}”."
+            if result.failed:
+                what += f"  {len(result.failed)} failed."
+            for disk in disks:
+                self._edited(disk, message=what)
+            if move and result.done:
+                self._clip = None  # what was cut is where it is now
+            problems = result.failed + result.skipped
+            if problems:
+                self._warn("Some files weren't transferred", f"{len(problems)} of {len(rows)} files weren't {'moved' if move else 'copied'}.", problems)
+
+        def failed(message: str) -> None:
+            relay.deleteLater()
+            self._edit_failed(dst.disk, message)
+
+        self._run_edit(work, done, failed)
+
+    def _file_drag_mime(self):
+        """What dragging the selected files carries (see ui/file_drag.py)."""
+        rows = self._selected_rows()
+        if not rows or self._engine is None:
+            return None
+        as_raw = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier)  # Option on a Mac
+        return file_drag.FileDragData(rows, lambda: self._export_for_drag(rows, as_raw))
+
+    def _export_for_drag(self, rows: list[tuple[Volume, FileEntry]], as_raw: bool) -> list[str]:
+        """Write the dragged files somewhere another application can reach, and say where. Samples are WAVs unless `as_raw`."""
+        engine = self._engine
+        if engine is None:
+            return []
+        if self._drag_dir is not None:
+            shutil.rmtree(self._drag_dir, ignore_errors=True)
+        self._drag_dir = tempfile.mkdtemp(prefix="akaiutil-gui-drag-")
+        groups: dict[tuple, tuple[Volume, list[FileEntry]]] = {}
+        for vol, f in rows:
+            groups.setdefault((vol.disk, vol.partition, vol.index), (vol, []))[1].append(f)
+        paths: list[str] = []
+        for vol, files in groups.values():
+            # files from several volumes get a folder each, so same-named files can't overwrite each other
+            target = Path(self._drag_dir) / export_folder_name(vol, True) if len(groups) > 1 else Path(self._drag_dir)
+            if len(groups) > 1:
+                target.mkdir(parents=True, exist_ok=True)
+                paths.append(str(target))
+            samples = [f for f in files if f.is_sample and not as_raw]
+            others = [f for f in files if f not in samples]
+            for batch, wav in ((samples, True), (others, False)):
+                if batch:
+                    res = engine.export_files(vol, batch, target, as_wav=wav, confirm_overwrite=lambda _p: True)
+                    if len(groups) == 1:
+                        paths += res.exported
+        return paths
+
     # --------------------------------------------------------------- importing
     def _ask_import_files(self) -> list[str]:
         start = settings.get_last_dir("import") or settings.get_last_dir("open") or str(Path.home())
@@ -1496,18 +1613,18 @@ class MainWindow(QMainWindow):
         sources = [importing.inspect(p) for p in sorted(paths, key=importing.natural_key)]
         self._ensure_editing(lambda: self._do_import(volume, sources))
 
-    def _ask_import(self, volume: Volume, sources: list) -> tuple[str, bool, str] | None:
+    def _ask_import(self, volume: Volume, sources: list) -> tuple[str, bool, str, importing.ImportOptions] | None:
         dialog = edit_dialogs.ImportDialog(self, volume, sources)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return None
-        return dialog.sample_type, dialog.compress_s900, dialog.stereo
+        return dialog.sample_type, dialog.compress_s900, dialog.stereo, dialog.options
 
     def _do_import(self, volume: Volume, sources: list) -> None:
         engine = self._engine
         answer = self._ask_import(volume, sources)
         if engine is None or answer is None:
             return
-        sample_type, compress, stereo = answer
+        sample_type, compress, stereo, options = answer
         relay = _ProgressRelay(self)
         relay.message.connect(lambda text: self.statusBar().showMessage(text))
 
@@ -1517,6 +1634,7 @@ class MainWindow(QMainWindow):
                 return importing.run_import(
                     engine, volume, sources, work_dir, sample_type, compress, stereo,
                     progress=lambda i, n, name: relay.message.emit(f"Importing {i + 1} of {n}: {name}…"),
+                    options=options,
                 )
             finally:
                 shutil.rmtree(work_dir, ignore_errors=True)
@@ -1590,6 +1708,8 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         if isinstance(obj, Volume):
             menu.addAction("Import Files…", lambda: self._import_dialog(obj))
+            paste = menu.addAction("Paste Files", lambda: self._paste(obj))
+            paste.setEnabled(self._clip is not None)
             menu.addSeparator()
             menu.addAction("Rename…", lambda: self._rename_volume(obj))
             menu.addAction("Delete…", lambda: self._delete_volume(obj))
@@ -1612,6 +1732,9 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         menu.addAction(self.act_export)
         menu.addAction(self.act_export_wav)
+        menu.addSeparator()
+        menu.addAction("Copy", lambda: self._copy_selection("copy"))
+        menu.addAction("Cut", lambda: self._copy_selection("cut"))
         menu.addSeparator()
         rename = menu.addAction("Rename…", lambda: self._rename_file(*rows[0]))
         rename.setEnabled(len(rows) == 1)
@@ -1695,10 +1818,14 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- events
     def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
+        if event.mimeData().hasFormat(file_drag.INTERNAL_MIME):
+            event.ignore()  # files dragged out of the list only mean something dropped on a volume in the tree
+        elif event.mimeData().hasUrls():
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:
+        if event.mimeData().hasFormat(file_drag.INTERNAL_MIME):
+            return
         self.handle_drop([u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()])
 
     def _on_tree_drop(self, volume, paths: list[str]) -> None:
@@ -1723,6 +1850,8 @@ class MainWindow(QMainWindow):
         self.preview.stop()
         if self._preview_dir is not None:
             shutil.rmtree(self._preview_dir, ignore_errors=True)
+        if self._drag_dir is not None:
+            shutil.rmtree(self._drag_dir, ignore_errors=True)
         if self._engine is not None:
             self._engine.close()
         QThreadPool.globalInstance().waitForDone(3000)

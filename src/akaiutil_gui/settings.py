@@ -130,3 +130,27 @@ def get_skipped_update_version() -> str | None:
 
 def set_skipped_update_version(version: str | None) -> None:
     _qs().setValue("updates/skipped_version", version or "")
+
+
+# ------------------------------------------------------------------------------ importing audio
+IMPORT_FLAGS = {"file_markers": True, "root_from_name": False, "trim": False, "normalize": False}  # name -> default
+IMPORT_STEREO_MIX = "import/stereo_mix"
+
+
+def get_import_flags() -> dict[str, bool]:
+    """The options last used in the import dialog."""
+    return {name: _bool(f"import/{name}", default) for name, default in IMPORT_FLAGS.items()}
+
+
+def set_import_flags(flags: dict[str, bool]) -> None:
+    for name in IMPORT_FLAGS:
+        if name in flags:
+            _qs().setValue(f"import/{name}", bool(flags[name]))
+
+
+def get_import_stereo_mix() -> bool:
+    return _bool(IMPORT_STEREO_MIX, False)
+
+
+def set_import_stereo_mix(mix: bool) -> None:
+    _qs().setValue(IMPORT_STEREO_MIX, bool(mix))

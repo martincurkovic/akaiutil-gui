@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from akaiutil_gui import akai_names, importing
+from akaiutil_gui import akai_names, importing, settings
 from akaiutil_gui.engine import formats
 from akaiutil_gui.engine.models import Disk
 
@@ -303,6 +303,20 @@ class ImportDialog(QDialog):
         self.stereo_combo = QComboBox()
         self.stereo_combo.addItem("Split into a left and a right sample", importing.STEREO_SPLIT)
         self.stereo_combo.addItem("Mix to mono", importing.STEREO_MIX)
+        if settings.get_import_stereo_mix():
+            self.stereo_combo.setCurrentIndex(1)
+        flags = settings.get_import_flags()
+        self.file_markers = QCheckBox("Use the loop points and root note stored in the files")
+        self.file_markers.setToolTip("A WAV from a DAW or sample editor can carry them (its “smpl” chunk); an AIFF can carry the root note")
+        self.root_from_name = QCheckBox("Take the root note from a name ending in a note, like Piano_C3")
+        self.root_from_name.setToolTip("Only if the file doesn't say. Middle C is C3, as on the samplers")
+        self.trim = QCheckBox("Trim silence from the start and end")
+        self.trim.setToolTip("Anything quieter than -60 dB. Never cuts into a loop")
+        self.normalize = QCheckBox("Normalise to -1 dB")
+        self.normalize.setToolTip("Make the loudest sample -1 dBFS")
+        for box, name in ((self.file_markers, "file_markers"), (self.root_from_name, "root_from_name"), (self.trim, "trim"), (self.normalize, "normalize")):
+            box.setChecked(flags[name])
+            box.toggled.connect(lambda _on: self._refresh())
         self.files = QListWidget()
         self.files.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         self.files.setMinimumHeight(140)
@@ -317,6 +331,9 @@ class ImportDialog(QDialog):
         self.stereo_row = (QLabel("Stereo files"), self.stereo_combo)
         form.addRow(*self.type_row)
         form.addRow(*self.stereo_row)
+        self.option_boxes = (self.file_markers, self.root_from_name, self.trim, self.normalize)
+        for box in self.option_boxes:
+            form.addRow(box)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -331,6 +348,8 @@ class ImportDialog(QDialog):
 
         for widget in self.type_row:
             widget.setVisible(bool(audio))
+        for box in self.option_boxes:
+            box.setVisible(bool(audio))
         self.stereo_row[0].setVisible(any(s.channels == 2 for s in audio))
         self.stereo_row[1].setVisible(any(s.channels == 2 for s in audio))
         self.type_combo.currentIndexChanged.connect(self._refresh)
@@ -362,6 +381,23 @@ class ImportDialog(QDialog):
         return self.stereo_combo.currentData()
 
     @property
+    def options(self) -> importing.ImportOptions:
+        return importing.ImportOptions(
+            file_markers=self.file_markers.isChecked(),
+            root_from_name=self.root_from_name.isChecked(),
+            trim=self.trim.isChecked(),
+            normalize=self.normalize.isChecked(),
+        )
+
+    def accept(self) -> None:
+        """Remember the choices for next time."""
+        settings.set_import_flags(
+            {"file_markers": self.file_markers.isChecked(), "root_from_name": self.root_from_name.isChecked(), "trim": self.trim.isChecked(), "normalize": self.normalize.isChecked()}
+        )
+        settings.set_import_stereo_mix(self.stereo == importing.STEREO_MIX)
+        super().accept()
+
+    @property
     def importable(self) -> int:
         return sum(1 for s in self._sources if not s.problem)
 
@@ -369,7 +405,7 @@ class ImportDialog(QDialog):
         self.compress.setVisible(self.sample_type == "S900" and self.type_row[1].isVisible())
         self.files.clear()
         for s in self._sources:
-            self.files.addItem(f"{s.path.name}   —   {importing.describe(s, self.sample_type, self.stereo)}")
+            self.files.addItem(f"{s.path.name}   —   {importing.describe(s, self.sample_type, self.stereo, self.options)}")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(self.importable > 0)
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Import")
 

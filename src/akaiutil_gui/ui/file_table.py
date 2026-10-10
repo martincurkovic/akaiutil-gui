@@ -1,6 +1,9 @@
 """The list of files in the selected volume."""
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QDrag, QFontMetrics, QPainter, QPixmap
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableWidget, QTableWidgetItem
 
 from akaiutil_gui.engine.models import CatalogEntry, FileEntry, Volume
@@ -46,6 +49,9 @@ class FileTable(QTableWidget):
         for col, width in {0: 48, 2: 130, 3: 90, 4: 100, 5: 80, LOCATION: 180}.items():
             self.setColumnWidth(col, width)
         self.itemSelectionChanged.connect(lambda: self.selectionFilesChanged.emit(self.selected_files()))
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        self.mime_provider: Callable[[], object | None] | None = None  # the window says what a drag carries
 
     def set_files(self, files: list[FileEntry], volume: Volume | None = None) -> None:
         """Show one volume's files."""
@@ -83,6 +89,30 @@ class FileTable(QTableWidget):
         self.setSortingEnabled(True)
         self.sortByColumn(1 if results else 0, Qt.SortOrder.AscendingOrder)  # results by name, a volume by file number
         self.selectionFilesChanged.emit([])
+
+    def startDrag(self, supported_actions) -> None:
+        mime = self.mime_provider() if self.mime_provider is not None else None
+        if mime is None:
+            return
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self._drag_pixmap(len(mime.rows)))
+        drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, Qt.DropAction.CopyAction)
+
+    def _drag_pixmap(self, count: int) -> QPixmap:
+        text = f"{count} file{'s' if count != 1 else ''}"
+        metrics = QFontMetrics(self.font())
+        pixmap = QPixmap(metrics.horizontalAdvance(text) + 20, metrics.height() + 10)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor(0, 0, 0, 170))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(pixmap.rect(), 6, 6)
+        painter.setPen(QColor("white"))
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, text)
+        painter.end()
+        return pixmap
 
     def clear_files(self) -> None:
         self.set_files([])

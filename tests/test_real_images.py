@@ -81,3 +81,33 @@ def test_real_samples_parse_into_sane_numbers(binary, image):
     finally:
         eng.close()
     assert checked > 0
+
+
+def test_a_move_keeps_a_files_tags_but_a_copy_cant(binary, tmp_path):
+    """On a real image: `reni` (a move inside a partition) carries the file's tags; `put` (a copy) doesn't."""
+    import shutil
+
+    from akaiutil_gui import transfer
+
+    image = next((p for p in REAL if "HD5" in p.name), None)
+    if image is None:
+        pytest.skip("needs the HD5 image")
+    work = tmp_path / "copy.img"
+    shutil.copy(image, work)
+    eng = AkaiEngine(binary)
+    eng.open([work])
+    eng.set_writable(True)
+    try:
+        part = eng.list_partitions(eng.list_disks()[0])[0]
+        vols = eng.list_volumes(part)
+        src, dst = vols[0], vols[2]
+        tagged = next((f for f in eng.list_files(src) if f.tags), None)
+        if tagged is None:
+            pytest.skip("no tagged file in the first volume")
+        copied = transfer.transfer_files(eng, [(src, tagged)], dst, move=False)
+        assert copied.done and not next(f for f in eng.list_files(dst) if f.name == copied.done[0]).tags  # copies lose tags
+        moved = transfer.transfer_files(eng, [(src, tagged)], vols[3], move=True)
+        assert moved.done == [tagged.name]
+        assert next(f for f in eng.list_files(vols[3]) if f.name == tagged.name).tags == tagged.tags  # a move keeps them
+    finally:
+        eng.close()
