@@ -90,6 +90,53 @@ def save(widget, name: str) -> None:
     print("saved", name)
 
 
+def extra_pictures(app, window, work: Path, volume) -> None:
+    """The start screen with some recent images, the Sample Settings dialog (with a loop switched on) and the backup question."""
+    from akaiutil_gui.audio.sample import load_wav
+    from akaiutil_gui.ui.main_window import MainWindow
+
+    home = (work / "home").resolve()
+    disks = home / "Music" / "Akai disks"
+    disks.mkdir(parents=True, exist_ok=True)
+    os.environ["HOME"] = str(home)  # (so the list shows "~/Music/Akai disks", not a temporary folder)
+    settings.clear_recent_images()  # (the demo image the other pictures use isn't one anyone would have)
+    for name in ("HD0.img", "Gotek floppy.img", "SD card backup.img", "HD5.img"):
+        (disks / name).write_bytes(b"\0" * 16)
+        settings.add_recent_image(str(disks / name))
+    start = MainWindow()
+    start.resize(*SIZE)
+    start.show()
+    pump(app, timeout=0.5)
+    save(start, "start-screen.png")
+    start.close()
+
+    engine = window._engine
+    snare = next(f for f in engine.list_files(volume) if f.name == "SNARE.S3")
+    current = engine.read_sample_settings(volume, snare)
+    wav = engine.export_sample_wav(volume, snare, work)
+    audio = load_wav(wav, snare.name, None).samples
+    dialog = edit_dialogs.SampleSettingsDialog(window, snare.name, current, audio)
+    on, start_box, end_box, _time, hold = dialog.loop_rows[0]
+    on.setChecked(True)
+    start_box.setValue(int(current.frames * 0.25))
+    end_box.setValue(int(current.frames * 0.6))
+    dialog._select_loop(0)
+    dialog.show()
+    pump(app, timeout=0.4)
+    save(dialog, "sample-settings.png")
+    dialog.close()
+
+    question = edit_dialogs.ThreeWayDialog(
+        window, "Allow editing?", "Editing changes the disk image files themselves.",
+        "There is no undo. Back up this image first (512 MB)? The backups are kept in the app's folder, and File > Revert to Backup… puts one back.",
+        "Back Up and Edit", "Edit Without Backup", ["HD5.img  ·  512.0 MB"],
+    )
+    question.show()
+    pump(app, timeout=0.3)
+    save(question, "backup-question.png")
+    question.close()
+
+
 def main() -> int:
     binary = find_akaiutil()
     if binary is None:
@@ -118,6 +165,7 @@ def main() -> int:
         window.table.selectRow(1)
         pump(app, lambda: window._pending == 0 and window.preview.isVisible())
         pump(app, timeout=1.0)
+        window.preview.play_button.setEnabled(True)  # (audio is off for this script, which greys Play; the picture shows it as it normally is)
         save(window, f"main-window-{scheme}.png")
         if scheme == "dark":
             window.search.setText("hat")
@@ -148,6 +196,7 @@ def main() -> int:
             pump(app, timeout=0.3)
             save(settings_dialog, "settings.png")
             settings_dialog.close()
+            extra_pictures(app, window, work, volume)
         window.close()
     print("done:", OUT)
     return 0
