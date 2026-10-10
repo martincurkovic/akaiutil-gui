@@ -2,7 +2,7 @@
 
 akaiutil-GUI opens Akai S900, S1000 and S3000 disk images (the files you get from a Gotek, SCSI2SD or card-reader backup of
 your sampler's disk) and lets you look inside them, listen to the samples, take files out, and, if you choose, change what's
-inside. It does its work by running Klaus Michael Indlekofer's **akaiutil** program for you.
+inside. Powered by Klaus Michael Indlekofer's **akaiutil** program.
 
 ![The main window](screenshots/main-window-dark.png "The main window")
 
@@ -33,7 +33,7 @@ inside. It does its work by running Klaus Michael Indlekofer's **akaiutil** prog
 
 ## Getting started
 
-1. **Open an image.** Choose **File > Open Disk Image…**, or drag the image file onto the window. (The start screen has buttons for this, and for **New Disk Image…** if you want to make an empty one.)
+1. **Open an image.** Choose **File > Open Disk Image…**, or drag the image file onto the window. (The start screen has buttons for this, and for **New Disk Image…** if you want to make an empty one, and lists the images you opened lately: click one to open it, or **Clear List** to forget them. **File > Open Recent** has the same list, up to ten. An image that has been moved or deleted drops off the list.)
 2. The first time, the app needs akaiutil. If it isn't installed it offers to download it (the download is checked against a
    known checksum) or lets you point at a copy you already have. Built apps include akaiutil, so this only happens when running
    from source.
@@ -62,7 +62,7 @@ useful if something misbehaves.
 ## Opening disk images
 
 | Do this | To |
-|---|---|
+| --- | --- |
 | **File > Open Disk Image…** (Ctrl/Cmd+O) | Open one or more images, replacing what's open |
 | **File > Add Disk Image…** (Ctrl/Cmd+Shift+O), or drop files on the window | Add images to the ones already open |
 | Right-click a disk > **Close Disk Image** (Ctrl/Cmd+Shift+W) | Close one image and keep the others |
@@ -348,7 +348,7 @@ Open **Settings** (File > Settings…, or Cmd+, on a Mac).
 On a Mac use Cmd where this says Ctrl.
 
 | Keys | Does |
-|---|---|
+| --- | --- |
 | Ctrl+O | Open disk images |
 | Ctrl+Shift+O | Add disk images |
 | Ctrl+N | New disk image |

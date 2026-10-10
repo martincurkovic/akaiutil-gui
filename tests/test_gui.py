@@ -1350,3 +1350,129 @@ def test_search_results_still_show_the_location_whatever_columns_are_hidden(app,
     assert not w.table.isColumnHidden(file_table.LOCATION) and not w.table.column_visible("Tags")
     w.search.clear()
     assert pump(app, lambda: w.table.isColumnHidden(file_table.LOCATION))
+
+
+# --------------------------------------------------------------------------- recent images
+def rows_of(window):
+    from PySide6.QtWidgets import QPushButton
+
+    return [b for b in window.recent_box.findChildren(QPushButton) if b.objectName() == "recentButton"]
+
+
+def test_the_start_screen_lists_recent_images_newest_first_and_hides_the_list_when_there_are_none(app, window, images, tmp_path):
+    import os
+
+    assert window.recent_box.isHidden()  # (nothing opened yet)
+    settings.add_recent_image(str(images["fl1"]))
+    settings.add_recent_image(str(images["fl9"]))
+    window._refresh_recent()
+    assert not window.recent_box.isHidden()
+    assert [b.property("path") for b in rows_of(window)] == [os.path.realpath(images["fl9"]), os.path.realpath(images["fl1"])]
+    assert rows_of(window)[0].toolTip() == os.path.realpath(images["fl9"])  # (the full path, on hover)
+
+
+def test_opening_images_puts_them_on_the_list_and_closing_shows_it_again(app, window, images):
+    import os
+
+    window.open_images([str(images["fl1"]), str(images["fl9"])])
+    assert pump(app, lambda: window.tree.topLevelItemCount() == 2)
+    assert settings.get_recent_images()[:2] == [os.path.realpath(images["fl1"]), os.path.realpath(images["fl9"])]  # (the first of a set on top)
+    window.close_images()
+    assert pump(app, lambda: window.stack.currentIndex() == 0)
+    assert [b.property("path") for b in rows_of(window)][:2] == [os.path.realpath(images["fl1"]), os.path.realpath(images["fl9"])]
+
+
+def test_clicking_a_recent_image_opens_it(app, window, images):
+    settings.add_recent_image(str(images["fl1"]))
+    window._refresh_recent()
+    rows_of(window)[0].click()
+    assert pump(app, lambda: window.tree.topLevelItemCount() == 1)
+    assert [p for p in window._images] == [str(images["fl1"].resolve())] or len(window._images) == 1
+
+
+def test_a_recent_image_that_has_gone_is_not_listed_and_is_forgotten(app, window, images, tmp_path):
+    import os
+    import shutil
+
+    gone = tmp_path / "gone.img"
+    shutil.copy(images["fl1"], gone)
+    settings.add_recent_image(str(gone))
+    settings.add_recent_image(str(images["fl9"]))
+    gone.unlink()
+    window._refresh_recent()
+    assert [b.property("path") for b in rows_of(window)] == [os.path.realpath(images["fl9"])]
+    assert os.path.realpath(gone) not in settings.get_recent_images()
+
+
+def test_clicking_a_recent_image_that_vanished_since_says_so(app, window, images, tmp_path, monkeypatch):
+    import shutil
+
+    from PySide6.QtWidgets import QMessageBox
+
+    gone = tmp_path / "vanished.img"
+    shutil.copy(images["fl1"], gone)
+    settings.add_recent_image(str(gone))
+    window._refresh_recent()
+    shown = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: shown.append(a[1:3]))
+    button = rows_of(window)[0]
+    gone.unlink()
+    button.click()
+    assert shown and "isn't there any more" in shown[0][1]
+    assert window.stack.currentIndex() == 0 and window.recent_rows.count() == 0 and window.recent_box.isHidden()
+
+
+def test_the_start_screen_shows_only_the_first_few_but_the_menu_shows_them_all(app, window, images, tmp_path):
+    import shutil
+
+    from akaiutil_gui.ui import main_window
+
+    for i in range(9):
+        p = tmp_path / f"disk{i}.img"
+        shutil.copy(images["fl1"], p)
+        settings.add_recent_image(str(p))
+    window._refresh_recent()
+    assert len(rows_of(window)) == main_window.RECENT_SHOWN
+    window._fill_recent_menu()
+    entries = [a.text() for a in window.recent_menu.actions() if not a.isSeparator()]
+    assert entries[:-1] == [f"disk{i}.img" for i in range(8, -1, -1)] and entries[-1] == "Clear Menu"
+
+
+def test_the_clear_buttons_forget_everything(app, window, images):
+    settings.add_recent_image(str(images["fl1"]))
+    window._refresh_recent()
+    window.clear_recent_btn.click()
+    assert settings.get_recent_images() == [] and window.recent_box.isHidden()
+    settings.add_recent_image(str(images["fl1"]))
+    window._fill_recent_menu()
+    next(a for a in window.recent_menu.actions() if a.text() == "Clear Menu").trigger()
+    assert settings.get_recent_images() == []
+    window._fill_recent_menu()
+    assert [(a.text(), a.isEnabled()) for a in window.recent_menu.actions()] == [("No Recent Images", False)]
+
+
+def test_the_menu_entry_opens_the_image(app, window, images):
+    settings.add_recent_image(str(images["fl1"]))
+    window._fill_recent_menu()
+    next(a for a in window.recent_menu.actions() if a.text() == images["fl1"].name).trigger()
+    assert pump(app, lambda: window.tree.topLevelItemCount() == 1)
+
+
+def test_the_home_folder_is_shown_as_a_tilde(app, window):
+    from pathlib import Path
+
+    home = str(Path.home())
+    assert window._shown_folder(home + "/Music/disks/a.img") == "~/Music/disks"
+    assert window._shown_folder("/Volumes/SD/a.img") == "/Volumes/SD"
+
+
+def test_the_recent_list_sits_on_a_card_whose_colours_come_from_the_theme(app, window):
+    from PySide6.QtCore import Qt
+
+    assert window.recent_box.objectName() == "recentCard"
+    assert window.recent_box.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+    for palette in (theme.DARK_PALETTE, theme.LIGHT_PALETTE):
+        css = theme.render_stylesheet(palette)
+        rule = css[css.index("QWidget#recentCard {") :].split("}")[0]
+        assert palette["bg_dialog"] in rule and palette["border_progress"] in rule  # (the card's shade and edge, per theme)
+        assert palette["bg_dialog"] != palette["bg"]  # (a different background from the window's)

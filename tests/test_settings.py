@@ -227,3 +227,35 @@ def test_the_settings_dialog_shows_and_saves_the_backup_and_log_options(qt_app, 
     assert shown == [1]
     dialog.deleteLater()
     again.deleteLater()
+
+
+def test_recent_images_are_remembered_newest_first_without_repeats(tmp_path):
+    a, b, c = (tmp_path / n for n in ("a.img", "b.img", "c.img"))
+    for p in (a, b, c):
+        p.write_bytes(b"x")
+    assert settings.get_recent_images() == []
+    for p in (a, b, c, a):  # (a again: it moves to the top rather than appearing twice)
+        settings.add_recent_image(str(p))
+    import os
+
+    assert settings.get_recent_images() == [os.path.realpath(p) for p in (a, c, b)]
+    settings.remove_recent_image(os.path.realpath(c))
+    assert settings.get_recent_images() == [os.path.realpath(p) for p in (a, b)]
+    settings.clear_recent_images()
+    assert settings.get_recent_images() == []
+
+
+def test_only_the_newest_few_recent_images_are_kept(tmp_path):
+    for i in range(settings.MAX_RECENT_IMAGES + 5):
+        settings.add_recent_image(str(tmp_path / f"{i}.img"))
+    recent = settings.get_recent_images()
+    assert len(recent) == settings.MAX_RECENT_IMAGES and recent[0].endswith(f"{settings.MAX_RECENT_IMAGES + 4}.img")
+
+
+def test_a_damaged_recent_list_is_just_empty():
+    from PySide6.QtCore import QSettings
+
+    QSettings().setValue("recent/images", "this is not json")
+    assert settings.get_recent_images() == []
+    QSettings().setValue("recent/images", '[1, "ok.img", null]')
+    assert settings.get_recent_images() == ["ok.img"]

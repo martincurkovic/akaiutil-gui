@@ -11,7 +11,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QAction, QActionGroup, QFontDatabase, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QFontDatabase, QFontMetrics, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -73,6 +73,9 @@ from .update_helper import CHECK_INTERVAL_SECONDS, UpdateCheckRunner
 from .usage_bar import UsageSummary
 
 log = logging.getLogger(__name__)
+
+RECENT_WIDTH = 520  # px: the recent list on the start screen
+RECENT_SHOWN = 6  # how many of the remembered images the start screen lists
 
 IMAGE_FILTER = "Disk images (*.img *.iso *.bin *.dsk *.hfe *.fdi *.raw);;All files (*)"
 
@@ -394,6 +397,29 @@ class MainWindow(QMainWindow):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setObjectName("linkButton")
             footer.addWidget(button)
+        # recently opened images, under the buttons (only when there are some)
+        self.recent_box = QWidget()
+        self.recent_box.setObjectName("recentCard")
+        self.recent_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # (a plain QWidget only paints its QSS background with this)
+        self.recent_box.setFixedWidth(RECENT_WIDTH)
+        recent_layout = QVBoxLayout(self.recent_box)
+        recent_layout.setContentsMargins(8, 8, 8, 8)
+        recent_layout.setSpacing(2)
+        recent_head = QHBoxLayout()
+        recent_head.setContentsMargins(10, 0, 0, 0)  # (in line with the names below)
+        recent_title = QLabel("Recent")
+        recent_title.setObjectName("mutedLabel")
+        self.clear_recent_btn = QPushButton("Clear List")
+        self.clear_recent_btn.setFlat(True)
+        self.clear_recent_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_recent_btn.setObjectName("linkButton")
+        self.clear_recent_btn.clicked.connect(self._clear_recent)
+        recent_head.addWidget(recent_title, 1)
+        recent_head.addWidget(self.clear_recent_btn)
+        recent_layout.addLayout(recent_head)
+        self.recent_rows = QVBoxLayout()
+        self.recent_rows.setSpacing(0)
+        recent_layout.addLayout(self.recent_rows)
         ev.addStretch(3)
         ev.addWidget(self.empty_logo)
         ev.addSpacing(28)
@@ -402,6 +428,8 @@ class MainWindow(QMainWindow):
         ev.addLayout(buttons)
         ev.addSpacing(8)
         ev.addWidget(hint)
+        ev.addSpacing(26)
+        ev.addWidget(self.recent_box, 0, Qt.AlignmentFlag.AlignHCenter)
         ev.addStretch(4)
         ev.addLayout(footer)
 
@@ -440,6 +468,7 @@ class MainWindow(QMainWindow):
         self.version_label.setObjectName("mutedLabel")
         self.statusBar().addWidget(self.version_label)
         self._sync_status_labels()
+        self._refresh_recent()
 
     def _title(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -474,7 +503,11 @@ class MainWindow(QMainWindow):
         )
         act_quit = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
         act_quit.setMenuRole(QAction.MenuRole.QuitRole)
-        file_menu.addActions([self.act_new_image, self.act_open, self.act_add])
+        self.recent_menu = QMenu("Open &Recent", self)
+        self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
+        file_menu.addActions([self.act_new_image, self.act_open])
+        file_menu.addMenu(self.recent_menu)
+        file_menu.addAction(self.act_add)
         file_menu.addSeparator()
         file_menu.addActions([self.act_close_disk, self.act_close])
         file_menu.addSeparator()
@@ -663,6 +696,9 @@ class MainWindow(QMainWindow):
         if engine is not self._engine:
             return  # superseded by a newer open
         self._writable = engine.is_writable
+        for path in reversed(self._images):  # (so the first image of a set ends up on top)
+            settings.add_recent_image(path)
+        self._refresh_recent()
         log.info("opened %s (%s)", ", ".join(self._images), "editing" if self._writable else "read-only")
         m = re.search(r"Rev\.\s*([\w.]+)", banner)
         names = ", ".join(Path(p).name for p in self._images)
@@ -812,6 +848,7 @@ class MainWindow(QMainWindow):
         self._reset_views()
         self.stack.setCurrentIndex(0)
         self._sync_status_labels()
+        self._refresh_recent()
         self.setWindowTitle("akaiutil-gui")
         self.statusBar().clearMessage()
         self._update_actions()
@@ -1436,6 +1473,81 @@ class MainWindow(QMainWindow):
             box.exec()
 
     # -------------------------------------------------------------- editing
+    # ------------------------------------------------------------ recent images
+    @staticmethod
+    def _existing_recent() -> list[str]:
+        """The remembered images that are still there (and forget the ones that aren't)."""
+        found = settings.get_recent_images()
+        alive = [p for p in found if os.path.isfile(p)]
+        for gone in set(found) - set(alive):
+            settings.remove_recent_image(gone)
+        return alive
+
+    @staticmethod
+    def _shown_folder(path: str) -> str:
+        folder = str(Path(path).parent)
+        home = str(Path.home())
+        return "~" + folder[len(home) :] if folder == home or folder.startswith(home + os.sep) else folder
+
+    def _refresh_recent(self) -> None:
+        """Rebuild the start screen's list of recent images."""
+        while self.recent_rows.count():
+            item = self.recent_rows.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        recent = self._existing_recent()[:RECENT_SHOWN]
+        self.recent_box.setVisible(bool(recent))
+        for path in recent:
+            self.recent_rows.addWidget(self._recent_row(path))
+
+    def _recent_row(self, path: str) -> QPushButton:
+        button = QPushButton()
+        button.setObjectName("recentButton")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setToolTip(path)
+        button.setProperty("path", path)
+        row = QHBoxLayout(button)
+        row.setContentsMargins(10, 0, 10, 0)
+        name = QLabel(Path(path).name)
+        folder = QLabel()
+        folder.setObjectName("mutedLabel")
+        folder.setText(
+            QFontMetrics(folder.font()).elidedText(self._shown_folder(path), Qt.TextElideMode.ElideMiddle, RECENT_WIDTH // 2 - 20)
+        )
+        folder.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        for label in (name, folder):
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)  # (a click on the text is a click on the row)
+        row.addWidget(name, 1)
+        row.addWidget(folder)
+        button.setMinimumHeight(max(30, name.sizeHint().height() + 10))
+        button.clicked.connect(lambda _checked=False, p=path: self._open_recent(p))
+        return button
+
+    def _open_recent(self, path: str) -> None:
+        if not os.path.isfile(path):
+            settings.remove_recent_image(path)
+            self._refresh_recent()
+            QMessageBox.warning(self, "Can't find that image", f"{path}\n\nisn't there any more (it was moved, renamed or deleted).")
+            return
+        self.open_images([path])
+
+    def _clear_recent(self) -> None:
+        settings.clear_recent_images()
+        self._refresh_recent()
+
+    def _fill_recent_menu(self) -> None:
+        """File > Open Recent: the remembered images that still exist, newest first."""
+        self.recent_menu.clear()
+        recent = self._existing_recent()
+        if not recent:
+            self.recent_menu.addAction("No Recent Images").setEnabled(False)
+            return
+        for path in recent:
+            action = self.recent_menu.addAction(Path(path).name, lambda p=path: self._open_recent(p))
+            action.setToolTip(path)
+        self.recent_menu.addSeparator()
+        self.recent_menu.addAction("Clear Menu", self._clear_recent)
+
     def _sync_status_labels(self) -> None:
         """Read-only / Editing means nothing until an image is open, and the version is only worth a corner of the start screen."""
         browsing = self.stack.currentIndex() == 1

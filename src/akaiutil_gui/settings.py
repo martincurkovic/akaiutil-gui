@@ -180,6 +180,42 @@ def set_verbose_log(on: bool) -> None:
     _qs().setValue("log/verbose", bool(on))
 
 
+MAX_RECENT_IMAGES = 10
+
+
+def get_recent_images() -> list[str]:
+    """Disk images opened lately, most recent first (paths; they may no longer exist)."""
+    import json
+
+    try:
+        data = json.loads(str(_qs().value("recent/images", "[]") or "[]"))
+        return [str(p) for p in data if isinstance(p, str)][:MAX_RECENT_IMAGES]
+    except (ValueError, TypeError):
+        return []
+
+
+def _set_recent_images(paths: list[str]) -> None:
+    import json
+
+    _qs().setValue("recent/images", json.dumps(paths[:MAX_RECENT_IMAGES]))
+
+
+def add_recent_image(path: str) -> None:
+    """Put an image at the top of the recent list (once: an image already there moves up)."""
+    import os
+
+    path = os.path.realpath(path)
+    _set_recent_images([path] + [p for p in get_recent_images() if p != path])
+
+
+def remove_recent_image(path: str) -> None:
+    _set_recent_images([p for p in get_recent_images() if p != path])
+
+
+def clear_recent_images() -> None:
+    _set_recent_images([])
+
+
 def get_hidden_file_columns() -> set[str]:
     """The names of the file list's columns the user has hidden."""
     return {c for c in str(_qs().value("files/hidden_columns", "") or "").split(",") if c}

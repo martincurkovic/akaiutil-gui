@@ -3,7 +3,16 @@ checking for updates and reading the licences. Fixed size, so the text labels wr
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLayout, QProgressBar, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from akaiutil_gui import __version__, updates
 
@@ -42,7 +51,9 @@ class AboutDialog(QDialog):
         self.logo_label = QLabel(LOGO.strip("\n"))
         self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # (a stylesheet beats setFont, and the app's gives every label a pixel size and no fixed-width family)
-        self.logo_label.setStyleSheet(f"font-family: '{monospace_family()}'; font-size: 10pt;")
+        self.logo_label.setStyleSheet(
+            f"font-family: '{monospace_family()}'; font-size: 10pt;"
+        )
         layout.addWidget(self.logo_label)
 
         version_label = QLabel(f"Version {__version__}")
@@ -50,7 +61,9 @@ class AboutDialog(QDialog):
         layout.addWidget(version_label)
 
         layout.addWidget(
-            _wrapped("A cross-platform Qt front end for akaiutil: browse, preview, edit and export Akai S900, S1000 and S3000 disk images."),
+            _wrapped(
+                "A cross-platform Qt front end for akaiutil: browse, preview, edit and export Akai S900, S1000 and S3000 disk images."
+            ),
             alignment=Qt.AlignmentFlag.AlignHCenter,
         )
 
@@ -64,7 +77,7 @@ class AboutDialog(QDialog):
 
         layout.addWidget(
             _wrapped(
-                "Does its work by running akaiutil by Klaus Michael Indlekofer (GPL v2 or later).\n"
+                "Powered by akaiutil - Klaus Michael Indlekofer (GPL v2 or later).\n"
                 "Built with PySide6 (Qt), miniaudio, soundfile, NumPy and Nuitka.\n"
                 "Licensed under GPL-2.0-or-later."
             ),
@@ -99,7 +112,9 @@ class AboutDialog(QDialog):
     def _check_for_updates(self) -> None:
         self.check_updates_button.setEnabled(False)
         self.update_progress.setVisible(True)
-        self._update_runner.start(manual=True, on_finished=self._on_update_check_finished)
+        self._update_runner.start(
+            manual=True, on_finished=self._on_update_check_finished
+        )
 
     def _on_update_check_finished(self) -> None:
         self.update_progress.setVisible(False)

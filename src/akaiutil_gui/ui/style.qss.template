@@ -94,6 +94,31 @@ QPushButton:disabled {
     color: ${text_disabled};
 }
 
+/* the card behind the start screen's recent images: a shade apart from the window, with a fine edge (both from the palette,
+   so it follows the theme) */
+QWidget#recentCard {
+    background-color: ${bg_dialog};
+    border: 1px solid ${border_progress};
+    border-radius: 8px;
+}
+
+QWidget#recentCard QLabel {
+    background: transparent;
+}
+
+/* one row of the start screen's recent images: the name and where it is, highlighted when the mouse is over it */
+QPushButton#recentButton {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 10px;
+    text-align: left;
+}
+
+QPushButton#recentButton:hover {
+    background: ${bg_button_hover};
+}
+
 /* a button that reads as a quiet text link (the start screen's User Manual / About) */
 QPushButton#linkButton {
     background: transparent;
