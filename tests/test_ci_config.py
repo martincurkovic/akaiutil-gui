@@ -151,23 +151,17 @@ def test_the_macos_icon_has_all_ten_sizes():
             assert struct.unpack(">II", payload[16:24]) == (pixels, pixels), f"{kind} should be {pixels}px"
 
 
-def test_the_macos_icon_master_is_in_the_apple_template_form():
-    import struct
-
-    master = (ROOT / "assets" / "icon" / "AppIcon1024.png").read_bytes()
-    assert master[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", master[16:24]) == (1024, 1024)
-    assert master[25] == 6, "needs an alpha channel (RGBA): the rounded corners are transparent"
-
-    Image = pytest.importorskip("PIL.Image")  # decoding pixels needs Pillow; the CI test job doesn't install it
-    im = Image.open(ROOT / "assets/icon/AppIcon1024.png").convert("RGBA")
-    assert all(im.getpixel(p)[3] == 0 for p in [(0, 0), (1023, 0), (0, 1023), (1023, 1023)]), "corners must be transparent"
-    solid = im.getchannel("A").point(lambda v: 255 if v > 200 else 0).getbbox()
-    assert solid == (100, 100, 924, 924), f"Apple's template is 824px centred in 1024; this is {solid}"
-
+def test_the_macos_icon_is_in_the_apple_template_form():
+    """The shipped .icns's largest image is Apple's template: a rounded square ~824px wide, centred in a 1024
+    canvas with transparent corners (the macOS-style icon). Checked on the icns itself, which is what ships."""
     import io
 
+    Image = pytest.importorskip("PIL.Image")  # decoding pixels needs Pillow; the CI test job doesn't install it
     biggest = Image.open(io.BytesIO(icns_entries(ROOT / "assets/icon/akaiutil-GUI-macos.icns")["ic10"])).convert("RGBA")
-    assert biggest.tobytes() == im.tobytes(), "the .icns is out of date: rerun scripts/make_icns.sh"
+    assert biggest.size == (1024, 1024)
+    assert all(biggest.getpixel(p)[3] == 0 for p in [(0, 0), (1023, 0), (0, 1023), (1023, 1023)]), "corners must be transparent"
+    solid = biggest.getchannel("A").point(lambda v: 255 if v > 200 else 0).getbbox()
+    assert solid == (100, 100, 924, 924), f"Apple's template is 824px centred in 1024; this is {solid}"
 
 
 # ------------------------------------------------- what the build bundles
@@ -218,6 +212,8 @@ def test_the_notices_name_the_exact_akaiutil_that_is_bundled():
     assert fetch.SOURCE_SHA256 in text, "the notices must carry the checksum of the source that's pinned"
     assert fetch.VERSION in text and fetch.SOURCE_ARCHIVE in text
     assert "GNU General Public License" in text and "Klaus Michael Indlekofer" in text
+    for dependency in ("miniaudio", "soundfile", "libsndfile", "NumPy"):  # bundled in the app, so credited
+        assert dependency in text, f"{dependency} ships in the app but isn't in the notices"
 
 
 # --------------------------------------------------------------- .gitignore

@@ -166,7 +166,7 @@ total:   0 take(s)
 
 
 def test_dirrec_gives_volume_sizes_in_whole_blocks():
-    parts, usages = parse.parse_dirrec(DIRREC, 0, 0x2000)
+    parts, usages, catalog = parse.parse_dirrec(DIRREC, 0, 0x2000)
     assert [p.name for p in parts] == ["A", "B", "DD"]
     # inactive volumes are skipped, and the "tnr" section of a DD partition is ignored
     assert [(u.partition, u.index, u.name, u.files) for u in usages] == [("A", 1, "DRUMS", 2), ("A", 3, "MY SYNTH", 1)]
@@ -174,3 +174,10 @@ def test_dirrec_gives_volume_sizes_in_whole_blocks():
     assert usages[0].data_bytes == 2 * 44292  # ...while the files themselves add up to less
     assert usages[1].data_bytes == 1
     assert usages[1].used_bytes == 0x2000  # a 1-byte file still takes a whole block
+    # the same pass yields every file with the volume it lives in, for searching across volumes
+    assert [(c.volume.name, c.volume.index, c.file.name) for c in catalog] == [
+        ("DRUMS", 1, "KICK.S3"),
+        ("DRUMS", 1, "SNARE.S3"),
+        ("MY SYNTH", 3, "LEAD.S3"),
+    ]
+    assert catalog[0].volume.path == "/disk0/A/DRUMS" and catalog[0].file.index == 1

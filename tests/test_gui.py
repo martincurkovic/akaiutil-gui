@@ -9,7 +9,7 @@ import pytest
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
-from akaiutil_gui import settings
+from akaiutil_gui import search, settings
 from akaiutil_gui.engine.models import Volume
 from akaiutil_gui.ui import theme
 
@@ -696,3 +696,393 @@ def test_a_built_apps_smoke_test_demands_the_bundled_akaiutil(app, binary, tmp_p
         monkeypatch.setattr(main_module, "bundled_binary", lambda: stub)
         report = tmp_path / "noexec.txt"
         assert main_module.smoke_test(str(report)) == 1 and "isn't executable" in report.read_text()
+
+
+# ------------------------------------------------------------------ audio preview, end to end
+@pytest.fixture(scope="module")
+def loop_image(images, tmp_path_factory):
+    """The generated hard disk with real loops written into two samples' headers."""
+    import shutil
+
+    import imagegen
+
+    path = tmp_path_factory.mktemp("loops") / "loops.img"
+    shutil.copy(images["hd"], path)
+    imagegen.add_loop(path, "KICK", loop_end=20000, loop_length=5000, time_ms=None, hold_tune=5)  # Hold
+    imagegen.add_loop(path, "SNARE", loop_end=15000, loop_length=1000, time_ms=300, slot=2)  # a timed loop, slot 3
+    return path
+
+
+def open_drums(app, window, image):
+    """Open an image and select its first volume (DRUMS: KICK and SNARE)."""
+    window.open_images([str(image)])
+    assert pump(app, lambda: window.tree.topLevelItemCount() == 1)
+    disk = window.tree.topLevelItem(0)
+    assert pump(app, lambda: disk.childCount() == 18)
+    part_a = disk.child(0)
+    part_a.setExpanded(True)
+    assert pump(app, lambda: part_a.childCount() == 3)
+    window.tree.setCurrentItem(part_a.child(0))
+    assert pump(app, lambda: window.table.rowCount() == 2)
+
+
+def select_sample(app, window, row):
+    window.table.selectRow(row)
+    assert pump(app, lambda: window.preview.sample is not None and window.preview.sample.name == window.table.item(row, 1).text())
+
+
+def stream_of(dev, n=256):
+    import numpy as np
+
+    out = b""
+    while True:
+        try:
+            chunk = dev.gen.send(n)
+        except StopIteration:
+            return np.frombuffer(out, dtype="<i2")
+        out += chunk
+
+
+def test_selecting_a_sample_loads_it_and_plays_it_through_the_device(app, window, images, fake_audio):
+    import numpy as np
+
+    window.open_images([str(images["fl1"])])  # a floppy: KICK.S1 and SNARE.S1, no loops
+    assert pump(app, lambda: window.table.rowCount() == 2)
+    assert window.preview.isHidden()  # nothing selected yet
+    select_sample(app, window, 0)
+    assert not window.preview.isHidden()
+    sample = window.preview.sample
+    assert (sample.rate, sample.frames, sample.info.generation) == (44100, 22050, "S1000/S3000") and not sample.info.loops
+    assert not window.preview.loop_check.isEnabled()
+
+    window.preview.play_button.click()
+    dev = fake_audio.opened[-1]
+    audio = stream_of(dev)
+    assert dev.sample_rate == 44100 and (audio[:22050] == sample.samples).all() and not audio[22050:].any()
+    assert np.abs(sample.samples).max() > 5000, "a real sine, not silence"  # the WAV was really decoded
+
+
+def test_a_sample_with_a_loop_plays_its_loop(app, window, loop_image, fake_audio):
+    import numpy as np
+
+    open_drums(app, window, loop_image)
+    select_sample(app, window, 0)  # KICK: loop frames 15000..20000, Hold, hold tune +5
+    panel = window.preview
+    assert panel.loop_check.isEnabled() and panel.loop_check.isChecked() and panel.loop_combo.isHidden()
+    assert "loop 1" in panel.info_label.text() and "frames 15,000–20,000" in panel.info_label.text()
+
+    panel.play_button.click()
+    dev = fake_audio.opened[-1]
+    samples = panel.sample.samples
+    head = np.frombuffer(b"".join(dev.gen.send(500) for _ in range(41)), dtype="<i2")  # 20,500 frames
+    assert (head[:20001] == samples[:20001]).all()  # the attack, up to the loop's end
+    assert panel.player._live_loop_tune_cents == 5 and panel.is_playing()  # Hold: still going
+    panel.stop()
+
+
+def test_a_timed_loop_uses_its_own_dwell(app, window, loop_image, fake_audio):
+    open_drums(app, window, loop_image)
+    select_sample(app, window, 1)  # SNARE: loop 3, 300 ms
+    assert "300 ms" in window.preview.info_label.text()
+    window.preview.play_button.click()
+    audio = stream_of(fake_audio.opened[-1])  # ends by itself: attack + loop for ~300 ms + tail
+    samples = window.preview.sample.samples
+    loop_frames = 1001  # [14000, 15000]
+    passes = -(-round(0.3 * 44100) // loop_frames)  # whole passes, the last one finished
+    assert len(audio) >= 15001 + passes * loop_frames + (len(samples) - 15000)
+
+
+def test_selecting_several_files_or_a_volume_hides_the_preview_and_silences_it(app, window, loop_image, fake_audio):
+    open_drums(app, window, loop_image)
+    select_sample(app, window, 0)
+    window.preview.play_button.click()
+    dev = fake_audio.opened[-1]
+    assert window.preview.is_playing()
+    window.table.selectAll()  # two files
+    assert window.preview.isHidden() and dev.closed and not window.preview.is_playing()
+    select_sample(app, window, 0)
+    assert not window.preview.isHidden()
+    window.tree.setCurrentItem(window.tree.topLevelItem(0).child(0))  # a partition: no files, no preview
+    assert window.preview.isHidden() and window.preview.sample is None
+
+
+def test_closing_the_images_stops_and_hides_the_preview(app, window, loop_image, fake_audio):
+    open_drums(app, window, loop_image)
+    select_sample(app, window, 0)
+    window.preview.play_button.click()
+    dev = fake_audio.opened[-1]
+    window.close_images()
+    assert dev.closed and window.preview.isHidden() and window.preview.sample is None
+
+
+def test_auto_play_plays_as_soon_as_a_sample_is_selected(app, window, loop_image, fake_audio):
+    settings.set_auto_play(True)
+    open_drums(app, window, loop_image)
+    assert not fake_audio.opened
+    window.table.selectRow(0)
+    assert pump(app, lambda: fake_audio.opened and window.preview.is_playing())  # nobody pressed Play
+    settings.set_auto_play(False)
+    window.table.selectRow(1)
+    assert pump(app, lambda: window.preview.sample is not None and window.preview.sample.name == "SNARE.S3")
+    assert not window.preview.is_playing()  # and with it off, selecting only loads
+
+
+def test_space_plays_and_stops_from_the_file_list(app, window, loop_image, fake_audio):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    open_drums(app, window, loop_image)
+    select_sample(app, window, 0)
+    window.activateWindow()
+    window.table.setFocus()
+    QTest.keyClick(window.table, Qt.Key.Key_Space)
+    assert window.preview.is_playing()
+    QTest.keyClick(window.table, Qt.Key.Key_Space)
+    assert not window.preview.is_playing()
+
+
+def test_a_sample_is_converted_once_and_replays_from_memory(app, window, loop_image, fake_audio, monkeypatch):
+    open_drums(app, window, loop_image)
+    calls = []
+    real = window._engine.export_sample_wav
+    monkeypatch.setattr(window._engine, "export_sample_wav", lambda *a, **k: calls.append(a[1].name) or real(*a, **k))
+    select_sample(app, window, 0)
+    select_sample(app, window, 1)
+    select_sample(app, window, 0)  # back to the first
+    assert calls == ["KICK.S3", "SNARE.S3"]
+
+
+def test_selecting_quickly_never_shows_the_wrong_sample(app, window, loop_image, fake_audio, monkeypatch):
+    import time as _time
+
+    open_drums(app, window, loop_image)
+    real = window._engine.export_sample_wav
+
+    def slow_for_kick(vol, f, dest):
+        if f.name == "KICK.S3":
+            _time.sleep(0.6)  # still converting when the user has already moved on
+        return real(vol, f, dest)
+
+    monkeypatch.setattr(window._engine, "export_sample_wav", slow_for_kick)
+    window.table.selectRow(0)
+    window.table.selectRow(1)
+    assert pump(app, lambda: window.preview.sample is not None)
+    pump(app, lambda: False, 1.0)  # long enough for KICK's slow conversion to finish too
+    assert window.preview.sample.name == "SNARE.S3"
+
+
+def test_a_sample_that_cant_be_converted_says_why(app, window, loop_image, fake_audio, monkeypatch):
+    from akaiutil_gui.engine.session import EngineError
+
+    open_drums(app, window, loop_image)
+
+    def broken(*a, **k):
+        raise EngineError("akaiutil said no")
+
+    monkeypatch.setattr(window._engine, "export_sample_wav", broken)
+    window.table.selectRow(0)
+    assert pump(app, lambda: "akaiutil said no" in window.preview.info_label.text())
+    assert not window.preview.isHidden() and not window.preview.play_button.isEnabled()
+
+
+def test_the_converted_wavs_are_cleaned_up(app, window, loop_image, fake_audio):
+    import os
+
+    open_drums(app, window, loop_image)
+    select_sample(app, window, 0)
+    folder = window._preview_dir
+    assert folder and os.path.isdir(folder) and os.listdir(folder) == []  # the audio is in memory; the file's gone
+    window.close()
+    assert not os.path.exists(folder)
+
+
+def test_the_buffer_size_from_settings_is_used(app, window, loop_image, fake_audio, monkeypatch):
+    monkeypatch.setattr("akaiutil_gui.audio.preview.settings.get_audio_buffer_samples", lambda: 256)
+    open_drums(app, window, loop_image)
+    select_sample(app, window, 0)
+    window.preview.play_button.click()
+    assert fake_audio.opened[-1].buffersize_msec == round(256 / 44100 * 1000)
+
+
+# ------------------------------------------------------------------------- search, end to end
+@pytest.fixture
+def three_disks(app, window, images):
+    """The generated hard disk and both floppies, open, with the search index ready.
+    Files: disk0 DRUMS KICK.S3 SNARE.S3, BASS BASS.S3, MY SYNTH LEAD.S3; disk1 KICK.S1 SNARE.S1; disk2 KICK.S9."""
+    window.open_images([str(images["hd"]), str(images["fl1"]), str(images["fl9"])])
+    assert pump(app, lambda: window.tree.topLevelItemCount() == 3 and window._index_ready() and len(window._catalog) == 7)
+    return window
+
+
+def results(window):
+    return {(window.table.item(r, 1).text(), window.table.item(r, 6).text()) for r in range(window.table.rowCount())}
+
+
+def search_for(app, window, text, kind=None):
+    window.search.setText(text)
+    if kind is not None:
+        window.search_kind.setCurrentIndex(window.search_kind.findData(kind))
+    assert pump(app, lambda: not window._search_timer.isActive())  # the debounce has fired
+
+
+def test_search_finds_files_across_every_open_disk(app, three_disks):
+    w = three_disks
+    assert w.search.isEnabled()
+    search_for(app, w, "kick")
+    assert results(w) == {("KICK.S3", "disk0 / A / DRUMS"), ("KICK.S1", "disk1 / A / NOT NAMED"), ("KICK.S9", "disk2 / A / VOLUME 001")}
+    assert w.files_title.text() == "3 results for “kick”" and not w.table.isColumnHidden(6)
+    search_for(app, w, "kick drums")  # the volume's name counts, words in any order
+    assert results(w) == {("KICK.S3", "disk0 / A / DRUMS")} and w.files_title.text() == "1 result for “kick drums”"
+    search_for(app, w, "nothing matches this")
+    assert w.table.rowCount() == 0 and w.files_title.text().startswith("0 results")
+
+
+def test_the_type_filter_can_browse_everything_of_a_kind_without_a_query(app, three_disks):
+    w = three_disks
+    search_for(app, w, "", kind=search.SAMPLES)
+    assert w.table.rowCount() == 7 and w.files_title.text() == "7 results for samples"
+    search_for(app, w, "", kind=search.PROGRAMS)
+    assert w.table.rowCount() == 0
+
+
+def test_clearing_the_search_puts_the_volume_back(app, three_disks):
+    w = three_disks
+    hd = w.tree.topLevelItem(0)
+    part_a = hd.child(0)
+    part_a.setExpanded(True)
+    assert pump(app, lambda: part_a.childCount() == 3)
+    w.tree.setCurrentItem(part_a.child(0))  # DRUMS
+    assert pump(app, lambda: w.table.rowCount() == 2 and w._volume_files)
+    search_for(app, w, "kick")
+    assert w.table.rowCount() == 3
+    w.search.clear()
+    assert pump(app, lambda: not w._in_results)
+    assert w.table.rowCount() == 2 and w.files_title.text() == f"Files in {w._volume.path}" and w.table.isColumnHidden(6)
+    assert {w.table.item(r, 1).text() for r in range(2)} == {"KICK.S3", "SNARE.S3"}
+
+
+def test_a_result_can_be_previewed_inspected_and_exported_like_any_file(app, three_disks, fake_audio):
+    w = three_disks
+    search_for(app, w, "kick")
+    row = next(r for r in range(w.table.rowCount()) if w.table.item(r, 1).text() == "KICK.S1")
+    w.table.selectRow(row)
+    assert pump(app, lambda: w.preview.sample is not None and w.preview.sample.name == "KICK.S1")  # loads from ITS volume
+    assert w.preview.sample.rate == 44100 and not w.preview.isHidden()
+    assert pump(app, lambda: "KICK" in w.info.toPlainText() and "S1000 sample" in w.info.toPlainText())
+    assert w.export_btn.isEnabled() and w.export_wav_btn.isEnabled()
+    w.preview.play_button.click()
+    assert fake_audio.opened and w.preview.is_playing()
+
+
+def test_double_clicking_a_result_shows_it_in_its_volume(app, three_disks):
+    w = three_disks
+    search_for(app, w, "kick")
+    row = next(r for r in range(w.table.rowCount()) if w.table.item(r, 1).text() == "KICK.S9")  # on the other floppy
+    w.table.selectRow(row)
+    w.table.itemActivated.emit(w.table.item(row, 0))
+    assert pump(app, lambda: w._volume is not None and w._volume.disk == 2 and not w._in_results)
+    assert w.search.text() == "" and w.files_title.text() == "Files in /disk2/A/VOLUME 001"
+    assert pump(app, lambda: w.table.rowCount() == 1 and [f.name for f in w.table.selected_files()] == ["KICK.S9"])
+    assert w.tree.currentItem().data(0, 0x100) == w._volume  # and the tree is showing it
+
+
+def test_revealing_a_result_deep_in_a_hard_disk_expands_the_tree_to_it(app, three_disks):
+    w = three_disks
+    search_for(app, w, "lead")  # LEAD.S3 in "MY SYNTH", the third volume of partition A
+    w.table.selectRow(0)
+    w.table.itemActivated.emit(w.table.item(0, 0))
+    assert pump(app, lambda: w._volume is not None and w._volume.name == "MY SYNTH" and w.table.rowCount() == 1)
+    assert [f.name for f in w.table.selected_files()] == ["LEAD.S3"]
+
+
+def test_revealing_a_result_in_the_volume_already_open_just_selects_it(app, three_disks):
+    w = three_disks
+    hd = w.tree.topLevelItem(0)
+    hd.child(0).setExpanded(True)
+    assert pump(app, lambda: hd.child(0).childCount() == 3)
+    w.tree.setCurrentItem(hd.child(0).child(0))  # DRUMS
+    assert pump(app, lambda: w.table.rowCount() == 2 and w._volume_files)
+    search_for(app, w, "snare drums")
+    w.table.selectRow(0)
+    w.table.itemActivated.emit(w.table.item(0, 0))
+    assert pump(app, lambda: not w._in_results and [f.name for f in w.table.selected_files()] == ["SNARE.S3"])
+    assert w.table.rowCount() == 2
+
+
+def test_picking_something_in_the_tree_ends_the_search(app, three_disks):
+    w = three_disks
+    search_for(app, w, "kick")
+    w.tree.setCurrentItem(w.tree.topLevelItem(1))  # disk1
+    assert w.search.text() == "" and w.search_kind.currentData() == search.ALL and not w._in_results
+
+
+def test_search_waits_for_the_index_instead_of_showing_nothing(app, three_disks, monkeypatch):
+    w = three_disks
+    monkeypatch.setattr(w, "_index_ready", lambda: False)
+    search_for(app, w, "kick")
+    assert w.files_title.text() == "Indexing the disks…" and not w._in_results
+
+
+def test_a_long_result_list_says_it_was_cut(app, three_disks, monkeypatch):
+    w = three_disks
+    original = search.filter_catalog
+    monkeypatch.setattr(search, "filter_catalog", lambda c, q, k=search.ALL, limit=3: original(c, q, k, limit=3))
+    search_for(app, w, "", kind=search.SAMPLES)
+    assert w.table.rowCount() == 3 and "narrow the search" in w.files_title.text() and "3+ results" in w.files_title.text()
+
+
+def test_search_is_off_until_a_disk_is_open_and_after_it_closes(app, window, images):
+    assert not window.search.isEnabled() and not window.search_kind.isEnabled()
+    window.open_images([str(images["fl9"])])
+    assert pump(app, lambda: window.search.isEnabled())
+    window.search.setText("kick")
+    window.close_images()
+    assert not window.search.isEnabled() and window.search.text() == "" and window._catalog == []
+
+
+def test_find_and_escape_shortcuts(app, three_disks):
+    from PySide6.QtGui import QKeySequence, QShortcut
+
+    w = three_disks
+    assert any(s.key() == QKeySequence(QKeySequence.StandardKey.Find) for s in w.findChildren(QShortcut))
+    w._focus_search()
+    w.search.setText("kick")
+    w.show()
+    w._escape_search()
+    assert w.search.text() == "" and w.search_kind.currentData() == search.ALL
+
+
+def test_exporting_results_from_several_volumes_gives_each_its_own_folder(app, three_disks, tmp_path):
+    w = three_disks
+    settings.set_default_export_folder(str(tmp_path))
+    settings.set_ask_export_folder(False)
+    search_for(app, w, "kick")
+    w.table.selectAll()
+    assert pump(app, lambda: w.export_wav_btn.isEnabled())  # export waits for the details load that selecting started
+    w.export_wav_btn.click()
+    assert pump(app, lambda: "Exported" in w.statusBar().currentMessage())
+    found = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*.wav"))
+    assert found == ["disk0 A - DRUMS/KICK.wav", "disk1 A - NOT NAMED/KICK.wav", "disk2 A - VOLUME 001/KICK.wav"], "same-named files must not collide"
+    assert all(p.read_bytes()[:4] == b"RIFF" for p in tmp_path.rglob("*.wav"))
+    assert "3 file(s)" in w.statusBar().currentMessage()
+
+
+def test_exporting_results_from_one_volume_goes_straight_into_the_folder(app, three_disks, tmp_path):
+    w = three_disks
+    settings.set_default_export_folder(str(tmp_path))
+    settings.set_ask_export_folder(False)
+    search_for(app, w, "lead")
+    w.table.selectAll()
+    assert pump(app, lambda: w.export_btn.isEnabled())
+    w.export_btn.click()
+    assert pump(app, lambda: "Exported" in w.statusBar().currentMessage())
+    assert [p.name for p in tmp_path.iterdir()] == ["LEAD.S3"]  # no sub-folder
+
+
+def test_the_export_folder_name_is_safe(app):
+    from akaiutil_gui.engine.models import Volume
+    from akaiutil_gui.ui.main_window import export_folder_name
+
+    odd = Volume(3, "B", 1, 'A/B:C*"D', "-", "0x0", "-", "S3000")
+    assert export_folder_name(odd, False) == "B - A_B_C__D" and export_folder_name(odd, True) == "disk3 B - A_B_C__D"
+    assert export_folder_name(Volume(0, "A", 1, "  ", "-", "0x0", "-", "S3000"), False) == "A -"

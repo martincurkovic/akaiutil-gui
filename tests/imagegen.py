@@ -99,3 +99,30 @@ if __name__ == "__main__":
     target = Path(sys.argv[1] if len(sys.argv) > 1 else REPO / "build" / "images")
     for key, path in make_images(target).items():
         print(f"{key:4} {path}")
+
+
+_AKAI_CHARS = "0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ#+-."  # an Akai name byte is an index into this
+
+
+def add_loop(image: Path, sample: str, loop_end: int, loop_length: int, time_ms: int | None = None, slot: int = 0,
+             hold_tune: int = 0, play_mode: int = 0) -> None:
+    """Write a loop into an S1000/S3000 sample's header, in place (akaiutil can't set loops itself).
+
+    Layout from `struct akai_sample1000_s` in akaiutil_file.h: lnum at +16, lfirst +17, pmode +19, loop[8] from
+    +38 (12 bytes each: at[4], flen[2], len[4], time[2]), hltoff +140. time_ms None means HOLD (9999).
+    """
+    name = bytes(_AKAI_CHARS.index(c) for c in sample.upper().ljust(12))
+    data = bytearray(Path(image).read_bytes())
+    at = bytes(data).find(b"\x03\x01\x3c" + name + b"\x80")
+    if at < 0:
+        raise RuntimeError(f"no S1000/S3000 sample header named {sample!r} in {image}")
+    time_value = 9999 if time_ms is None else time_ms
+    data[at + 16] = slot + 1  # lnum
+    data[at + 17] = slot  # lfirst
+    data[at + 19] = play_mode  # 0 LOOP, 1 LOOPNOTREL, 2 NOLOOP, 3 TOEND
+    loop = at + 38 + 12 * slot
+    data[loop : loop + 12] = (
+        loop_end.to_bytes(4, "little") + (0).to_bytes(2, "little") + loop_length.to_bytes(4, "little") + time_value.to_bytes(2, "little")
+    )
+    data[at + 140] = hold_tune & 0xFF
+    Path(image).write_bytes(bytes(data))
