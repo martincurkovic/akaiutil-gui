@@ -79,3 +79,13 @@ def test_the_volume_limit_is_read_from_the_listing():
     text = "vnr   vname\n-----\n  1   A\n-----\ntotal:   1 volume(s) (max. 100)\n"
     assert parse.parse_volume_limit(text) == 100
     assert parse.parse_volume_limit("no limit here") is None
+
+
+def test_sanitising_what_is_typed_or_pasted():
+    assert akai_names.sanitize("my_synth") == ("MY SYNTH", [], False)
+    assert akai_names.sanitize("a/b*c/d") == ("ABCD", ["/", "*"], False)  # each dropped character listed once
+    assert akai_names.sanitize("THIRTEEN CHARS") == ("THIRTEEN CHA", [], True)
+    assert akai_names.sanitize("kick  ") == ("KICK  ", [], False)  # a space typed on the way to a longer name stays
+    assert akai_names.sanitize("é") == ("", ["é"], False)
+    assert akai_names.sanitize("Keep Case", "S900") == ("Keep Case", [], False)
+    assert akai_names.sanitize("ELEVEN CHARS", "S900") == ("ELEVEN CHA", [], True)

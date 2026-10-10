@@ -44,6 +44,25 @@ def check_name(text: str, volume_type: str = "S3000") -> tuple[str, str | None]:
     return name, None
 
 
+def sanitize(text: str, volume_type: str = "S3000") -> tuple[str, list[str], bool]:
+    """What a name field should hold after typing or pasting `text`: capitals (not on S900), an underscore as a space,
+    characters Akai can't store dropped, and no longer than the limit.
+
+    Returns (clean text, the distinct characters that were dropped, whether it was cut short)."""
+    text = text.replace("_", " ")
+    kept, dropped = [], []
+    for c in text:
+        if _VALID.fullmatch(c):
+            kept.append(c)
+        elif c not in dropped:
+            dropped.append(c)
+    clean = "".join(kept)
+    if volume_type != "S900":
+        clean = clean.upper()
+    limit = name_limit(volume_type)
+    return clean[:limit], dropped, len(clean) > limit
+
+
 def split_extension(file_name: str) -> tuple[str, str]:
     """"KICK.S3" -> ("KICK", ".S3"). The type of a file is its extension, so renaming never touches it."""
     m = _EXTENSION.match(file_name)

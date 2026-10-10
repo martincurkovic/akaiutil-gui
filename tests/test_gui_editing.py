@@ -25,6 +25,20 @@ def pump(app, cond, timeout=10.0):
     return False
 
 
+@pytest.fixture(autouse=True)
+def delete_widgets(qt_app):
+    """Delete every widget a test made (dialogs and fields it never gave a parent): left to Python's exit, Qt can
+    destroy a parent before its children and crash the interpreter on the way out."""
+    yield
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    for widget in qt_app.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qt_app.processEvents()
+
+
 @pytest.fixture
 def window(qt_app, binary):
     from akaiutil_gui.ui.main_window import MainWindow
@@ -416,7 +430,7 @@ def test_the_rename_dialog_only_accepts_a_real_change_to_a_good_unused_name(qt_a
     assert not ok_enabled(d) and "Not allowed" in d.problem.text()
     d.edit.setText("")
     assert not ok_enabled(d)
-    d.edit.setText("THIS IS TOO LONG")
+    d.edit.setText("THIS IS TOO LONG")  # (typing can't get here: the field cuts at 12; this is the dialog's own check)
     assert not ok_enabled(d) and "At most 12" in d.problem.text()
 
 
@@ -618,3 +632,81 @@ def test_the_disk_format_dialog_for_an_existing_disk_keeps_its_size_and_density(
     low = Disk(1, "FLL", 1, 1024, 800, 796, 0.8, 0.8, 99.5)
     f = edit_dialogs.DiskFormatDialog(None, low)
     assert [f.type_combo.itemData(i) for i in range(f.type_combo.count())] == ["fl3l", "fl1l", "fl9l"]
+
+
+# ------------------------------------------------------------- typing a name
+def test_typing_a_name_is_cleaned_as_you_go(qt_app):
+    from PySide6.QtTest import QTest
+
+    edit = edit_dialogs.AkaiNameEdit()
+    notes = []
+    edit.rejected.connect(notes.append)
+    QTest.keyClicks(edit, "my_synth 2")
+    assert edit.text() == "MY SYNTH 2" and notes == []
+    edit.clear()
+    for key in "a/b*c":
+        QTest.keyClick(edit, key)
+        qt_app.processEvents()
+    assert edit.text() == "ABC"
+    assert notes == ["“/” can't be used in a name.", "“*” can't be used in a name."]
+
+
+def test_a_name_cant_grow_past_the_limit_and_a_paste_is_cut_with_a_note(qt_app):
+    edit = edit_dialogs.AkaiNameEdit()
+    notes = []
+    edit.rejected.connect(notes.append)
+    edit.insert("a very long name indeed")
+    qt_app.processEvents()
+    assert edit.text() == "A VERY LONG " and len(edit.text()) == 12
+    assert notes and "at most 12 characters" in notes[-1]
+    from PySide6.QtTest import QTest
+
+    QTest.keyClicks(edit, "x")  # typing more does nothing at the limit
+    assert edit.text() == "A VERY LONG "
+
+
+def test_a_refused_keystroke_leaves_the_cursor_where_it_was(qt_app):
+    from PySide6.QtTest import QTest
+
+    edit = edit_dialogs.AkaiNameEdit("abc")
+    edit.setCursorPosition(1)
+    QTest.keyClicks(edit, "/")
+    assert edit.text() == "ABC" and edit.cursorPosition() == 1
+    QTest.keyClicks(edit, "x")  # and a good one goes in at the cursor
+    assert edit.text() == "AXBC" and edit.cursorPosition() == 2
+
+
+def test_an_s900_name_field_keeps_case_and_is_shorter(qt_app):
+    edit = edit_dialogs.AkaiNameEdit("", "S900")
+    edit.insert("Kick Drum Loud")
+    assert edit.text() == "Kick Drum "
+    edit.set_volume_type("S3000")  # changing the type tidies what's there by the new rules
+    assert edit.text() == "KICK DRUM "
+    edit.set_volume_type("S900")
+    assert edit.text() == "KICK DRUM "
+
+
+def test_the_dialogs_show_what_was_left_out(qt_app):
+    from PySide6.QtTest import QTest
+
+    d = edit_dialogs.RenameDialog(None, "volume", "DRUMS", "S3000")
+    d.edit.clear()
+    QTest.keyClicks(d.edit, "a/")
+    qt_app.processEvents()
+    assert d.edit.text() == "A" and "“/” can't be used" in d.problem.text()
+    QTest.keyClicks(d.edit, "c")
+    assert d.problem.text() == ""  # the next good keystroke clears it
+
+    n = edit_dialogs.NewVolumeDialog(None, "A", [], 100, ["S3000"], "S3000")
+    n.name_edit.insert("pads?")
+    qt_app.processEvents()
+    assert n.name == "PADS" and "“?” can't be used" in n.problem.text()
+
+
+def test_the_new_volume_dialogs_name_field_follows_the_volume_type(qt_app):
+    d = edit_dialogs.NewVolumeDialog(None, "A", [], 100, ["S900", "S3000"], "S3000")
+    d.name_edit.insert("twelve chars")
+    assert d.name_edit.text() == "TWELVE CHARS"
+    d.type_combo.setCurrentIndex(d.type_combo.findText("S900"))
+    assert d.name_edit.text() == "TWELVE CHAR" or len(d.name_edit.text()) == 10
+    assert d.name_edit.placeholderText() == "up to 10 characters"

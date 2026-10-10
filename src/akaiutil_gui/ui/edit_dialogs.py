@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -18,6 +19,45 @@ from PySide6.QtWidgets import (
 from akaiutil_gui import akai_names
 from akaiutil_gui.engine import formats
 from akaiutil_gui.engine.models import Disk
+
+
+class AkaiNameEdit(QLineEdit):
+    """A line edit that only lets an Akai name be typed: capitals, the characters Akai has, and not too long.
+    `rejected` says (in words) what was left out of what was just typed or pasted."""
+
+    rejected = Signal(str)
+
+    def __init__(self, text: str = "", volume_type: str = "S3000", parent=None):
+        super().__init__(parent)
+        self._volume_type = volume_type
+        self.textEdited.connect(self._clean)
+        self.set_volume_type(volume_type)
+        if text:
+            self.setText(akai_names.sanitize(text, volume_type)[0])
+
+    def set_volume_type(self, volume_type: str) -> None:
+        """S900 names are shorter and keep their case: a field changing from one type to another is cleaned again."""
+        self._volume_type = volume_type  # (the limit is enforced in _clean, not with setMaxLength, so a cut can be reported)
+        clean = akai_names.sanitize(self.text(), volume_type)[0]
+        if clean != self.text():
+            self.setText(clean)
+
+    def _clean(self, text: str) -> None:
+        clean, dropped, cut = akai_names.sanitize(text, self._volume_type)
+        if clean != text:
+            before_cursor = akai_names.sanitize(text[: self.cursorPosition()], self._volume_type)[0]
+            self.setText(clean)
+            self.setCursorPosition(min(len(before_cursor), len(clean)))
+        notes = []
+        if dropped:
+            notes.append(f"{' '.join(f'“{c}”' for c in dropped)} can't be used in a name")
+        if cut:
+            notes.append(f"names are at most {akai_names.name_limit(self._volume_type)} characters")
+        if notes:
+            # said once the edit has finished: Qt reports the change (which a dialog answers by re-checking the name and
+            # rewriting its message) after this handler returns
+            message = "; ".join(notes).capitalize() + "."
+            QTimer.singleShot(0, lambda: self.rejected.emit(message))
 
 
 def _problem_label() -> QLabel:
@@ -39,9 +79,10 @@ class RenameDialog(QDialog):
         self._taken = [t for t in taken]
         self._current = current
 
-        self.edit = QLineEdit(current)
+        self.edit = AkaiNameEdit(current, volume_type)
         self.edit.selectAll()
         self.edit.textChanged.connect(self._validate)
+        self.edit.rejected.connect(lambda note: self.problem.setText(note))
         row = QHBoxLayout()
         row.addWidget(self.edit, 1)
         if suffix:
@@ -83,7 +124,7 @@ class NewVolumeDialog(QDialog):
         self._taken = [t for t in taken]
         free = [n for n in range(1, limit + 1) if n not in self._used]
 
-        self.name_edit = QLineEdit()
+        self.name_edit = AkaiNameEdit("", default_type)
         self.name_edit.setPlaceholderText(f"up to {akai_names.name_limit(default_type)} characters")
         self.name_edit.textChanged.connect(self._validate)
         self.number = QSpinBox()
@@ -95,12 +136,14 @@ class NewVolumeDialog(QDialog):
             self.type_combo.addItem(t)
         self.type_combo.setCurrentIndex(max(0, self.type_combo.findText(default_type)))
         self.type_combo.setEnabled(len(types) > 1)
+        self.type_combo.currentIndexChanged.connect(self._type_changed)
         self.type_combo.currentIndexChanged.connect(self._validate)
         self.load = QSpinBox()
         self.load.setRange(0, 128)
         self.load.setSpecialValueText("Off")
         self.load.setToolTip("The number the sampler's front panel uses to load this volume (1 to 128), or Off")
         self.problem = _problem_label()
+        self.name_edit.rejected.connect(lambda note: self.problem.setText(note))
 
         form = QFormLayout()
         form.addRow("Name", self.name_edit)
@@ -121,6 +164,10 @@ class NewVolumeDialog(QDialog):
     @property
     def volume_type(self) -> str:
         return self.type_combo.currentText()
+
+    def _type_changed(self, _index: int) -> None:
+        self.name_edit.set_volume_type(self.volume_type)
+        self.name_edit.setPlaceholderText(f"up to {akai_names.name_limit(self.volume_type)} characters")
 
     @property
     def name(self) -> str:
