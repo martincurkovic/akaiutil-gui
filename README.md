@@ -80,11 +80,17 @@ images again puts the app back in read-only mode.
 - **New Volume** (right-click a partition): name, volume number, type and load number.
 - **Format Disk** (right-click a disk): erases it and sets it up as an S1000, S3000, CD3000 or S900 disk, or a floppy of
   the same density; hard disks are cut into partitions of up to 60 MB.
+- **Copy and move files** between volumes, partitions and disks: Copy / Cut / Paste (Edit menu), or drag files from the list onto
+  a volume in the tree (hold Shift, or Cmd on a Mac, to move instead of copy). A move inside one partition keeps everything about
+  the file; a copy carries the file but not its tags. A name already in the target gets a number. Drag files out of the list to
+  Finder, Explorer or your DAW: samples arrive as WAV files, or exactly as Akai stores them if you hold Option/Alt when you start
+  the drag.
 - **Import** (drop files on a volume, or Edit > Import Files): WAV, AIFF and FLAC (also OGG and MP3) become samples for the
   S1000, S3000 or S900 (you're asked which, for stereo files whether to split them into left and right samples or mix them to
   mono, and for an S900 whether to compress). Anything that isn't 16-bit or is faster than the sampler can play (44.1 kHz; 40 kHz
   on an S900) is converted first; a 16-bit WAV that is fine is used exactly as it is, which keeps the loops of a WAV this app
-  exported. Files are added in alphabetical order (numbers in order: `kick 2` before `kick 10`), and a name already in the
+  exported. The dialog can also set a sample's loops and root key from the WAV (the `smpl` chunk many DAWs and sample editors
+  write), take the root key from a name like `Piano_C3`, trim silence and normalise. Files are added in alphabetical order (numbers in order: `kick 2` before `kick 10`), and a name already in the
   volume gets a number rather than replacing the old file. Akai files (`KICK.S3`, `.P3`, ...) go in unchanged, but only into a
   volume of the right sampler: an S900 volume takes only S900 files, an S1000 volume only S1000 ones.
 - **File > New Disk Image** makes a new empty image (a hard disk up to 512 MB, or a floppy), formatted and opened.
@@ -117,6 +123,10 @@ Things worth knowing:
 - Names with spaces: akaiutil accepts `_` for ` ` on its command line, but the GUI avoids that ambiguity by
   addressing volumes and files by index (`cdi`, `geti`, …).
 - Not yet: importing samples (WAV) into images, copying files between volumes, DD takes (listed as text only), real floppy/physical-drive access.
+
+## For contributors
+
+[dev_docs/](dev_docs/README.md) has the roadmap and notes on how akaiutil really behaves.
 
 ## Licence
 
