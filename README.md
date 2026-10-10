@@ -129,6 +129,13 @@ Things worth knowing:
   addressing volumes and files by index (`cdi`, `geti`, …).
 - Not yet: importing samples (WAV) into images, copying files between volumes, DD takes (listed as text only), real floppy/physical-drive access.
 
+## Help
+
+**Help > User Manual** (F1) in the app has the full guide, with screenshots: opening and browsing images, search, preview,
+export, and everything that edits (renaming, importing, copying, sorting, formatting). It's the same file as
+[the manual](src/akaiutil_gui/ui/help/manual.md), which `uv run python scripts/make_manual_screenshots.py` regenerates the
+pictures for.
+
 ## For contributors
 
 [dev_docs/](dev_docs/README.md) has the roadmap and notes on how akaiutil really behaves.
