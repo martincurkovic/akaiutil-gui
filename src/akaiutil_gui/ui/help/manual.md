@@ -67,7 +67,7 @@ useful if something misbehaves.
 | --- | --- |
 | **File > Open Disk Image…** (Ctrl/Cmd+O) | Open one or more images, replacing what's open |
 | **File > Add Disk Image…** (Ctrl/Cmd+Shift+O), or drop files on the window | Add images to the ones already open |
-| Right-click a disk > **Close Disk Image** (Ctrl/Cmd+Shift+W) | Close one image and keep the others |
+| The **eject button** at the right of a disk, or right-click a disk > **Close Disk Image** (Ctrl/Cmd+Shift+W) | Close one image and keep the others |
 | **File > Close All Images** (Ctrl/Cmd+W) | Close everything |
 | Right-click a disk > **Reveal in Finder** (or Show in Explorer) | See the image file |
 
@@ -124,7 +124,7 @@ Press **Space** to play and stop, or click the waveform to play from that point.
 - If the sample has loops (and its play mode loops), tick **Loop Preview** to hear the attack once and then the loop repeating, until
   you stop it if its loop time is Hold. Untick it to hear the sample play once. S900 samples play once.
 - The preview plays through your computer's default output. **Settings** lets you pick another device, change the buffer size
-  (raise it if you hear clicks), and have samples play as soon as you select them.
+  (raise it if you hear clicks), and choose whether samples play as soon as you select them (they do by default).
 
 The preview uses the same audio engine as AKAISDS.
 

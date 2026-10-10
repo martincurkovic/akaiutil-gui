@@ -38,7 +38,7 @@ def test_a_fresh_install_shows_the_defaults(dialog):
     assert dialog.combo_audio_output.currentData() is None and dialog.combo_audio_output.itemText(0) == "(System Default)"
     assert [dialog.combo_audio_output.itemText(i) for i in (1, 2)] == ["Built-in Speakers", "USB Interface"]
     assert dialog.combo_audio_buffer.currentData() == 1024
-    assert not dialog.check_auto_play.isChecked() and dialog.check_preview_loops.isChecked()
+    assert dialog.check_auto_play.isChecked() and dialog.check_preview_loops.isChecked()
     assert dialog.edit_export_folder.text() == "" and dialog.check_ask_folder.isChecked() and dialog.check_updates.isChecked()
 
 
@@ -46,7 +46,7 @@ def test_ok_saves_everything(qt_app, tmp_path):
     d = SettingsDialog()
     d.combo_audio_output.setCurrentIndex(d.combo_audio_output.findData("usb"))
     d.combo_audio_buffer.setCurrentIndex(d.combo_audio_buffer.findData(256))
-    d.check_auto_play.setChecked(True)
+    d.check_auto_play.setChecked(False)
     d.check_preview_loops.setChecked(False)
     d.edit_export_folder.setText(str(tmp_path))
     d.check_ask_folder.setChecked(False)
@@ -54,21 +54,21 @@ def test_ok_saves_everything(qt_app, tmp_path):
     d.accept()
 
     assert settings.get_audio_output_device() == "usb" and settings.get_audio_buffer_samples() == 256
-    assert settings.get_auto_play() is True and settings.get_preview_loops() is False
+    assert settings.get_auto_play() is False and settings.get_preview_loops() is False
     assert settings.get_default_export_folder() == str(tmp_path) and settings.get_ask_export_folder() is False
     assert settings.get_check_updates_on_startup() is False
 
     again = SettingsDialog()  # and a new dialog shows what was saved
     assert again.combo_audio_output.currentData() == "usb" and again.combo_audio_buffer.currentData() == 256
-    assert again.check_auto_play.isChecked() and not again.check_preview_loops.isChecked()
+    assert not again.check_auto_play.isChecked() and not again.check_preview_loops.isChecked()
     assert again.edit_export_folder.text() == str(tmp_path) and not again.check_ask_folder.isChecked()
 
 
 def test_cancel_saves_nothing(dialog):
-    dialog.check_auto_play.setChecked(True)
+    dialog.check_auto_play.setChecked(False)
     dialog.combo_audio_buffer.setCurrentIndex(0)
     dialog.reject()
-    assert settings.get_auto_play() is False and settings.get_audio_buffer_samples() == 1024
+    assert settings.get_auto_play() is True and settings.get_audio_buffer_samples() == 1024
 
 
 def test_a_saved_device_that_has_gone_shows_as_the_default(qt_app):

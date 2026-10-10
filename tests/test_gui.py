@@ -764,6 +764,7 @@ def test_selecting_a_sample_loads_it_and_plays_it_through_the_device(app, window
 
 
 def test_a_sample_with_a_loop_plays_its_loop(app, window, loop_image, fake_audio):
+    settings.set_auto_play(False)  # these press Play themselves
     import numpy as np
 
     open_drums(app, window, loop_image)
@@ -794,6 +795,7 @@ def test_a_timed_loop_uses_its_own_dwell(app, window, loop_image, fake_audio):
 
 
 def test_selecting_several_files_or_a_volume_hides_the_preview_and_silences_it(app, window, loop_image, fake_audio):
+    settings.set_auto_play(False)  # these press Play themselves
     open_drums(app, window, loop_image)
     select_sample(app, window, 0)
     window.preview.play_button.click()
@@ -829,6 +831,7 @@ def test_auto_play_plays_as_soon_as_a_sample_is_selected(app, window, loop_image
 
 
 def test_space_plays_and_stops_from_the_file_list(app, window, loop_image, fake_audio):
+    settings.set_auto_play(False)  # these press Play themselves
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
 
@@ -963,6 +966,7 @@ def test_clearing_the_search_puts_the_volume_back(app, three_disks):
 
 
 def test_a_result_can_be_previewed_inspected_and_exported_like_any_file(app, three_disks, fake_audio):
+    settings.set_auto_play(False)  # these press Play themselves
     w = three_disks
     search_for(app, w, "kick")
     row = next(r for r in range(w.table.rowCount()) if w.table.item(r, 1).text() == "KICK.S1")

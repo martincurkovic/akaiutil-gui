@@ -241,6 +241,7 @@ class MainWindow(QMainWindow):
         self.tree = DiskTree()
         self.tree.nodeSelected.connect(self._on_node_selected)
         self.tree.disksLoaded.connect(self._prefetch_usage)
+        self.tree.ejectRequested.connect(self.close_disk)
         self.tree.failed.connect(self._report_error)
         left = QWidget()
         lv = QVBoxLayout(left)

@@ -72,7 +72,7 @@ def _bool(key: str, default: bool) -> bool:
 
 def get_auto_play() -> bool:
     """Play a sample as soon as it's selected."""
-    return _bool("audio/auto_play", False)
+    return _bool("audio/auto_play", True)
 
 
 def set_auto_play(on: bool) -> None:

@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRect, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
-from PySide6.QtWidgets import QStyle, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QToolTip, QTreeWidget, QTreeWidgetItem
 
 from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.models import Disk, Partition, Volume
@@ -34,12 +34,63 @@ def _disk_text(d: Disk, path: str | None = None) -> str:
     return text
 
 
+EJECT_SIZE = 16  # the square the eject button is drawn in, at the right edge of a disk's row
+EJECT_MARGIN = 6
+
+
+def eject_rect(row: QRect) -> QRect:
+    return QRect(row.right() - EJECT_MARGIN - EJECT_SIZE + 1, row.center().y() - EJECT_SIZE // 2 + 1, EJECT_SIZE, EJECT_SIZE)
+
+
+class _DiskDelegate(QStyledItemDelegate):
+    """Draws a Finder-style eject button at the right of each disk's row (and leaves room for it in the name)."""
+
+    def __init__(self, tree: "DiskTree"):
+        super().__init__(tree)
+        self._tree = tree
+
+    def _is_disk(self, index) -> bool:
+        return not index.parent().isValid()
+
+    def initStyleOption(self, option, index) -> None:
+        super().initStyleOption(option, index)
+        if self._is_disk(index):  # elide the name short of the button
+            room = option.rect.width() - option.decorationSize.width() - EJECT_SIZE - 2 * EJECT_MARGIN - 12
+            option.text = option.fontMetrics.elidedText(option.text, Qt.TextElideMode.ElideRight, max(room, 0))
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        super().paint(painter, option, index)
+        if not self._is_disk(index):
+            return
+        colors = theme.current_palette()
+        hot = self._tree.eject_hot == index.row()
+        box = eject_rect(option.rect)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if hot:  # a soft round plate under the glyph, as on a hovered toolbar button
+            plate = QColor(colors["text"])
+            plate.setAlpha(36)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(plate)
+            painter.drawEllipse(QRectF(box).adjusted(-1, -1, 1, 1))
+        glyph = QColor(colors["text_bright" if hot else "text"])
+        if not hot:
+            glyph.setAlpha(150)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(glyph)
+        x, y = box.x(), box.y()
+        painter.drawPolygon([QPointF(x + 8, y + 3.5), QPointF(x + 12.5, y + 9), QPointF(x + 3.5, y + 9)])  # ⏏: a triangle over a bar
+        painter.drawRoundedRect(QRectF(x + 3.5, y + 10.5, 9, 2), 0.6, 0.6)
+        painter.restore()
+
+
 class DiskTree(QTreeWidget):
     nodeSelected = Signal(object)  # Disk | Partition | Volume | None
     transferDropped = Signal(object, bool, object)  # (Volume | None, move?, the drag's mime data): files from the list dropped here
     filesDropped = Signal(object, list)  # (Volume | None, paths): files dropped on a volume (None: on anything else)
     contextRequested = Signal(object, object)  # (Disk | Partition | Volume | None, global QPoint): a right-click
     disksLoaded = Signal(list)  # list[Disk], once the top level is built
+    ejectRequested = Signal(object)  # Disk: its eject button was clicked
     failed = Signal(str)
 
     def __init__(self, parent=None):
@@ -57,6 +108,10 @@ class DiskTree(QTreeWidget):
         self._refreshing = False  # a disk's children are being thrown away: the selection jumping about is noise
         self._files: dict[int, str] = {}  # disk number -> the image file it came from
         self._announce = True  # False: the next selection made by a reload is silent (nodeSelected isn't emitted)
+        self._eject_pressed: int | None = None
+        self.eject_hot = -1  # the top-level row whose eject button is under the mouse
+        self.setItemDelegate(_DiskDelegate(self))
+        self.setMouseTracking(True)
         self._load_seq = 0
         self._generation = 0  # bumped on every reload so stale async results are dropped
         self.itemExpanded.connect(self._on_expanded)
@@ -66,6 +121,57 @@ class DiskTree(QTreeWidget):
         self.setAcceptDrops(True)  # files dropped on a volume are imported into it
         self._drop_item: QTreeWidgetItem | None = None
         theme.notifier.changed.connect(self._refresh_swatches)  # swatch pixmaps bake the colour in
+
+    def _eject_disk_at(self, pos) -> Disk | None:
+        """The disk whose eject button is at `pos` (viewport coordinates), if any."""
+        item = self.itemAt(pos)
+        if item is None or item.parent() is not None:
+            return None
+        disk = item.data(0, _ROLE_OBJ)
+        if isinstance(disk, Disk) and eject_rect(self.visualItemRect(item)).adjusted(-3, -3, 3, 3).contains(pos):
+            return disk
+        return None
+
+    def _set_eject_hot(self, row: int) -> None:
+        if row != self.eject_hot:
+            self.eject_hot = row
+            self.viewport().update()
+
+    def mouseMoveEvent(self, event) -> None:
+        pos = event.position().toPoint()
+        disk = self._eject_disk_at(pos)
+        self._set_eject_hot(self.indexOfTopLevelItem(self.itemAt(pos)) if disk is not None else -1)
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if disk is not None else Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._set_eject_hot(-1)
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        disk = self._eject_disk_at(event.position().toPoint()) if event.button() == Qt.MouseButton.LeftButton else None
+        if disk is not None:  # a click on the button only ejects: it doesn't select the row
+            self._eject_pressed = disk.index
+            event.accept()
+            return
+        self._eject_pressed = None
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        pressed, self._eject_pressed = self._eject_pressed, None
+        if pressed is not None:
+            disk = self._eject_disk_at(event.position().toPoint())
+            if disk is not None and disk.index == pressed:
+                self.ejectRequested.emit(disk)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def viewportEvent(self, event) -> bool:
+        if event.type() == QEvent.Type.ToolTip and self._eject_disk_at(event.pos()) is not None:
+            QToolTip.showText(event.globalPos(), "Close this disk image", self.viewport())
+            return True
+        return super().viewportEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
         # A second click within the double-click interval arrives as a

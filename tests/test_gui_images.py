@@ -9,8 +9,9 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
+from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import QDropEvent
+from PySide6.QtTest import QTest
 
 from akaiutil_gui import settings
 from akaiutil_gui.engine.models import Volume
@@ -216,6 +217,38 @@ def test_the_menu_item_closes_the_selected_disk(qt_app, three):
     window.act_close_disk.trigger()
     assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 2)
     assert names(window) == ["s3000_hd.img", "s1000_floppy.img"]
+
+
+def test_the_eject_button_closes_that_disk_without_selecting_it(qt_app, three):
+    from akaiutil_gui.ui.disk_tree import eject_rect
+
+    window, tree = three, three.tree
+    tree.setCurrentItem(tree.topLevelItem(0))
+    assert pump(qt_app, lambda: tree.current_object() is not None and tree.current_object().index == 0)
+    viewport = tree.viewport()
+    button = eject_rect(tree.visualItemRect(tree.topLevelItem(1))).center()
+    QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=button)
+    assert pump(qt_app, lambda: tree.topLevelItemCount() == 2)
+    assert names(window) == ["s3000_hd.img", "s900_floppy.img"]  # the second disk went
+    assert pump(qt_app, lambda: tree.current_object() is not None and tree.current_object().index == 0)  # the first stayed selected
+
+
+def test_clicking_a_disks_name_does_not_eject_it(qt_app, three):
+    tree = three.tree
+    row = tree.visualItemRect(tree.topLevelItem(1))
+    QTest.mouseClick(tree.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(row.left() + 120, row.center().y()))
+    assert pump(qt_app, lambda: tree.current_object() is not None and tree.current_object().index == 1)
+    assert tree.topLevelItemCount() == 3 and names(three) == ["s3000_hd.img", "s1000_floppy.img", "s900_floppy.img"]
+
+
+def test_only_disks_have_an_eject_button(qt_app, three):
+    from akaiutil_gui.ui.disk_tree import eject_rect
+
+    tree = three.tree
+    assert pump(qt_app, lambda: tree.topLevelItem(0).childCount() > 0 and tree.topLevelItem(0).child(0).text(0).startswith("A"))
+    partition = tree.topLevelItem(0).child(0)
+    assert tree._eject_disk_at(eject_rect(tree.visualItemRect(partition)).center()) is None
+    assert tree._eject_disk_at(eject_rect(tree.visualItemRect(tree.topLevelItem(0))).center()).index == 0
 
 
 def test_close_disk_is_off_with_nothing_open(qt_app, window):
