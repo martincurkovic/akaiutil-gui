@@ -1,6 +1,6 @@
 # akaiutil-GUI User Manual
 
-akaiutil-GUI allows you to open, view and edit Akai S900, S1000 and S3000 disk images. Powered by Klaus Michael Indlekofer's **akaiutil** program.
+akaiutil-GUI allows you to open, view and edit Akai S900, S1000 and S3000 disk images. It is powered by Klaus Michael Indlekofer's **akaiutil** program.
 
 ![The main window](screenshots/main-window-dark.png "The main window")
 
@@ -65,7 +65,7 @@ akaiutil-GUI allows you to open, view and edit Akai S900, S1000 and S3000 disk i
 Each disk row shows which file it came from. Hard-disk images show their partitions (A, B, C…) and each partition's volumes.
 Floppy images hold a single volume.
 
-Opening or closing of akaiutil can take a moment with several large images.
+Opening or closing an image restarts akaiutil, which can take a moment with several large images.
 
 ---
 
@@ -74,7 +74,7 @@ Opening or closing of akaiutil can take a moment with several large images.
 Select a disk, partition, volume or file. The **Details** pane describes the selection. For a sample that means its length, sample rate, root key, tuning, play mode, markers and loops; for a program, its keygroups, each with its key range, tuning, filter and
 the sample played in each velocity zone; for a volume, its number of files, load number and space used.
 
-The list of files shows each file's number (its slot in the volume, which is the order a sampler lists them in), name, type, size, start block, OS version and tags. A file's type is its extension, for example `.S3` for an S3000 sample, `.P3` for a S3000 program.
+The list of files shows each file's number (its slot in the volume, which is the order a sampler lists them in), name, type, size, start block, OS version and tags. A file's type is its extension, for example `.S3` for an S3000 sample, `.P3` for an S3000 program.
 
 **Right-click a column heading** to choose which columns are shown or to reset them. Click a heading to sort by it.
 
@@ -90,7 +90,7 @@ Type in the search box (Ctrl/Cmd+F) to search **every open disk** at once. The t
 
 Results show where each file lives. Double-click a result (or press Enter) to jump to it in its location. You can preview, export, rename, copy and delete results just as you can in a volume. Press Escape, or clear the box, to go back.
 
-Results are indexed. If you try to search before indexing is complete, only the indexed results will appear and the app let you know that indexing is still happening in the background.
+Results are indexed. If you try to search before indexing is complete, only the indexed results will appear and the app will let you know that indexing is still happening in the background.
 
 ---
 
@@ -98,7 +98,7 @@ Results are indexed. If you try to search before indexing is complete, only the 
 
 Click on a single sample and its waveform appears under the Details section. By default, the sample will play as soon as you click on it. Press **Space** to play and stop, or click anywhere on the waveform to play from that point.
 
-- If the sample has loop points set, check **Loop Preview** to hear it. Un-check it to hear the sample play once thru to the end. **Loop Preview** is not currently supported for S900 samples.
+- If the sample has loop points set, check **Loop Preview** to hear it. Uncheck it to hear the sample play once through to the end. **Loop Preview** is not currently supported for S900 samples.
 - The preview plays through your computer's default output. **Settings** lets you pick another device, change the buffer size, and choose whether samples play as soon as you click them.
 
 The preview uses the same audio engine as [AKAISDS](https://github.com/martincurkovic/AKAISDS).
@@ -109,7 +109,7 @@ The preview uses the same audio engine as [AKAISDS](https://github.com/martincur
 
 Select files and use **File > Export…** (Ctrl/Cmd+E) to copy them out of the image exactly as Akai stores them, or **File > Export as WAV…** (Ctrl/Cmd+Shift+E) to convert samples to WAV files. A WAV exported this way saves the sample's root note and loop points in the output file, so a DAW or sample editor can see them too.
 
-To export  a whole volume, partition or disk, right-click it in the tree and choose **Export Samples as WAV…**. Each volume gets a folder named after it (eg,  `A - DRUMS`) inside the folder you pick. Program files and other non-sample files aren't included.
+To export a whole volume, partition or disk, right-click it in the tree and choose **Export Samples as WAV…**. Each volume gets a folder named after it (e.g., `A - DRUMS`) inside the folder you pick. Program files and other non-sample files aren't included.
 
 If you export files from several volumes at once, each volume gets its own folder so same-named files can't overwrite each other. If a file already exists in the folder you're asked whether to replace it. **Settings** lets you set a default export folder.
 
@@ -124,7 +124,7 @@ You can also **drag files out of the list** onto the desktop, a Finder or Explor
 Choose **Edit > Allow Editing** (or just start editing; the app asks first). It restarts akaiutil in
 read/write mode on the open images, and the status bar shows **Editing**, highlighted. Every change from then on is written to the image immediately.
 
-Editing is on for **all** the open images simultaneously, not one at a time. If an image file is read-only on your computer, the app tells you which one cannot be written to and stays read-only mode.
+Editing is on for **all** the open images simultaneously, not one at a time. If an image file is read-only on your computer, the app tells you which one cannot be written to and stays in read-only mode.
 
 Everything in the next sections needs editing to be on, and asks to switch it on if it isn't.
 
@@ -134,7 +134,7 @@ Everything in the next sections needs editing to be on, and asks to switch it on
 
 The first time you switch editing on, the app asks whether to **Back Up and Edit**, or **Edit Without Backup** (**Show Details…** lists the images and their sizes). A backup is a full copy of each open image (on a Mac with APFS the copy is instant and takes no extra space). The backup is kept in the app's own data folder. The app asks once per image per session.
 
-To go back, choose **File > Revert to Backup…**, pick one of the backups (newest first, with its date and size) and confirm. The image file is replaced by the backup. The 5 most recent backups of each image are kept, older ones are deleted automatically.
+To go back, choose **File > Revert to Backup…**, pick one of the backups (newest first, with its date and size) and confirm. The image file is replaced by the backup. The 5 most recent backups of each image are kept; older ones are deleted automatically.
 
 ---
 
@@ -145,7 +145,7 @@ Right-clicking a volume, a disk or some files shows what you can do with it:
 ![A volume's right-click menu](screenshots/context-menu.png "A volume's right-click menu")
 
 - **Rename** (F2, or right-click > Rename…): a volume or a file.
-- **Delete** (Delete key, or right-click > Delete…): files, or a whole volume with everything in it. It always confirms first before deleting.
+- **Delete** (Delete key, or right-click > Delete…): files, or a whole volume with everything in it. It always confirms before deleting.
 - **New volume** (Edit > New Volume…, or right-click a partition): choose a name, volume number, type (S1000, S3000, CD3000 or S900) and an optional load number (1 to 128, the number the sampler's front panel uses). Floppies can only hold one volume.
 
 ---
@@ -158,18 +158,18 @@ Right-clicking a volume, a disk or some files shows what you can do with it:
 
 What you can import:
 
-- **Audio:** WAV, AIFF, FLAC, OGG, MP3, CAF and W64 are all supported. Anything that isn't 16-bit, or is above the max sample rate (40 kHz for an S900, 44.1 kHz for all other samplers), is converted first.
+- **Audio:** WAV, AIFF, FLAC, OGG, MP3, CAF and W64 are all supported. Anything that isn't 16-bit, or is above the maximum sample rate (40 kHz for an S900, 44.1 kHz for all other samplers), is converted first.
 - **Akai files:** `KICK.S3`, programs (`.P3`), effects and so on go in unchanged, but only into a volume of the right sampler.
 
 Choices in the dialog:
 
 - **Sample type:** S1000, S3000 or S900 (and for an S900, whether to compress). An S900 volume only takes S900 samples and an S1000 volume only S1000 ones; an S3000 volume takes any.
-- **Stereo files:** split into a left and a right sample (named `…-L` and `-R`) or mixed to mono.
+- **Stereo files:** split into a left and a right sample (named `…-L` and `…-R`) or mixed to mono.
 - **Use the loop points and root note stored in the files:** many DAWs and sample editors write these into a WAV. The sample is imported with its loop and root key.
 - **Take the root note from a name ending in a note,** like `Piano_C3`.
 - **Trim silence** from the start and end (anything quieter than −60 dB unless it's part of a loop) and **Normalise** to −1 dB.
 
-Files are added in **alphabetical order**. A name that's already in the volume gets a number (`KICK 2`): **nothing is ever replaced**. Files that can't be imported (eg, corrupted files) are listed afterwards.
+Files are added in **alphabetical order**. A name that's already in the volume gets a number (`KICK 2`): **nothing is ever replaced**. Files that can't be imported (e.g., corrupted files) are listed afterwards.
 
 ---
 
@@ -186,7 +186,7 @@ Right-click a volume and choose **Copy Volume To…** to copy it into a hard dis
 
 ## Changing a sample's settings
 
-Select a S1000 or S3000 sample and choose **Edit > Sample Settings…** (or right-click it).
+Select an S1000 or S3000 sample and choose **Edit > Sample Settings…** (or right-click it).
 
 ![The sample settings dialog](screenshots/sample-settings.png "Sample Settings, with loop 1 switched on")
 
@@ -245,7 +245,7 @@ Open **Settings** (File > Settings…, or Cmd+, on a Mac).
 - **Audio Preview:** output device, buffer size, whether samples play when selected, and whether samples with loops play as a loop.
 - **Export:** a default folder, and whether to ask each time.
 - **Editing:** sort a volume after importing or pasting.
-- **Backups:** how long to keep the backups made when editing is switched on (14 days by default. **Never** keeps all backups until you delete them yourself). The newest 5 of each image are kept at most.
+- **Backups:** how long to keep the backups made when editing is switched on (14 days by default; **Never** keeps all backups until you delete them yourself). At most the newest 5 backups of each image are kept.
 - **Troubleshooting:** **Log every command sent to akaiutil** (makes the log bigger, but shows exactly what the app asked akaiutil to do). Turn it on before repeating a problem you want to report. **Show Log File** opens the folder where logs are stored.
 - **akaiutil:** which akaiutil to use (**Locate…**, or **Use Default** for the one that came with the app).
 - **Updates:** check when the app starts (at most once a day). **Help > Check for Updates…** checks right now.
@@ -280,15 +280,15 @@ On a Mac use Cmd where this says Ctrl.
 
 **An image won't open, or shows "no Akai filesystem found".** The file isn't an Akai disk image akaiutil understands, or it hasn't been formatted. A blank image can be formatted with **Format Disk…**. **View > Console** shows what akaiutil said.
 
-**The backups take a lot of room.** Each backup is a full copy of an image. They are deleted automatically when the app starts, once they are older than **Settings > Backups > Delete backups older than** (14 days by default, the 5 most recent images are kept).
+**The backups take a lot of room.** Each backup is a full copy of an image. They are deleted automatically when the app starts, once they are older than **Settings > Backups > Delete backups older than** (14 days by default), and at most the 5 most recent backups of each image are kept.
 
 **Editing won't switch on.** The image file is read-only on your computer. The message names the file. You can either change its permissions or work on a copy.
 
-**Samples start playing as soon as I select them.** That is on by default. Un-check **Settings > Audio Preview > Play a sample as soon as it's selected** to have them wait for **Play** (or Space).
+**Samples start playing as soon as I select them.** That is on by default. Uncheck **Settings > Audio Preview > Play a sample as soon as it's selected** to have them wait for **Play** (or Space).
 
-**Preview is silent or clicks.** Check **Settings > Audio Preview**: pick the right output device, and raise the buffer size if it clicks. Samples that don't have a loop set (or the play mode is not set to loop) will only play once even with Loop Preview checked.
+**Preview is silent or clicks.** Check **Settings > Audio Preview**: pick the right output device, and raise the buffer size if it clicks. Samples that don't have a loop set, or whose play mode isn't set to loop, will only play once even with Loop Preview checked.
 
-**A file can't be imported or pasted.** The message after the import lists each file and why. The usual reasons are a file that isn't audio, contains more than two channels, or a sample for the wrong sampler (an S3000 sample can't go into an S900 volume).
+**A file can't be imported or pasted.** The message after the import lists each file and why. The usual reasons are a file that isn't audio, a file with more than two channels, or a sample for the wrong sampler (an S3000 sample can't go into an S900 volume).
 
 **Dragging files out of the list does nothing.** Use **File > Export…** instead.
 
@@ -302,7 +302,7 @@ The app keeps a log of what it did and every error. To report a problem, attach 
 2. Choose **Help > Show Log File**. It opens the folder with `akaiutil-gui.log` (and `crash.log`, if the program ever closed unexpectedly).
 3. Send those files with a short description of what you did and what you expected.
 
-The log holds the app's version, your operating system, the images you opened and the files you changed, and any error with details. It contains file paths and Akai file names, but never contains any audio. It is limited in size, so older logs will automatically delete.
+The log holds the app's version, your operating system, the images you opened and the files you changed, and any error with details. It contains file paths and Akai file names, but never any audio. It is limited in size, so older logs are deleted automatically.
 
 ---
 
