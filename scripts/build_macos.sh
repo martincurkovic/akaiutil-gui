@@ -13,7 +13,9 @@ echo "Syncing environment with uv..."
 uv sync
 uv pip install pip
 
-# the app contains a compiled copy of akaiutil (pinned release, checksum-verified)
+# the app contains a compiled copy of akaiutil (pinned release, checksum-verified). Build it for macOS 14, the oldest the app
+# supports, rather than for whatever the build machine runs (which would make it refuse to start on anything older)
+export MACOSX_DEPLOYMENT_TARGET=14.0
 echo "Fetching akaiutil..."
 uv run python scripts/get_akaiutil.py
 

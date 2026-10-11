@@ -9,6 +9,8 @@
 
 A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil/) (Klaus Michael Indlekofer's tool for Akai S900/S1000/S3000 disk images).
 
+**Need help? Read the [user manual](src/akaiutil_gui/ui/help/manual.md).**
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="src/akaiutil_gui/ui/help/screenshots/main-window-dark.png">
@@ -34,7 +36,7 @@ Looks like [AKAISDS](https://github.com/martincurkovic/AKAISDS) (shared light/da
 
 Download the latest release from the [Releases](https://github.com/martincurkovic/akaiutil-gui/releases) page on GitHub. akaiutil is included, so there's nothing else to install.
 
-**macOS** (14 or newer, Apple Silicon or Intel): open the `.dmg` and drag akaiutil-GUI to Applications.
+**macOS** (14.4 or newer, Apple Silicon or Intel): open the `.dmg` and drag akaiutil-GUI to Applications.
 
 **Windows**: run `akaiutil-GUI-Setup.exe`.
 
@@ -61,7 +63,7 @@ Preview plays through your system's default output, or the device chosen in Sett
 
 ## Help
 
-**Help > User Manual** (F1) in the app has the full guide, with screenshots.
+The [user manual](src/akaiutil_gui/ui/help/manual.md) has the full guide, with screenshots. It is also in the app: **Help > User Manual** (F1).
 
 ## Building and contributing
 
