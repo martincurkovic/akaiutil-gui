@@ -1,4 +1,4 @@
-"""Help > User Manual: renders help/manual.md (the same file the README links to, so there is one copy to keep up to date).
+"""Help > User Manual: renders help/manual.md (the one copy of the manual).
 
 A port of AKAISDS's Quick Start dialog: Find in page (Ctrl/Cmd+F), `[links](#headings)` that jump within the page, and
 screenshots that shrink to fit the window. It is not modal, so it can stay open next to the window it explains. The help
