@@ -24,7 +24,7 @@ None of this could be checked by the test runs, which use a fake audio device, o
 5. **Import polish:** AIFF loop points (INST + MARK chunks: the end-marker convention needs checking), fade in/out, a pitch
    fraction from `smpl`, per-file overrides in the import dialog, a progress dialog for big batches.
 6. **ctypes/cffi engine** to replace the subprocess and the text parsing in `engine/parse.py`. `engine/api.py` is the seam
-   (see the README). Worth doing once the feature set settles: it removes the restart-on-add/close and the text fragility.
+   (see [ARCHITECTURE.md](ARCHITECTURE.md)). Worth doing once the feature set settles: it removes the restart-on-add/close and the text fragility.
 
 ## Known limitations
 
