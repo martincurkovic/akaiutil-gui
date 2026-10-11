@@ -55,4 +55,4 @@ The GUI tests run offscreen. Tests that use real disk images look in `testing_im
 
 ## The user manual
 
-`src/akaiutil_gui/ui/help/manual.md` is the in-app manual (Help > User Manual). Its pictures are in `help/screenshots/` and are made by `uv run python scripts/make_manual_screenshots.py` (offscreen, from a small demo image of invented sounds, at twice their on-screen size). Regenerate them when the interface changes. The whole `ui/help` folder is bundled into built apps (`--include-data-dir`), and the smoke test checks the manual and its pictures are present.
+`src/akaiutil_gui/ui/help/manual.md` is the in-app manual (Help > User Manual). Its pictures are in `help/screenshots/` and are made by `uv run python scripts/make_manual_screenshots.py` (offscreen, from a small demo image of invented sounds, at twice their on-screen size). Regenerate them when the interface changes. The README shows `main-window-dark.png` and `main-window-light.png` too, so they stay current with the rest. The whole `ui/help` folder is bundled into built apps (`--include-data-dir`), and the smoke test checks the manual and its pictures are present.
