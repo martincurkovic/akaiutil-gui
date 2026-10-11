@@ -237,7 +237,7 @@ Open as many images as you like. They all appear in the disk tree, search covers
 
 ## Settings
 
-Open **Settings** (File > Settings…, or Cmd+, on a Mac).
+Open **Settings** (File > Settings…, or Ctrl/Cmd+,).
 
 ![The settings dialog](screenshots/settings.png "The settings dialog")
 
@@ -270,6 +270,7 @@ On a Mac use Cmd where this says Ctrl.
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / Cut / Paste files |
 | Ctrl+I | Import files into the selected volume |
 | Ctrl+J | Show or hide the akaiutil console |
+| Ctrl+, | Open Settings |
 | F1 (Cmd+? on a Mac) | This manual |
 
 ---
