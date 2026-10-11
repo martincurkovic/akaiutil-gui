@@ -9,6 +9,13 @@
 
 A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil/) (Klaus Michael Indlekofer's tool for Akai S900/S1000/S3000 disk images).
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="src/akaiutil_gui/ui/help/screenshots/main-window-dark.png">
+    <img alt="akaiutil-gui showing a disk's volumes, the files in one, and a sample's waveform" src="src/akaiutil_gui/ui/help/screenshots/main-window-light.png" width="860">
+  </picture>
+</p>
+
 **Status: early.** Disk images open read-only by default. *Please* make backups of any important data; there is no undo (see [Editing](#editing)).
 
 - **Browse** disks, partitions, volumes and files across multiple disk images.
