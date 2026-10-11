@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -89,7 +90,13 @@ class SettingsDialog(QDialog):
         self.combo_audio_output.addItem("(System Default)", None)
         for device in preview.list_output_devices():
             self.combo_audio_output.addItem(device["name"], preview.device_id_string(device))
-        self.combo_audio_output.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        # Device names can be very long (on Linux especially). Size to a fixed width instead of the longest name, or the page
+        # outgrows the dialog and gets a horizontal scroll bar; a long name is elided, and the tooltip shows it in full.
+        self.combo_audio_output.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.combo_audio_output.setMinimumContentsLength(24)
+        self.combo_audio_output.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        for i in range(self.combo_audio_output.count()):
+            self.combo_audio_output.setItemData(i, self.combo_audio_output.itemText(i), Qt.ItemDataRole.ToolTipRole)
         self.combo_audio_output.setCurrentIndex(max(0, self.combo_audio_output.findData(settings.get_audio_output_device())))
         form.addRow("Output Device:", self.combo_audio_output)
 
@@ -227,7 +234,7 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(scroll)
         layout.addWidget(buttons)
-        self.setMinimumWidth(540)
+        self.setMinimumSize(540, 400)
         self.resize(560, 640)
 
     # -------------------------------------------------------------------- actions

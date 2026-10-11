@@ -9,7 +9,20 @@ import re
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QTimer
-from PySide6.QtGui import QColor, QKeySequence, QPixmap, QShortcut, QTextCharFormat, QTextCursor
+from PySide6.QtGui import (
+    QColor,
+    QKeySequence,
+    QPalette,
+    QPixmap,
+    QShortcut,
+    QTextBlockFormat,
+    QTextCharFormat,
+    QTextCursor,
+    QTextFormat,
+    QTextFrameFormat,
+    QTextLength,
+    QTextTableFormat,
+)
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextBrowser, QTextEdit, QVBoxLayout, QWidget
 
 from .about_dialog import link_palette
@@ -42,6 +55,7 @@ class ManualDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("User Manual")
+        self.setMinimumSize(480, 360)
         self.resize(820, 700)
         self._matches: list[tuple[int, int]] = []
         self._current = -1
@@ -55,6 +69,7 @@ class ManualDialog(QDialog):
         try:
             self.viewer.setMarkdown(MANUAL_PATH.read_text(encoding="utf-8"))
             self.loaded = True
+            self._style_blockquotes()
             self._fit_images(self._target_width())
             self._add_heading_anchors()
         except OSError as e:
@@ -120,6 +135,47 @@ class ManualDialog(QDialog):
         if watched is self.viewer.viewport() and event.type() == QEvent.Type.Resize and self.loaded:
             self._resize_timer.start(_RESIZE_DEBOUNCE_MS)
         return super().eventFilter(watched, event)
+
+    # ---------------------------------------------------------------- blockquotes
+    def _style_blockquotes(self) -> None:
+        """Qt renders a `> quote` as nothing but an indented paragraph; put each one in a tinted, bordered box so it reads as a
+        callout. The tint is the palette's highlight colour at low alpha, so it suits the light and dark themes alike."""
+        document = self.viewer.document()
+        accent = self.viewer.palette().color(QPalette.ColorRole.Highlight)
+        tint, edge = QColor(accent), QColor(accent)
+        tint.setAlpha(36)
+        edge.setAlpha(140)
+        groups: list[tuple[int, int]] = []  # (start, end) of each run of quoted blocks
+        block = document.begin()
+        while block.isValid():
+            if block.blockFormat().intProperty(QTextFormat.Property.BlockQuoteLevel) > 0:
+                end = block.position() + block.length() - 1
+                if groups and groups[-1][1] + 1 == block.position():
+                    groups[-1] = (groups[-1][0], end)
+                else:
+                    groups.append((block.position(), end))
+            block = block.next()
+        for start, end in reversed(groups):  # last first, so the positions still to do don't shift
+            cursor = QTextCursor(document)
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            fragment = cursor.selection()
+            cursor.removeSelectedText()
+            table_format = QTextTableFormat()
+            table_format.setBorder(1)
+            table_format.setBorderBrush(edge)
+            table_format.setBorderStyle(QTextFrameFormat.BorderStyle.BorderStyle_Solid)
+            table_format.setCellPadding(8)
+            table_format.setCellSpacing(0)
+            table_format.setBackground(tint)
+            table_format.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+            table = cursor.insertTable(1, 1, table_format)
+            inner = table.cellAt(0, 0).firstCursorPosition()
+            inner.insertFragment(fragment)
+            plain = QTextBlockFormat()  # the quote's own indent would otherwise sit inside the box
+            inner.setPosition(table.cellAt(0, 0).firstPosition())
+            inner.setPosition(table.cellAt(0, 0).lastPosition(), QTextCursor.MoveMode.KeepAnchor)
+            inner.setBlockFormat(plain)
 
     # ------------------------------------------------------------------- anchors
     def _add_heading_anchors(self) -> None:

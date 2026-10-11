@@ -160,6 +160,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("akaiutil-gui")
         self.setAcceptDrops(True)
+        self.setMinimumSize(880, 520)  # below this the disk list, file table and details pane are too cramped to use
         self.resize(1180, 720)
 
         self._engine: AkaiEngine | None = None
@@ -534,9 +535,8 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.act_revert)
         file_menu.addSeparator()
-        settings_action = self._action(
-            "&Settings…", self._open_settings, QKeySequence.StandardKey.Preferences
-        )
+        # Ctrl+, everywhere (Qt maps Ctrl to Cmd on a Mac): the standard Preferences key is only defined on macOS and some Linux desktops
+        settings_action = self._action("&Settings…", self._open_settings, QKeySequence("Ctrl+,"))
         settings_action.setMenuRole(
             QAction.MenuRole.PreferencesRole
         )  # macOS moves it to the app menu

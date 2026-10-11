@@ -100,6 +100,7 @@ class UpdateAvailableDialog(QDialog):
         layout.addLayout(row)
         self.setMinimumWidth(520)
         if self.notes_view is not None:
+            self.setMinimumHeight(360)
             self.resize(560, 460)
 
     def _open_notes_link(self, url) -> None:
