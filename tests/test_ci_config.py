@@ -14,6 +14,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "build.yml"
+TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"  # the one definition of the tests (push/PR runs and the release gate)
 SCRIPTS = {name: (ROOT / "scripts" / name).read_text(encoding="utf-8") for name in ("build_macos.sh", "build_linux.sh", "build_windows.ps1")}
 
 
@@ -49,8 +50,16 @@ def test_the_job_graph_matches_akaisds(workflow):
     assert trigger["push"]["tags"] == ["v*.*.*"] and "workflow_dispatch" in trigger
 
 
-def test_tests_run_against_a_real_akaiutil(workflow):
-    commands = [s.get("run", "") for s in steps(workflow["jobs"]["test"])]
+def test_the_release_gate_is_the_shared_test_workflow(workflow):
+    assert workflow["jobs"]["test"] == {"uses": "./.github/workflows/test.yml"}
+    test_workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
+    triggers = test_workflow.get("on", test_workflow.get(True))  # `on:` parses as the boolean True in YAML 1.1
+    assert "workflow_call" in triggers and "pull_request" in triggers and "push" in triggers
+
+
+def test_tests_run_against_a_real_akaiutil():
+    test_workflow = yaml.safe_load(TEST_WORKFLOW.read_text(encoding="utf-8"))
+    commands = [s.get("run", "") for s in steps(test_workflow["jobs"]["test"])]
     fetch = next(i for i, c in enumerate(commands) if "scripts/get_akaiutil.py" in c)
     pytest_run = next(i for i, c in enumerate(commands) if "pytest" in c)
     assert fetch < pytest_run, "akaiutil must be fetched before pytest, or most tests silently skip"
