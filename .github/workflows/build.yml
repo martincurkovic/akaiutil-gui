@@ -12,25 +12,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version-file: ".python-version"
-      - uses: astral-sh/setup-uv@v6
-      - name: Install Qt runtime libraries
-        run: sudo apt-get update && sudo apt-get install -y qt6-qpa-plugins libegl1 libgl1 libfontconfig1 libnss3 libasound2t64 libpulse0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcomposite1 libxdamage1 libxi6 libxtst6
-      - name: Sync environment
-        # the tests don't need the packaging tools (Nuitka, PySide6-Addons), so skip that dependency group
-        run: uv sync --no-group build
-      - name: Fetch akaiutil
-        # most of the tests drive the real akaiutil; without it they would be skipped, not run
-        run: uv run python scripts/get_akaiutil.py
-      - name: Run tests
-        env:
-          AKAIUTIL_GUI_NO_AUDIO: "1" # the runner has no sound card; tests that need a device use a fake one
-        run: uv run pytest tests/ -v
+    uses: ./.github/workflows/test.yml
 
   build-macos-arm:
     needs: test

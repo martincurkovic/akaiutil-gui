@@ -1,0 +1,89 @@
+name: Update Homebrew Tap
+
+# Runs when a GitHub Release is PUBLISHED (not as a draft, not for pre-releases) and bumps
+# Casks/akaiutil-gui.rb in martincurkovic/homebrew-akaisds. Can also be run by hand from the
+# Actions tab against any published release. Only works once it is on the default branch.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to package, e.g. v0.1.0 (blank = latest published release)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  homebrew:
+    # A hand run always goes ahead; a release event skips pre-releases.
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve which release to package
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-$EVENT_TAG}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name)
+          fi
+          echo "Packaging $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Hash the release's DMGs
+        id: hash
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/${{ github.repository }}/releases/download/${{ steps.resolve.outputs.tag }}"
+          curl -sL -f -o arm.dmg   "$BASE/akaiutil-GUI-macos-arm.dmg"
+          curl -sL -f -o intel.dmg "$BASE/akaiutil-GUI-macos-intel.dmg"
+          echo "sha_arm=$(sha256sum arm.dmg | cut -d' ' -f1)"     >> "$GITHUB_OUTPUT"
+          echo "sha_intel=$(sha256sum intel.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: martincurkovic/homebrew-akaisds
+          token: ${{ secrets.TAP_REPO_TOKEN }}
+
+      # Bumps ONLY the version and the two sha256 lines of the tap's existing cask; the rest
+      # of the cask (caveats and so on) is edited by hand in the tap.
+      - name: Bump the cask
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          SHA_ARM: ${{ steps.hash.outputs.sha_arm }}
+          SHA_INTEL: ${{ steps.hash.outputs.sha_intel }}
+        run: |
+          set -euo pipefail
+          CASK=Casks/akaiutil-gui.rb
+          sed -i \
+            -e "s|^\(  version \)\".*\"|\1\"${VERSION}\"|" \
+            -e "s|^\(  sha256 arm: *\)\"[0-9a-f]*\"|\1\"${SHA_ARM}\"|" \
+            -e "s|^\( *intel: *\)\"[0-9a-f]*\"|\1\"${SHA_INTEL}\"|" \
+            "$CASK"
+          # Fail loudly if the cask layout changed and a substitution missed.
+          grep -q "^  version \"${VERSION}\"" "$CASK"
+          grep -q "\"${SHA_ARM}\"" "$CASK"
+          grep -q "\"${SHA_INTEL}\"" "$CASK"
+          git diff "$CASK"
+
+      - name: Commit and push
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "akaiutil-gui-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add Casks/akaiutil-gui.rb
+          if git diff --cached --quiet; then
+            echo "No changes to publish"
+            exit 0
+          fi
+          git commit -m "akaiutil-gui ${VERSION}"
+          git push

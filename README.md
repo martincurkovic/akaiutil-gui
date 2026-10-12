@@ -36,7 +36,7 @@ Looks like [AKAISDS](https://github.com/martincurkovic/AKAISDS) (shared light/da
 
 Download the latest release from the [Releases](https://github.com/martincurkovic/akaiutil-gui/releases) page on GitHub. akaiutil is included, so there's nothing else to install.
 
-**macOS** (14.4 or newer, Apple Silicon or Intel): open the `.dmg` and drag akaiutil-GUI to Applications.
+**macOS** (14.4 or newer, Apple Silicon or Intel): open the `.dmg` and drag akaiutil-GUI to Applications. Or install with [Homebrew](https://brew.sh): `brew install --cask martincurkovic/akaisds/akaiutil-gui`.
 
 **Windows**: run `akaiutil-GUI-Setup.exe`.
 
