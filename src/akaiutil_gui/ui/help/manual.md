@@ -74,7 +74,7 @@ Opening or closing an image restarts akaiutil, which can take a moment with seve
 Select a disk, partition, volume or file. The **Details** pane describes the selection. For a sample that means its length, sample rate, root key, tuning, play mode, markers and loops; for a program, its keygroups, each with its key range, tuning, filter and
 the sample played in each velocity zone; for a volume, its number of files, load number and space used.
 
-The list of files shows each file's number (its slot in the volume, which is the order a sampler lists them in), name, type, size, start block, OS version and tags. A file's type is its extension, for example `.S3` for an S3000 sample, `.P3` for an S3000 program.
+The list of files shows each file's number (its slot in the volume, which is the order a sampler lists them in), name, type, size, start block, OS version and tags. A file's type is its extension, for example `.S3` for an S3000 sample, `.P3` for an S3000 program. The OS version is the one the sampler's own screen shows (OS 2.00, say). akaiutil prints S3000-series versions 15 higher (`17.00`), so you will see that number if you compare with its output; the volume's details show both.
 
 **Right-click a column heading** to choose which columns are shown or to reset them. Click a heading to sort by it.
 

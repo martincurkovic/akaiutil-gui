@@ -1,5 +1,24 @@
 """Small display helpers shared by the engine-facing and UI code (no Qt here)."""
 
+import re
+
+# An S3000-series OS version is stored 15 above the number the sampler's panel shows: akaiutil prints "17.00" for what the panel calls 2.00
+# (akaiutil.h calls "17.00" the maximum S3000 OS version; AKAISDS measured OS 1.30 and 2.00 on a real S2000 as 16.30 and 17.00). S1000 and S1100 values
+# (at most "4.40" and "9.30" in akaiutil.h) already read as the panel does, so only majors from 16 up - the S3000 series - are shifted.
+_S3000_MAJOR_OFFSET = 15
+_S3000_FIRST_STORED_MAJOR = 16
+_OS_VERSION = re.compile(r"(\d+)\.(\d\d)")
+
+
+def panel_os_version(text: str) -> str:
+    """An OS version as the sampler's panel shows it, from akaiutil's text for it: "17.00" -> "2.00", "16.30" -> "1.30". Anything else - an S1000 version,
+    S900's "uncompr", a bare number, "-" - comes back as it is. Display only: the engine keeps akaiutil's own text, which is what it compares and re-imports."""
+    match = _OS_VERSION.fullmatch(text.strip())
+    if match and int(match[1]) >= _S3000_FIRST_STORED_MAJOR:
+        return f"{int(match[1]) - _S3000_MAJOR_OFFSET}.{match[2]}"
+    return text
+
+
 _NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 

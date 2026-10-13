@@ -23,7 +23,7 @@ from .engine.models import DiskUsage, FileEntry, Loop, SampleInfo
 
 if TYPE_CHECKING:
     from .references import VolumeReferences
-from .formatting import human_size, note_name, percent, plural
+from .formatting import human_size, note_name, panel_os_version, percent, plural
 
 
 # ------------------------------------------------------------------ the result
@@ -623,10 +623,15 @@ def describe_volume(text: str, usage: DiskUsage | None = None, refs: "VolumeRefe
         ("Type", f"{vtype} volume" if vtype else None),
         ("Volume number", root.get("vnr")),
         ("Load number", "None" if load in ("-", "") else load) if root.has("load number") else (None, None),
-        ("OS version", root.get("osver") or None),
+        ("OS version", panel_os_version(root.get("osver")) if root.get("osver") else None),
         ("Room for", plural(int(root.get("max. files")), "file") if root.has("max. files") else None),
     )
-    technical = _rows(("Starts at", root.get("start")))
+    osver = root.get("osver")
+    # what akaiutil itself prints for it, to match against its own listings (only when that differs from the panel's number)
+    technical = _rows(
+        ("Starts at", root.get("start")),
+        ("OS version as akaiutil prints it", osver if osver and panel_os_version(osver) != osver else None),
+    )
     blocks = [Block(rows=rows)]
     if (contents := _volume_contents(root, path, usage)) is not None:
         blocks.append(contents)

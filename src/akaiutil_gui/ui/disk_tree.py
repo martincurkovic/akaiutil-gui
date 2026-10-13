@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QToolTip, QTreeWidget
 
 from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.models import Disk, Partition, Volume
+from akaiutil_gui.formatting import panel_os_version
 
 from . import theme
 from .file_drag import INTERNAL_MIME
@@ -532,7 +533,7 @@ class DiskTree(QTreeWidget):
         for v in vols:
             item = QTreeWidgetItem([v.name])
             item.setIcon(0, swatch_icon(self._position(v), self.devicePixelRatioF()))
-            item.setToolTip(0, f"{v.type} volume, OS {v.os_version}")
+            item.setToolTip(0, f"{v.type} volume, OS {panel_os_version(v.os_version)}")
             item.setData(0, _ROLE_OBJ, v)
             part_item.addChild(item)
         # a lone floppy image: jump straight to its files. (With several disks

@@ -68,10 +68,12 @@ def test_real_samples_parse_into_sane_numbers(binary, image):
     eng = AkaiEngine(binary)
     eng.open([image])
     checked = 0
+    samples_present = 0
     try:
         disk = eng.list_disks()[0]
         for part in eng.list_partitions(disk):
             for vol in eng.list_volumes(part)[:3]:
+                samples_present += sum(f.is_sample for f in eng.list_files(vol))
                 for number, info in eng.volume_sample_infos(vol).items():
                     checked += 1
                     assert info.frames > 0 and 1000 <= info.rate <= 96000, (vol.path, number, info)
@@ -80,7 +82,9 @@ def test_real_samples_parse_into_sane_numbers(binary, image):
                         assert 0 <= loop.start <= loop.end <= info.frames, (vol.path, number, loop)
     finally:
         eng.close()
-    assert checked > 0
+    if not samples_present:
+        pytest.skip(f"{image.name} holds no samples (an empty disk): nothing to check")
+    assert checked > 0  # it has samples, so the loop above must have looked at some - not silently at none
 
 
 def test_a_move_and_a_copy_both_keep_a_files_tags(binary, tmp_path):

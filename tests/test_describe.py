@@ -281,8 +281,9 @@ def test_disk_partition_and_volume():
     vol = describe.describe_volume(VOLUME)
     assert vol.title == "VOLUME 001" and vol.subtitle == "S3000 volume"
     r = rows(vol.blocks[0])
-    assert r["Load number"] == "None" and r["OS version"] == "17.00" and r["Room for"] == "510 files"
+    assert r["Load number"] == "None" and r["OS version"] == "2.00" and r["Room for"] == "510 files"  # (akaiutil's "17.00": see formatting.panel_os_version)
     assert [b.title for b in vol.blocks] == ["", "Technical"]
+    assert rows(block(vol, "Technical"))["OS version as akaiutil prints it"] == "17.00"  # to match akaiutil's own listings
 
 
 def test_floppy_volume_also_shows_the_disk_space():

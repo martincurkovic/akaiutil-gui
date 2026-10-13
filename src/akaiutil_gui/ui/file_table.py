@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QMenu, QTableWidge
 from akaiutil_gui import settings
 
 from akaiutil_gui.engine.models import CatalogEntry, FileEntry, Volume
-from akaiutil_gui.formatting import human_size
+from akaiutil_gui.formatting import human_size, panel_os_version
 
 _ROLE_FILE = Qt.ItemDataRole.UserRole
 _ROLE_SORT = Qt.ItemDataRole.UserRole + 1
@@ -155,7 +155,7 @@ class FileTable(QTableWidget):
                 (f.kind, f.kind, None),
                 (human_size(f.size), f.size, right),
                 (f.start_block, int(f.start_block, 16), right),
-                (f.os_version or "—", f.os_version, right),
+                (panel_os_version(f.os_version) if f.os_version else "—", f.os_version, right),
                 (", ".join(f.tag_labels), ", ".join(f.tag_labels).lower(), None),
                 (where, where.lower(), None),
             ]
