@@ -321,6 +321,45 @@ def test_akai_only_drops_have_no_conversion_choices(qt_app, audio):
     assert d.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
 
 
+def test_the_dialog_offers_add_anyway_only_for_files_it_cant_check(qt_app, audio):
+    wav = importing.inspect(make(audio / "ok.wav", tone()))
+    d = edit_dialogs.ImportDialog(None, vol(), [wav])
+    d.show()
+    assert not d.add_anyway.isVisible() and not d.options.add_anyway
+    image = audio / "S2K PATCH.C"
+    image.write_bytes(bytes(1000))
+    d = edit_dialogs.ImportDialog(None, vol(), [importing.inspect(image)])
+    d.show()
+    assert d.add_anyway.isVisible() and not d.add_anyway.isChecked()
+    assert d.importable == 0 and not d.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
+    assert d.files.item(0).text().endswith("(tick “Add anyway” to import it as it is)")
+
+
+def test_ticking_add_anyway_makes_the_file_importable(qt_app, audio):
+    image = audio / "S2K PATCH.C"
+    image.write_bytes(bytes(1000))
+    junk = audio / "notes.txt"
+    junk.write_bytes(b"hello")
+    d = edit_dialogs.ImportDialog(None, vol(), [importing.inspect(image), importing.inspect(junk)])
+    d.show()
+    d.add_anyway.setChecked(True)
+    assert d.options.add_anyway and d.importable == 1  # (the text file has no Akai type to go in as)
+    assert d.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
+    assert d.files.item(0).text() == "S2K PATCH.C   —   added anyway: an Akai file, imported as it is (not checked)"
+    assert d.files.item(1).text().startswith("notes.txt   —   skipped: can't read it as audio")
+    assert "Add anyway" not in d.files.item(1).text()
+
+
+def test_add_anyway_is_not_remembered_for_the_next_import(qt_app, audio):
+    image = audio / "S2K PATCH.C"
+    image.write_bytes(bytes(1000))
+    sources = [importing.inspect(image)]
+    d = edit_dialogs.ImportDialog(None, vol(), sources)
+    d.add_anyway.setChecked(True)
+    d.accept()
+    assert not edit_dialogs.ImportDialog(None, vol(), sources).add_anyway.isChecked()
+
+
 def test_with_nothing_importable_the_button_is_off(qt_app, audio):
     junk = audio / "x.wav"
     junk.write_bytes(b"nope")

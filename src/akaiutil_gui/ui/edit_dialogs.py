@@ -741,6 +741,12 @@ class ImportDialog(QDialog):
         for box, name in ((self.file_markers, "file_markers"), (self.root_from_name, "root_from_name"), (self.trim, "trim"), (self.normalize, "normalize")):
             box.setChecked(flags[name])
             box.toggled.connect(lambda _on: self._refresh())
+        self.add_anyway = QCheckBox("Add anyway: import the skipped files as Akai files, unchanged")
+        self.add_anyway.setToolTip(
+            "For a file the app can't check, like an operating system image (.C or .C3). It goes in exactly as it is, as the type its "
+            "extension says, with no conversion and no checks. Not remembered: it has to be ticked each time"
+        )
+        self.add_anyway.toggled.connect(lambda _on: self._refresh())
         self.files = QListWidget()
         self.files.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         self.files.setMinimumHeight(140)
@@ -758,6 +764,7 @@ class ImportDialog(QDialog):
         self.option_boxes = (self.file_markers, self.root_from_name, self.trim, self.normalize)
         for box in self.option_boxes:
             form.addRow(box)
+        form.addRow(self.add_anyway)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -774,6 +781,7 @@ class ImportDialog(QDialog):
             widget.setVisible(bool(audio))
         for box in self.option_boxes:
             box.setVisible(bool(audio))
+        self.add_anyway.setVisible(any(s.forceable for s in sources))  # (only when there is something to add anyway)
         self.stereo_row[0].setVisible(any(s.channels == 2 for s in audio))
         self.stereo_row[1].setVisible(any(s.channels == 2 for s in audio))
         self.type_combo.currentIndexChanged.connect(self._refresh)
@@ -813,6 +821,7 @@ class ImportDialog(QDialog):
             root_from_name=self.root_from_name.isChecked(),
             trim=self.trim.isChecked(),
             normalize=self.normalize.isChecked(),
+            add_anyway=self.add_anyway.isChecked(),
         )
 
     def accept(self) -> None:
@@ -825,7 +834,8 @@ class ImportDialog(QDialog):
 
     @property
     def importable(self) -> int:
-        return sum(1 for s in self._sources if not s.problem)
+        options = self.options
+        return sum(1 for s in self._sources if not importing.effective(s, options).problem)
 
     def _refresh(self) -> None:
         self.compress.setVisible(self.sample_type == "S900" and self.type_row[1].isVisible())

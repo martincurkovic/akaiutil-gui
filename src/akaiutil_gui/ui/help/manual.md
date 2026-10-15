@@ -160,6 +160,7 @@ What you can import:
 
 - **Audio:** WAV, AIFF, FLAC, OGG, MP3, CAF and W64 are all supported. Anything that isn't 16-bit, or is above the maximum sample rate (40 kHz for an S900, 44.1 kHz for all other samplers), is converted first.
 - **Akai files:** `KICK.S3`, programs (`.P3`), effects and so on go in unchanged, but only into a volume of the right sampler.
+- **Anything else with an Akai file type in its name**, such as an operating system image (`.C`, `.C3`). The app can't check these, so the dialog marks them as skipped until you tick **Add anyway**. They then go in exactly as they are, as the type the extension says. The choice isn't remembered, and a name with no Akai type (`.bin`, `.txt`) can't be added. Choose **Operating system images** in the file picker's list of file types, or **All files**. (Dropping a `.C` file on the window opens it as a disk image instead, so use **Import Files…**.)
 
 Choices in the dialog:
 
@@ -289,7 +290,7 @@ On a Mac use Cmd where this says Ctrl.
 
 **Preview is silent or clicks.** Check **Settings > Audio Preview**: pick the right output device, and raise the buffer size if it clicks. Samples that don't have a loop set, or whose play mode isn't set to loop, will only play once even with Loop Preview checked.
 
-**A file can't be imported or pasted.** The message after the import lists each file and why. The usual reasons are a file that isn't audio, a file with more than two channels, or a sample for the wrong sampler (an S3000 sample can't go into an S900 volume).
+**A file can't be imported or pasted.** The message after the import lists each file and why. The usual reasons are a file that isn't audio (an Akai file the app can't check can be imported with **Add anyway**), a file with more than two channels, or a sample for the wrong sampler (an S3000 sample can't go into an S900 volume).
 
 **Dragging files out of the list does nothing.** Use **File > Export…** instead.
 

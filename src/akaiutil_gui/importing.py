@@ -12,7 +12,7 @@ file of that name the new one gets a number, because akaiutil would silently rep
 import re
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +33,9 @@ AKAI_EXTENSIONS = {
     ".x", ".x3", ".q", ".q3", ".t", ".t3",
     ".m3", ".m9", ".o9", ".f9", ".cd",
 }
+# What akaiutil takes as a file type in a name: a letter and then 9, 1 or 3 (or nothing), or one of its three special ones.
+# Any such file can be added anyway, since akaiutil takes the type from the name alone.
+_AKAI_SUFFIX = re.compile(r"\.([a-z][139]?|s9c|cd|s\+)", re.IGNORECASE)
 SAMPLE_TYPES = ("S3000", "S1000", "S900")
 TRIM_THRESHOLD = 10 ** (-60 / 20)  # silence: quieter than -60 dBFS
 NORMALIZE_PEAK = 10 ** (-1 / 20)  # loudest sample at -1 dBFS
@@ -50,6 +53,11 @@ def kind_of(path: str | Path) -> str:
     if ext in AKAI_EXTENSIONS:
         return "akai"
     return "other"
+
+
+def has_akai_suffix(path: str | Path) -> bool:
+    """Whether the name ends in something akaiutil would take as a file type (.S3, .C, .C3, .X...)."""
+    return _AKAI_SUFFIX.fullmatch(Path(path).suffix) is not None
 
 
 def natural_key(path: str | Path) -> tuple[list, str]:
@@ -126,6 +134,7 @@ class Source:
     frames: int = 0
     problem: str = ""  # why it can't be imported at all
     markers: audio_markers.Markers = audio_markers.Markers()  # the root note and loops the file carries
+    forceable: bool = False  # the problem is only that the app can't check the file: "Add anyway" imports it as an Akai file
 
     @property
     def bits(self) -> int | None:
@@ -148,11 +157,15 @@ def inspect(path: str | Path) -> Source:
                 head = f.read(1)
             if head != b"\x03" or size < 150:  # an S1000/S3000 sample starts with its header, whose first byte is 3
                 problem = "this doesn't look like an Akai sample"
+                return Source(path, kind, problem=problem, forceable=True)
         return Source(path, kind, problem=problem)
     try:
         info = soundfile.info(str(path))
     except Exception as e:  # soundfile raises its own error types
-        return Source(path, kind, problem=f"can't read it as audio ({e})")
+        # An operating system image (.C, .C3) or any other file with an Akai type in its name: there is nothing to check it
+        # against, so the user can say to add it as it is. (A name akaiutil can't use as a type is still refused.)
+        forceable = has_akai_suffix(path) and path.is_file() and path.stat().st_size > 0
+        return Source(path, kind, problem=f"can't read it as audio ({e})", forceable=forceable)
     problem = ""
     if info.channels > 2:
         problem = f"it has {info.channels} channels (samples are mono or stereo)"
@@ -169,6 +182,14 @@ class ImportOptions:
     root_from_name: bool = False  # a name ending in a note (Piano_C3) is the root note, if the file doesn't say
     trim: bool = False  # cut silence from the start and end
     normalize: bool = False  # make the loudest sample -1 dBFS
+    add_anyway: bool = False  # import the files the app can't check (Source.forceable) as Akai files, exactly as they are
+
+
+def effective(src: Source, options: ImportOptions) -> Source:
+    """`src` as it will be imported: a file that can only be added anyway is an Akai file, unchanged, if that was asked for."""
+    if src.problem and src.forceable and options.add_anyway:
+        return replace(src, kind="akai", problem="", forceable=False)
+    return src
 
 
 def sample_markers(src: Source, sample_type: str, options: ImportOptions) -> tuple[int | None, tuple[tuple[int, int], ...]]:
@@ -209,7 +230,10 @@ def conversion_steps(src: Source, sample_type: str, stereo: str = STEREO_SPLIT, 
 def describe(src: Source, sample_type: str, stereo: str = STEREO_SPLIT, options: ImportOptions = ImportOptions()) -> str:
     """One line for the import dialog."""
     if src.problem:
-        return f"skipped: {src.problem}"
+        if src.forceable and options.add_anyway:
+            return "added anyway: an Akai file, imported as it is (not checked)"
+        hint = "  (tick “Add anyway” to import it as it is)" if src.forceable else ""
+        return f"skipped: {src.problem}{hint}"
     if src.kind == "akai":
         return "Akai file, imported as it is"
     channels = "stereo" if src.channels == 2 else "mono"
@@ -321,6 +345,7 @@ def run_import(
     for i, src in enumerate(sources):
         if progress is not None:
             progress(i, len(sources), src.path.name)
+        src = effective(src, options)
         if src.problem:
             result.failed.append(f"{src.path.name}: {src.problem}")
             continue

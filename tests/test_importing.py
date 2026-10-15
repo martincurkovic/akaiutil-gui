@@ -134,6 +134,63 @@ def test_an_akai_sample_is_checked_for_its_header(audio):
     assert importing.inspect(prog).problem == ""  # only samples have a header worth checking
 
 
+# ------------------------------------------------------------------------- adding anyway
+def test_a_file_with_an_akai_type_in_its_name_can_be_added_anyway(audio):
+    os_image = audio / "S2K PATCH.C"
+    os_image.write_bytes(bytes(range(256)) * 8)
+    src = importing.inspect(os_image)
+    assert src.kind == "other" and src.problem.startswith("can't read it as audio") and src.forceable
+    assert importing.describe(src, "S3000").endswith("(tick “Add anyway” to import it as it is)")
+    anyway = importing.ImportOptions(add_anyway=True)
+    forced = importing.effective(src, anyway)
+    assert (forced.kind, forced.problem, forced.path) == ("akai", "", os_image)
+    assert importing.describe(src, "S3000", options=anyway) == "added anyway: an Akai file, imported as it is (not checked)"
+    assert importing.effective(src, importing.ImportOptions()) is src  # not unless asked for
+
+
+@pytest.mark.parametrize("name", ["OS.C3", "os.c", "thing.z", "a.k1", "b.e9"])
+def test_every_akai_type_in_a_name_can_be_added_anyway(audio, name):
+    f = audio / name
+    f.write_bytes(b"not audio")
+    assert importing.has_akai_suffix(f) and importing.inspect(f).forceable
+
+
+@pytest.mark.parametrize("name", ["FX.X", "x.s9c", "a.cd", "KICK.S3"])
+def test_the_types_the_app_knows_need_no_adding_anyway(audio, name):
+    f = audio / name
+    f.write_bytes(b"\x03" + bytes(300))
+    src = importing.inspect(f)
+    assert importing.has_akai_suffix(f) and src.kind == "akai" and src.problem == "" and not src.forceable
+
+
+@pytest.mark.parametrize("name", ["notes.txt", "disk.img", "data.bin", "noext", "x.c2", "x.abc"])
+def test_a_file_with_no_akai_type_cant_be_added_anyway(audio, name):
+    f = audio / name
+    f.write_bytes(b"not audio")
+    assert not importing.has_akai_suffix(f)
+    src = importing.inspect(f)
+    assert src.problem and not src.forceable
+    assert importing.effective(src, importing.ImportOptions(add_anyway=True)) is src
+
+
+def test_what_cant_be_added_anyway_stays_refused(audio):
+    empty = audio / "EMPTY.C"
+    empty.write_bytes(b"")
+    assert not importing.inspect(empty).forceable  # nothing to add
+    many = audio / "m.flac"
+    make(many, tone(channels=3), 44100, "PCM_16")
+    assert not importing.inspect(many).forceable  # audio that is simply unusable
+    assert not importing.inspect(audio / "gone.C").forceable  # missing
+
+
+def test_an_akai_sample_without_a_header_can_be_added_anyway(audio):
+    bad = audio / "NOT.S3"
+    bad.write_bytes(b"hello, I am a text file" * 20)
+    src = importing.inspect(bad)
+    assert src.problem == "this doesn't look like an Akai sample" and src.forceable
+    assert importing.effective(src, importing.ImportOptions(add_anyway=True)).problem == ""
+
+
 # -------------------------------------------------------------------------- converting
 def test_what_has_to_be_done_to_a_file(audio):
     ok = importing.inspect(make(audio / "ok.wav", tone(), 44100, "PCM_16"))
@@ -413,6 +470,31 @@ def test_akai_files_of_the_wrong_sampler_or_with_no_header_are_refused(ed, audio
     assert "doesn't look like an Akai sample" in result.failed[0]
     assert "compressed S900 samples only work in an S900 volume" in result.failed[1]
     assert files(ed, bass) == ["BASS.S3"]
+
+
+def test_an_os_image_is_refused_unless_added_anyway_and_then_goes_in_byte_for_byte(ed, audio, tmp_path):
+    bass = volumes(ed)[1]
+    image = audio / "S2K PATCH.C"
+    raw = bytes(range(256)) * 1024  # 256 KB, the size of an S2000 operating system
+    image.write_bytes(raw)
+    refused = run(ed, bass, [image], tmp_path)
+    assert refused.imported == [] and refused.failed[0].startswith("S2K PATCH.C: can't read it as audio")
+    result = run(ed, bass, [image], tmp_path, options=importing.ImportOptions(add_anyway=True))
+    assert result.imported == ["S2K PATCH.C"] and result.failed == []
+    copied = next(f for f in ed.list_files(bass) if f.name == "S2K PATCH.C")
+    assert copied.size == len(raw)
+    back = tmp_path / "back"
+    back.mkdir()
+    ed.export_files(bass, [copied], back)
+    assert (back / "S2K PATCH.C").read_bytes() == raw
+
+
+def test_adding_anyway_still_honours_the_volumes_sampler(tmp_path):
+    image = tmp_path / "OS.C3"
+    image.write_bytes(bytes(400))
+    forced = importing.effective(importing.inspect(image), importing.ImportOptions(add_anyway=True))
+    with pytest.raises(ValueError, match="S3000 files don't belong in an S1000 volume"):
+        importing._make_job(forced, Volume(0, "A", 1, "V", "-", "", "", "S1000"), tmp_path / "w", "S3000", False, importing.STEREO_SPLIT, set(), importing.ImportOptions())
 
 
 def test_exported_wavs_keep_their_loops_when_they_come_back(binary, editable_hd, tmp_path):

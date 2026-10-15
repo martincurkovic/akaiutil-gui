@@ -2610,7 +2610,7 @@ class MainWindow(QMainWindow):
             self,
             "Import into the volume",
             start,
-            f"Audio and Akai files ({audio} {akai});;All files (*)",
+            f"Audio and Akai files ({audio} {akai});;Operating system images (*.C *.c *.C3 *.c3);;All files (*)",
         )
         if paths:
             settings.set_last_dir("import", str(Path(paths[0]).parent))
