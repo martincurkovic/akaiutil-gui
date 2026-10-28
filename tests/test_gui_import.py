@@ -418,6 +418,19 @@ def test_ticking_add_anyway_makes_the_file_importable(qt_app, audio):
     assert "Add anyway" not in d.files.item(2).text()
 
 
+def test_the_add_anyway_box_says_it_covers_any_file_and_the_list_has_room_for_several(qt_app, audio):
+    files = []
+    for name in ("a.txt", "b.C", "c.m4a", "d.wav", "e.S3", "f.pdf"):
+        f = audio / name
+        f.write_bytes(b"\x03" + bytes(300))
+        files.append(importing.inspect(f))
+    d = edit_dialogs.ImportDialog(None, vol(), files)
+    d.show()
+    assert d.add_anyway.text() == "Add anyway: import the skipped files as they are"
+    assert d.files.minimumHeight() == 240  # (the list grows with the number of files, up to a limit)
+    assert edit_dialogs.ImportDialog(None, vol(), files[:1]).files.minimumHeight() == 140
+
+
 def test_the_dialog_offers_add_anyway_for_a_file_made_for_another_sampler(qt_app, audio):
     sample = audio / "KICK.S3"
     sample.write_bytes(b"\x03" + bytes(300))

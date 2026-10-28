@@ -1797,7 +1797,7 @@ class MainWindow(QMainWindow):
             self,
             f"Revert {image.name}?",
             f"Replace {image.name} with the backup from {picked.created:%d %b %Y, %H:%M}?",
-            "Everything done to it since is lost, except that the image as it is now is backed up first.",
+            "Everything done to it since then is lost, except that the image as it is now is backed up first.",
             action="Revert",
         ):
             return

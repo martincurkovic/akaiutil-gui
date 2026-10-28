@@ -741,16 +741,17 @@ class ImportDialog(QDialog):
         for box, name in ((self.file_markers, "file_markers"), (self.root_from_name, "root_from_name"), (self.trim, "trim"), (self.normalize, "normalize")):
             box.setChecked(flags[name])
             box.toggled.connect(lambda _on: self._refresh())
-        self.add_anyway = QCheckBox("Add anyway: import the skipped files as Akai files, unchanged")
+        self.add_anyway = QCheckBox("Add anyway: import the skipped files as they are")
         self.add_anyway.setToolTip(
-            "For a file the app can't check, like an operating system image (.C or .C3), and for Akai files made for another "
-            "sampler than the volume's (an S3000 sample in an S1000 volume). It goes in exactly as it is, as the type its "
-            "extension says, with no conversion and no checks. Not remembered: it has to be ticked each time"
+            "For a file the app can't check, like an operating system image (.C or .C3) or a text file, and for Akai files made for "
+            "another sampler than the volume's (an S3000 sample in an S1000 volume). It goes in exactly as it is, with no conversion "
+            "and no checks: as the type its extension says, or, if that isn't an Akai type, with .X01 added to its name. "
+            "Not remembered: it has to be ticked each time"
         )
         self.add_anyway.toggled.connect(lambda _on: self._refresh())
         self.files = QListWidget()
         self.files.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        self.files.setMinimumHeight(140)
+        self.files.setMinimumHeight(min(300, max(140, 40 * len(sources))))  # (a row can wrap onto two lines; room for a few)
         self.files.setWordWrap(True)  # a long description wraps instead of scrolling sideways
         self.files.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.note = QLabel("Files are added in this order. A name that is already in the volume gets a number, so nothing is replaced.")

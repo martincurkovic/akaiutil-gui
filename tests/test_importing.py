@@ -219,7 +219,7 @@ def test_a_file_with_an_akai_type_in_its_name_can_be_added_anyway(audio):
     os_image = audio / "S2K PATCH.C"
     os_image.write_bytes(bytes(range(256)) * 8)
     src = importing.inspect(os_image)
-    assert src.kind == "other" and src.problem.startswith("can't read it as audio") and src.forceable
+    assert src.kind == "other" and src.problem == "it isn't audio, and the app can't check it" and src.forceable
     assert importing.describe(src, "S3000").endswith("(tick “Add anyway” to import it as it is)")
     anyway = importing.ImportOptions(add_anyway=True)
     forced = importing.effective(src, anyway)
@@ -268,6 +268,14 @@ def test_a_hex_type_belongs_in_every_volume():
     for volume in ("S900", "S1000", "S3000", "CD3000"):
         assert importing.sampler_mismatch(".X01", volume) is None
     assert importing.has_akai_suffix("a.x01") and not importing.has_akai_suffix("a.xyz")
+
+
+def test_the_reason_audio_cant_be_read_doesnt_name_the_file(audio):
+    broken = audio / "broken.wav"
+    broken.write_bytes(b"not really a wav")
+    problem = importing.inspect(broken).problem
+    assert problem.startswith("can't read it as audio (") and str(audio) not in problem and "Error opening" not in problem
+    assert importing._why(Exception("Error opening '/var/x/a b.wav': Format not recognised.")) == "format not recognised"
 
 
 def test_what_cant_be_added_anyway_stays_refused(audio):
@@ -597,7 +605,7 @@ def test_an_os_image_is_refused_unless_added_anyway_and_then_goes_in_byte_for_by
     raw = bytes(range(256)) * 1024  # 256 KB, the size of an S2000 operating system
     image.write_bytes(raw)
     refused = run(ed, bass, [image], tmp_path)
-    assert refused.imported == [] and refused.failed[0].startswith("S2K PATCH.C: can't read it as audio")
+    assert refused.imported == [] and refused.failed == ["S2K PATCH.C: it isn't audio, and the app can't check it"]
     result = run(ed, bass, [image], tmp_path, options=importing.ImportOptions(add_anyway=True))
     assert result.imported == ["S2K PATCH.C"] and result.failed == []
     copied = next(f for f in ed.list_files(bass) if f.name == "S2K PATCH.C")
@@ -614,7 +622,7 @@ def test_an_os_image_for_another_sampler_needs_adding_anyway_for_that_too(tmp_pa
     s1000 = Volume(0, "A", 1, "V", "-", "", "", "S1000")
     src = importing.inspect(image)
     anyway = importing.ImportOptions(add_anyway=True)
-    assert importing.import_problem(src, "S1000").startswith("can't read it as audio")
+    assert importing.import_problem(src, "S1000") == "it isn't audio, and the app can't check it"
     assert importing.import_problem(src, "S1000", anyway) == ""
     as_akai = importing.effective(src, anyway)
     with pytest.raises(ValueError, match="S3000 files don't belong in an S1000 volume"):

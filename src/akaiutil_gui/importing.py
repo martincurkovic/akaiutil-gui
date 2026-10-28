@@ -225,6 +225,12 @@ class Source:
         return {"PCM_16": 16, "PCM_24": 24, "PCM_32": 32, "PCM_U8": 8, "PCM_S8": 8, "FLOAT": 32, "DOUBLE": 64}.get(self.subtype)
 
 
+def _why(error: Exception) -> str:
+    """soundfile's complaint without the path it names ("Error opening '/tmp/x.wav': Format not recognised." -> "format not recognised")."""
+    text = re.sub(r"^Error opening '.*?': ", "", str(error)).strip().rstrip(".")
+    return text[:1].lower() + text[1:]
+
+
 def inspect(path: str | Path) -> Source:
     path = Path(path)
     kind = kind_of(path)
@@ -254,7 +260,9 @@ def inspect(path: str | Path) -> Source:
         forceable = kind == "other" and path.is_file() and path.stat().st_size > 0
         if kind == "other" and not has_akai_suffix(path):
             return Source(path, kind, problem="it isn't audio or an Akai file", forceable=forceable)
-        return Source(path, kind, problem=f"can't read it as audio ({e})", forceable=forceable)
+        if kind == "other":  # (an operating system image, say: its name says it is Akai's, so it isn't audio that went wrong)
+            return Source(path, kind, problem="it isn't audio, and the app can't check it", forceable=forceable)
+        return Source(path, kind, problem=f"can't read it as audio ({_why(e)})", forceable=forceable)
     problem = ""
     if info.channels > 2:
         problem = f"it has {info.channels} channels (samples are mono or stereo)"
