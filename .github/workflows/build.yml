@@ -178,7 +178,11 @@ jobs:
       - name: Add the akaiutil source code
         # The apps contain a compiled copy of akaiutil (GPL-2), so the exact source it was built from
         # goes on every release. The download is checked against the checksum pinned in the repo.
-        run: PYTHONPATH=src python3 scripts/get_akaiutil.py --source-only release-files/akaiutil-source
+        run: |
+          PYTHONPATH=src python3 scripts/get_akaiutil.py --source-only release-files/akaiutil-source
+          # Named so that nobody takes it for the app (people kept downloading it by accident and asking why it didn't run).
+          cd release-files/akaiutil-source
+          for f in akaiutil-*.tar.gz; do mv "$f" "SOURCE-CODE-ONLY-$f"; done
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:

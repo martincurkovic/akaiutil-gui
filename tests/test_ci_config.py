@@ -76,6 +76,7 @@ def test_the_release_ships_akaiutils_source(workflow):
     release = workflow["jobs"]["release"]
     assert any(s.get("uses", "").startswith("actions/checkout") for s in steps(release))
     assert "--source-only" in run_text(release)
+    assert 'mv "$f" "SOURCE-CODE-ONLY-$f"' in run_text(release)  # (named so that nobody downloads it thinking it is the app)
     assert "release-files/**/*" in str(steps(release)[-1])  # ...into the folder the release uploads from
 
 

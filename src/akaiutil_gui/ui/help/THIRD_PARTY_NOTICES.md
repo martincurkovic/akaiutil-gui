@@ -16,7 +16,7 @@ running it as a separate program.
   `48ea733cc38d90c2f9f70a6ff9c4fb12a8e64ddd7024d4b436e9ebeef2bf57b1`.
 - Project page: <https://sourceforge.net/projects/akaiutil/>
 - **Source code:** the exact source this copy was built from is attached to every
-  release of akaiutil-gui on GitHub as `akaiutil-4.6.8.tar.gz`, and can also be
+  release of akaiutil-gui on GitHub as `SOURCE-CODE-ONLY-akaiutil-4.6.8.tar.gz`, and can also be
   downloaded from SourceForge:
   <https://sourceforge.net/projects/akaiutil/files/akaiutil-4.6.8.tar.gz/download>
 
