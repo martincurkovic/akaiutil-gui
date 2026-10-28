@@ -14,6 +14,8 @@ None of this could be checked by the test runs, which use a fake audio device, o
       volume's OS version in place of the file's (4.40 in an S1000 volume, none in an S900 one). Check that an S3000-series sampler
       lists and loads them from both kinds of image, and that an S1000 or S900 doesn't choke on the disk. The people who asked
       for this say it works, but nothing here has confirmed it.
+- [ ] **Other files stored as `<name>.X01`** (a text file or PDF added anyway). Nothing says what a sampler shows for a file of
+      that type, or whether another hex type (or a name the sampler hides) would suit better; change `importing.RAW_TYPE` if so.
 
 ## Next
 

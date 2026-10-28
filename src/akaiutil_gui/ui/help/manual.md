@@ -32,7 +32,7 @@ akaiutil-GUI allows you to open, view and edit Akai S900, S1000 and S3000 disk i
 
 ## Getting started
 
-1. **Open an image.** Choose **File > Open Disk Image…**, or drag the image file onto the window.
+1. **Open an image.** Choose **File > Open Disk Image…**, or drag the image file onto the window. Files that are plainly not disk images (a PDF, a picture, a text file, anything smaller than a floppy) are turned away with a message instead of being opened.
 2. Click around. **Every image opens read-only by default**. If you want to edit the image, the app will ask if you want to create a backup first (see [Editing disk images](#editing-disk-images)).
 
 ![The start screen](screenshots/start-screen.png "The start screen")
@@ -160,7 +160,10 @@ What you can import:
 
 - **Audio:** WAV, AIFF, FLAC, OGG, MP3, CAF and W64 are all supported. Anything that isn't 16-bit, or is above the maximum sample rate (40 kHz for an S900, 44.1 kHz for all other samplers), is converted first.
 - **Akai files:** `KICK.S3`, programs (`.P3`), effects and so on go in unchanged. A file made for a different sampler than the volume's (an S3000 sample in an S1000 volume, say) is marked as skipped until you tick **Add anyway**; see *Files for another sampler* below.
-- **Anything else with an Akai file type in its name**, such as an operating system image (`.C`, `.C3`). The app can't check these, so the dialog marks them as skipped until you tick **Add anyway**. They then go in exactly as they are, as the type the extension says. The choice isn't remembered, and a name with no Akai type (`.bin`, `.txt`) can't be added. Choose **Operating system images** in the file picker's list of file types, or **All files**. (Dropping a `.C` file on the window opens it as a disk image instead, so use **Import Files…**.)
+- **Anything else with an Akai file type in its name**, such as an operating system image (`.C`, `.C3`). The app can't check these, so the dialog marks them as skipped until you tick **Add anyway**. They then go in exactly as they are, as the type the extension says. The choice isn't remembered. Choose **Operating system images** in the file picker's list of file types, or **All files**.
+- **Any other file**, such as a text file or a PDF. Tick **Add anyway** and it is stored as it is, with its whole name kept and `.X01` added after it (a sampler's file types are a single byte, and akaiutil takes it from the end of the name), so `Patch notes.txt` becomes `PATCH NO.TXT.x01`. The app can't tell what a sampler will make of a file like that.
+
+**Where to drop files.** Drop them on a volume in the list of disks and everything goes into that volume, through the dialog above. Dropped on the rest of the window, audio and Akai files go into the selected volume, a disk image is opened, and anything else is turned away with a message.
 
 Choices in the dialog:
 

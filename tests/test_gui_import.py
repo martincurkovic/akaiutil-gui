@@ -11,7 +11,7 @@ import pytest
 import soundfile
 from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
 from PySide6.QtGui import QDropEvent
-from PySide6.QtWidgets import QDialogButtonBox, QMessageBox
+from PySide6.QtWidgets import QDialogButtonBox, QFileDialog, QMessageBox
 
 from akaiutil_gui import importing, settings
 from akaiutil_gui.engine.models import Volume
@@ -177,6 +177,60 @@ def test_a_folder_can_be_dropped(qt_app, window, editable_hd, audio, answers):
     assert [a[2] for a in answers.asked if a[0] == "import"] == [["a.wav", "b.wav"]]  # the .txt in the folder never reaches the dialog
 
 
+def test_dropping_a_pdf_on_the_window_doesnt_open_it_as_a_disk_image(qt_app, window, editable_hd, audio, answers):
+    open_volume(qt_app, window, editable_hd)
+    pdf = audio / "manual.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n" + bytes(importing.DISK_IMAGE_MIN_BYTES))
+    drop(window, [pdf])
+    pump(qt_app, lambda: False, timeout=0.3)
+    title, text, details = answers.warnings[-1]
+    assert title == "Not a disk image" and "drop them on the volume" in text
+    assert details == ["manual.pdf: it's a PDF, not a disk image"]
+    assert window.tree.topLevelItemCount() == 1 and window._images == [str(editable_hd)]
+    assert not [a for a in answers.asked if a[0] == "import"]
+
+
+def test_dropping_a_pdf_with_nothing_open_opens_nothing(qt_app, window, audio, answers):
+    pdf = audio / "manual.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n" + bytes(1000))
+    drop(window, [pdf])
+    pump(qt_app, lambda: False, timeout=0.3)
+    assert answers.warnings and answers.warnings[-1][0] == "Not a disk image"
+    assert window._engine is None and window.tree.topLevelItemCount() == 0
+
+
+def test_a_picked_file_that_isnt_a_disk_image_isnt_opened_either(qt_app, window, audio, answers, monkeypatch):
+    txt = audio / "notes.txt"
+    txt.write_text("hello")
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(txt)], ""))
+    window.open_dialog()
+    assert answers.warnings[-1][0] == "Not a disk image" and window._engine is None
+
+
+def test_a_text_file_dropped_on_a_volume_goes_to_the_import_dialog_and_is_stored_as_it_is(qt_app, window, editable_hd, audio, answers):
+    open_volume(qt_app, window, editable_hd, index=2, files=1)
+    bass = next(v for v in window.tree.volumes_in(0, "A") if v.name == "BASS")
+    note = audio / "notes.txt"
+    note.write_text("remember the reverb")
+    answers.import_answer = ("S3000", False, importing.STEREO_SPLIT, importing.ImportOptions(add_anyway=True))
+    window.tree.filesDropped.emit(bass, [str(note)])
+    assert pump(qt_app, lambda: any(a[0] == "import" for a in answers.asked))
+    assert [a[1:] for a in answers.asked if a[0] == "import"] == [("BASS", ["notes.txt"])]
+    assert pump(qt_app, lambda: "NOTES.TXT.x01" in names(window))
+    assert not [w for w in answers.warnings if w[0] == "Not a disk image"]
+
+
+def test_an_operating_system_file_dropped_on_a_volume_still_goes_in_when_added_anyway(qt_app, window, editable_hd, audio, answers):
+    open_volume(qt_app, window, editable_hd, index=2, files=1)
+    bass = next(v for v in window.tree.volumes_in(0, "A") if v.name == "BASS")
+    os_file = audio / "S2K REVERB.C"
+    os_file.write_bytes(bytes(range(256)) * 1024)
+    answers.import_answer = ("S3000", False, importing.STEREO_SPLIT, importing.ImportOptions(add_anyway=True))
+    window.tree.filesDropped.emit(bass, [str(os_file)])
+    assert pump(qt_app, lambda: any(a[0] == "import" for a in answers.asked))
+    assert pump(qt_app, lambda: "S2K REVERB.C" in names(window) or "S2K REVERB.c" in names(window))
+
+
 def test_disk_images_are_still_opened_by_dropping_them(qt_app, window, images, tmp_path, answers):
     drop(window, [images["fl1"]])
     assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1)
@@ -338,16 +392,20 @@ def test_the_dialog_offers_add_anyway_only_for_files_it_cant_check(qt_app, audio
 def test_ticking_add_anyway_makes_the_file_importable(qt_app, audio):
     image = audio / "S2K PATCH.C"
     image.write_bytes(bytes(1000))
-    junk = audio / "notes.txt"
-    junk.write_bytes(b"hello")
-    d = edit_dialogs.ImportDialog(None, vol(), [importing.inspect(image), importing.inspect(junk)])
+    note = audio / "notes.txt"
+    note.write_bytes(b"hello")
+    broken = audio / "broken.wav"
+    broken.write_bytes(b"not really a wav")
+    d = edit_dialogs.ImportDialog(None, vol(), [importing.inspect(image), importing.inspect(note), importing.inspect(broken)])
     d.show()
+    assert d.importable == 0 and d.files.item(1).text() == "notes.txt   —   skipped: it isn't audio or an Akai file  (tick “Add anyway” to import it as it is)"
     d.add_anyway.setChecked(True)
-    assert d.options.add_anyway and d.importable == 1  # (the text file has no Akai type to go in as)
+    assert d.options.add_anyway and d.importable == 2  # (the broken WAV is audio that can't be read, which isn't offered)
     assert d.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
     assert d.files.item(0).text() == "S2K PATCH.C   —   added anyway: an Akai file, imported as it is (not checked)"
-    assert d.files.item(1).text().startswith("notes.txt   —   skipped: can't read it as audio")
-    assert "Add anyway" not in d.files.item(1).text()
+    assert d.files.item(1).text() == "notes.txt   —   added anyway: not an Akai file, stored as it is with .X01 added to its name"
+    assert d.files.item(2).text().startswith("broken.wav   —   skipped: can't read it as audio")
+    assert "Add anyway" not in d.files.item(2).text()
 
 
 def test_the_dialog_offers_add_anyway_for_a_file_made_for_another_sampler(qt_app, audio):

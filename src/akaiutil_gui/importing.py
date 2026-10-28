@@ -7,6 +7,10 @@ soundfile and rewritten. Files that are already Akai's (KICK.S3, a program, ...)
 
 Names: a file's name becomes an Akai name (capitals, the characters Akai has, up to 12), and if the volume already has a
 file of that name the new one gets a number, because akaiutil would silently replace the old one.
+
+Any other file (a text file, a PDF) can be added anyway. akaiutil takes a file's type from the end of its name, so such a file
+goes in as it is, with its whole name kept and a type of no known kind (RAW_TYPE) after it. The app can't tell whether that is
+a good idea, so the user has to ask for it.
 """
 
 import re
@@ -33,9 +37,11 @@ AKAI_EXTENSIONS = {
     ".x", ".x3", ".q", ".q3", ".t", ".t3",
     ".m3", ".m9", ".o9", ".f9", ".cd",
 }
-# What akaiutil takes as a file type in a name: a letter and then 9, 1 or 3 (or nothing), or one of its three special ones.
+# What akaiutil takes as a file type in a name: a letter and then 9, 1 or 3 (or nothing), "X" and two hex digits, or one of its three special ones.
 # Any such file can be added anyway, since akaiutil takes the type from the name alone.
-_AKAI_SUFFIX = re.compile(r"\.([a-z][139]?|s9c|cd|s\+)", re.IGNORECASE)
+_AKAI_SUFFIX = re.compile(r"\.([a-z][139]?|s9c|cd|s\+|x[0-9a-f]{2})", re.IGNORECASE)
+RAW_TYPE = ".X01"  # the type a file with no Akai type of its own is stored as: akaiutil's "X" and two hex digits
+_HEX_TYPE = re.compile(r"x[0-9a-f]{2}", re.IGNORECASE)
 SAMPLE_TYPES = ("S3000", "S1000", "S900")
 TRIM_THRESHOLD = 10 ** (-60 / 20)  # silence: quieter than -60 dBFS
 NORMALIZE_PEAK = 10 ** (-1 / 20)  # loudest sample at -1 dBFS
@@ -94,8 +100,10 @@ def default_type(volume_type: str) -> str:
 
 
 def generation(ext: str) -> str:
-    """Which sampler an Akai file's extension is for: "9", "1", "3", or "13" (the types S1000 and S3000 share)."""
+    """Which sampler an Akai file's extension is for: "9", "1", "3", "13" (the types S1000 and S3000 share) or "any" (a hex type)."""
     ext = ext.lower().lstrip(".")
+    if _HEX_TYPE.fullmatch(ext):
+        return "any"  # (a type of no known kind belongs to no sampler)
     if ext in ("cd", "s+") or ext.endswith("3"):
         return "3"
     if ext.endswith("9") or ext == "s9c":
@@ -125,6 +133,8 @@ class Mismatch:
 def sampler_mismatch(ext: str, volume_type: str) -> Mismatch | None:
     """Whether a file of this type doesn't belong in a volume of this type (None: it does)."""
     gen = generation(ext)
+    if gen == "any":
+        return None
     if volume_type == "S900":
         ok = gen == "9"
     elif volume_type == "S1000":
@@ -148,6 +158,40 @@ def akai_file_problem(ext: str, volume_type: str, force: bool = False) -> str | 
     return mismatch.reason
 
 
+# ------------------------------------------------------------------------ disk images
+DISK_IMAGE_MIN_BYTES = 800 * 1024  # a low-density floppy is the smallest disk akaiutil knows
+_IMAGE_EXTENSIONS = {".img", ".iso", ".hds", ".hda", ".dd", ".ima", ".flp", ".dsk", ".raw", ".bin", ".vhd", ".akai", ".hfe", ".fdi"}
+_NOT_DISK_MAGIC = (  # what the start of some other kind of file looks like
+    (b"%PDF", "a PDF"), (b"PK\x03\x04", "a zip archive"), (b"\x89PNG", "a PNG image"), (b"\xff\xd8\xff", "a JPEG image"),
+    (b"GIF8", "a GIF image"), (b"7z\xbc\xaf", "a 7-Zip archive"), (b"Rar!", "a RAR archive"), (b"\x1f\x8b", "a gzip file"),
+    (b"{\\rtf", "an RTF document"), (b"\x7fELF", "a program"), (b"MZ", "a program"), (b"ID3", "an MP3 file"),
+    (b"SQLite format 3", "a database"), (b"<?xml", "an XML file"), (b"<!DOCTYPE", "a web page"), (b"<html", "a web page"),
+    (b"#!", "a script"), (b"RIFF", "a RIFF audio file"), (b"fLaC", "a FLAC file"), (b"OggS", "an Ogg file"), (b"FORM", "an AIFF file"),
+)
+
+
+def disk_image_problem(path: str | Path) -> str | None:
+    """Why this can't be a disk image (None: it might be, and akaiutil can look). Only what is plainly something else is
+    refused: a file too small to hold the smallest disk, one that begins like a PDF, a picture or an archive, or one that is just text."""
+    path = Path(path)
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            head = f.read(512)
+    except OSError as e:
+        return str(e)
+    if size == 0:
+        return "the file is empty"
+    for magic, what in _NOT_DISK_MAGIC:
+        if head.startswith(magic):
+            return f"it's {what}, not a disk image"
+    if size < DISK_IMAGE_MIN_BYTES:
+        return f"it's too small to be a disk image (the smallest, a floppy, is {DISK_IMAGE_MIN_BYTES // 1024} KB)"
+    if path.suffix.lower() not in _IMAGE_EXTENSIONS and all(b in (9, 10, 13) or 32 <= b < 127 or b >= 128 for b in head) and b"\x00" not in head:
+        return "it's a text file, not a disk image"
+    return None
+
+
 # ----------------------------------------------------------------------- looking at a file
 @dataclass(frozen=True)
 class Source:
@@ -160,7 +204,7 @@ class Source:
     frames: int = 0
     problem: str = ""  # why it can't be imported at all
     markers: audio_markers.Markers = audio_markers.Markers()  # the root note and loops the file carries
-    forceable: bool = False  # the problem is only that the app can't check the file: "Add anyway" imports it as an Akai file
+    forceable: bool = False  # the problem is only that the app can't check the file: "Add anyway" imports it as it is
 
     @property
     def bits(self) -> int | None:
@@ -188,9 +232,12 @@ def inspect(path: str | Path) -> Source:
     try:
         info = soundfile.info(str(path))
     except Exception as e:  # soundfile raises its own error types
-        # An operating system image (.C, .C3) or any other file with an Akai type in its name: there is nothing to check it
-        # against, so the user can say to add it as it is. (A name akaiutil can't use as a type is still refused.)
-        forceable = has_akai_suffix(path) and path.is_file() and path.stat().st_size > 0
+        # An operating system image (.C, .C3), a text file, anything: there is nothing to check it against, so the user can say
+        # to add it as it is (a name with no Akai type of its own gets RAW_TYPE after it).
+        # (A name that says it is audio but isn't is probably a mistake, so that one isn't offered.)
+        forceable = kind == "other" and path.is_file() and path.stat().st_size > 0
+        if kind == "other" and not has_akai_suffix(path):
+            return Source(path, kind, problem="it isn't audio or an Akai file", forceable=forceable)
         return Source(path, kind, problem=f"can't read it as audio ({e})", forceable=forceable)
     problem = ""
     if info.channels > 2:
@@ -284,6 +331,8 @@ def describe(src: Source, sample_type: str, stereo: str = STEREO_SPLIT, options:
     if problem:
         return f"skipped: {problem}" + ("  (tick “Add anyway” to import it as it is)" if can_add_anyway(src, volume_type) else "")
     if options.add_anyway and can_add_anyway(src, volume_type):
+        if not has_akai_suffix(src.path) and src.kind == "other":
+            return f"added anyway: not an Akai file, stored as it is with {RAW_TYPE} added to its name"
         mismatch = mismatch_of(src, volume_type, options)
         what = f"{mismatch.reason}; " if mismatch else ""
         return f"added anyway: {what}an Akai file, imported as it is (not checked)"
@@ -306,6 +355,15 @@ def clean_stem(stem: str, limit: int) -> str:
     text = re.sub(r" +", " ", text).strip(" .")
     text = text[:limit].rstrip(" .")
     return text or "SAMPLE"
+
+
+def raw_stem(file_name: str, limit: int) -> str:
+    """The name a file with no Akai type of its own is stored under, ahead of RAW_TYPE: "Notes about the mix.txt" becomes
+    "NOTES ABO.TXT", the start of the name cut short but its extension kept (so that the file can be told apart)."""
+    path = Path(file_name)
+    tail = re.sub(r"[^0-9A-Za-z#+\-]", "", path.suffix[1:]).upper()[:4]
+    tail = f".{tail}" if tail else ""
+    return clean_stem(path.stem, limit - len(tail)) + tail
 
 
 def final_names(base: str, ext: str, channels_out: int, limit: int) -> list[str]:
@@ -418,12 +476,13 @@ def _make_job(src, volume, work_dir: Path, sample_type: str, compress: bool, ste
     for old in work_dir.iterdir():
         old.unlink()
     if src.kind == "akai":
-        problem = akai_file_problem(src.path.suffix, volume.type, force=options.add_anyway)
+        raw = not has_akai_suffix(src.path)  # (a file of no Akai type: it keeps its whole name, with RAW_TYPE after it)
+        ext = RAW_TYPE if raw else src.path.suffix.upper()
+        problem = akai_file_problem(ext, volume.type, force=options.add_anyway)
         if problem:
             raise ValueError(problem)
-        ext = src.path.suffix.upper()
         limit = akai_names.name_limit(volume.type)  # (an S900 volume's names are shorter)
-        base = unique_base(clean_stem(src.path.stem, limit), ext, 1, limit, taken)
+        base = unique_base(raw_stem(src.path.name, limit) if raw else clean_stem(src.path.stem, limit), ext, 1, limit, taken)
         local = work_dir / f"{base}{ext}"
         shutil.copyfile(src.path, local)
         return ImportJob(local, "put")

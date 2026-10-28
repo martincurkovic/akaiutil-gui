@@ -121,6 +121,41 @@ def test_a_mismatch_says_which_samplers_files_they_are():
     assert importing.article("S1000") == "an" and importing.article("S3000") == "a"
 
 
+# ------------------------------------------------------------------------ disk images
+@pytest.mark.parametrize(
+    "head, what",
+    [(b"%PDF-1.7\n", "a PDF"), (b"PK\x03\x04", "a zip archive"), (b"\x89PNG\r\n", "a PNG image"), (b"\xff\xd8\xff\xe0", "a JPEG image"), (b"#!/bin/sh\n", "a script")],
+)
+def test_a_file_that_is_plainly_something_else_is_not_a_disk_image(audio, head, what):
+    big = audio / "doc.bin"  # (even a big one with a disk image's kind of name)
+    big.write_bytes(head + bytes(importing.DISK_IMAGE_MIN_BYTES))
+    assert importing.disk_image_problem(big) == f"it's {what}, not a disk image"
+
+
+def test_a_file_too_small_for_a_disk_or_empty_is_not_a_disk_image(audio):
+    small = audio / "notes.txt"
+    small.write_bytes(bytes(1000))
+    assert "too small to be a disk image" in importing.disk_image_problem(small)
+    empty = audio / "e.img"
+    empty.write_bytes(b"")
+    assert importing.disk_image_problem(empty) == "the file is empty"
+    assert importing.disk_image_problem(audio / "gone.img") is not None
+
+
+def test_a_big_text_file_is_not_a_disk_image_but_a_blank_or_binary_one_is(audio):
+    text = audio / "big.txt"
+    text.write_bytes(b"just words\n" * 100000)
+    assert importing.disk_image_problem(text) == "it's a text file, not a disk image"
+    for name, content in [("blank.img", bytes(importing.DISK_IMAGE_MIN_BYTES)), ("odd.xyz", bytes(range(256)) * 4000), ("floppy.IMG", b"\x00\x01" * 500000)]:
+        (audio / name).write_bytes(content)
+        assert importing.disk_image_problem(audio / name) is None
+
+
+def test_the_real_disk_images_are_disk_images(images):
+    for image in images.values():
+        assert importing.disk_image_problem(image) is None
+
+
 # ------------------------------------------------------------------------ inspecting
 def test_inspecting_audio_reads_what_the_converter_needs(audio):
     src = importing.inspect(make(audio / "a.flac", tone(rate=48000, channels=2), 48000, "PCM_24"))
@@ -185,13 +220,30 @@ def test_the_types_the_app_knows_need_no_adding_anyway(audio, name):
 
 
 @pytest.mark.parametrize("name", ["notes.txt", "disk.img", "data.bin", "noext", "x.c2", "x.abc"])
-def test_a_file_with_no_akai_type_cant_be_added_anyway(audio, name):
+def test_a_file_with_no_akai_type_can_be_added_anyway_and_is_stored_as_it_is(audio, name):
     f = audio / name
     f.write_bytes(b"not audio")
     assert not importing.has_akai_suffix(f)
     src = importing.inspect(f)
-    assert src.problem and not src.forceable
-    assert importing.effective(src, importing.ImportOptions(add_anyway=True)) is src
+    assert src.problem == "it isn't audio or an Akai file" and src.forceable
+    anyway = importing.ImportOptions(add_anyway=True)
+    assert importing.effective(src, anyway).problem == ""
+    assert importing.describe(src, "S3000").endswith("(tick “Add anyway” to import it as it is)")
+    assert importing.describe(src, "S3000", options=anyway) == "added anyway: not an Akai file, stored as it is with .X01 added to its name"
+
+
+@pytest.mark.parametrize(
+    "name, limit, stem",
+    [("notes.txt", 12, "NOTES.TXT"), ("Notes about the mix.txt", 12, "NOTES AB.TXT"), ("README", 12, "README"), ("a.pdf", 10, "A.PDF"), ("my song.mp3", 10, "MY SON.MP3"), (".gitignore", 12, "GITIGNORE")],
+)
+def test_a_file_of_no_akai_type_keeps_its_extension_in_its_name(name, limit, stem):
+    assert importing.raw_stem(name, limit) == stem
+
+
+def test_a_hex_type_belongs_in_every_volume():
+    for volume in ("S900", "S1000", "S3000", "CD3000"):
+        assert importing.sampler_mismatch(".X01", volume) is None
+    assert importing.has_akai_suffix("a.x01") and not importing.has_akai_suffix("a.xyz")
 
 
 def test_what_cant_be_added_anyway_stays_refused(audio):
@@ -202,6 +254,7 @@ def test_what_cant_be_added_anyway_stays_refused(audio):
     make(many, tone(channels=3), 44100, "PCM_16")
     assert not importing.inspect(many).forceable  # audio that is simply unusable
     assert not importing.inspect(audio / "gone.C").forceable  # missing
+    assert not importing.inspect(audio / "gone.txt").forceable
 
 
 def test_an_akai_sample_without_a_header_can_be_added_anyway(audio):
@@ -491,6 +544,27 @@ def test_akai_files_of_the_wrong_sampler_or_with_no_header_are_refused(ed, audio
     assert "doesn't look like an Akai sample" in result.failed[0]
     assert "compressed S900 samples only work in an S900 volume" in result.failed[1]
     assert files(ed, bass) == ["BASS.S3"]
+
+
+def test_a_text_file_is_refused_unless_added_anyway_and_then_goes_in_byte_for_byte(ed, audio, tmp_path):
+    bass = volumes(ed)[1]
+    note = audio / "Patch notes.txt"
+    raw = b"reverb tweaks\nand a second line\n" * 20
+    note.write_bytes(raw)
+    refused = run(ed, bass, [note], tmp_path)
+    assert refused.imported == [] and refused.failed == ["Patch notes.txt: it isn't audio or an Akai file"]
+    result = run(ed, bass, [note], tmp_path, options=importing.ImportOptions(add_anyway=True))
+    assert result.imported == ["PATCH NO.txt.x01"][:0] or len(result.imported) == 1 and result.failed == []
+    name = result.imported[0]
+    assert name.upper() == "PATCH NO.TXT.X01"
+    copied = next(f for f in ed.list_files(bass) if f.name == name)
+    assert copied.size == len(raw)
+    back = tmp_path / "back"
+    back.mkdir()
+    ed.export_files(bass, [copied], back)
+    assert next(back.iterdir()).read_bytes() == raw
+    again = run(ed, bass, [note], tmp_path, options=importing.ImportOptions(add_anyway=True))  # (the same file again is numbered, not replaced)
+    assert len(again.imported) == 1 and again.imported[0] != name
 
 
 def test_an_os_image_is_refused_unless_added_anyway_and_then_goes_in_byte_for_byte(ed, audio, tmp_path):

@@ -12,6 +12,10 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   `os.access` first and says which file.
 
 ## Names
+- akaiutil only takes a file name that ends in a type: `.` and a letter (+ `1`, `3` or `9`), `.S9C`, `.CD`, `.S+`, or `.X` and two hex
+  digits (the type byte itself; `.X00` and `.XFF` are refused). So a `.txt` can't be written under its own name. The GUI stores any
+  other file as `<its name>.X01` (`importing.RAW_TYPE`, `raw_stem`): `NOTES.TXT.x01`, contents untouched, the volume's OS version
+  put on it. A hex type belongs to no sampler, so it is accepted in every kind of volume.
 - An Akai name byte is one of `0-9 A-Z space # + - .`; akaiutil turns anything else into `.`, uppercases (except S900 volumes) and
   maps `_` to a space. 12 characters (10 on an S900). `akai_names.py` checks all of this before akaiutil sees a name.
 - A file's type is its extension (`KICK.S3`); **renaming with a different extension changes the type**, so the GUI only edits the

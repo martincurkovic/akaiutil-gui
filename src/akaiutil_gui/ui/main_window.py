@@ -669,7 +669,9 @@ class MainWindow(QMainWindow):
         )
         if paths:
             settings.set_last_dir("open", str(Path(paths[0]).parent))
-            self.open_images(paths)
+            paths = self._only_disk_images(paths)
+            if paths:
+                self.open_images(paths)
 
     def open_images(
         self,
@@ -758,7 +760,9 @@ class MainWindow(QMainWindow):
         )
         if paths:
             settings.set_last_dir("open", str(Path(paths[0]).parent))
-            self.add_images(paths)
+            paths = self._only_disk_images(paths)
+            if paths:
+                self.add_images(paths)
 
     def add_images(self, paths: list[str]) -> None:
         """Open more disk images next to the ones already open. (akaiutil takes its images when it starts, so this restarts it
@@ -2972,11 +2976,16 @@ class MainWindow(QMainWindow):
         self.handle_drop(paths, volume)
 
     def handle_drop(self, paths: list[str], volume: Volume | None = None) -> None:
-        """Files dropped on the window: audio and Akai files are imported (into `volume`, or the selected one), and anything
-        else is taken to be a disk image to open."""
+        """Files dropped on the window. Dropped on a volume, everything goes into that volume (the import dialog says what it
+        makes of each file). Otherwise audio and Akai files are imported (into the selected volume), anything that could be a
+        disk image is opened, and the rest is turned away."""
         files = importing.expand(paths)
+        if volume is not None:
+            if files:
+                self.import_files(files, volume)
+            return
         samples = [f for f in files if importing.kind_of(f) != "other"]
-        images = [str(f) for f in files if importing.kind_of(f) == "other"]
+        images = self._only_disk_images([f for f in files if importing.kind_of(f) == "other"], dropped=True)
         if samples:
             if images:
                 self.statusBar().showMessage(
@@ -2986,6 +2995,26 @@ class MainWindow(QMainWindow):
             self.import_files(samples, volume)
         elif images:
             self.add_images(images)
+
+    def _only_disk_images(self, files: list, dropped: bool = False) -> list[str]:
+        """The files that might be disk images, as paths. The others are named in a message and left out: akaiutil would "open"
+        a PDF or a text file without complaint, and show a disk with nothing on it."""
+        images, rejected = [], []
+        for f in files:
+            problem = importing.disk_image_problem(f)
+            if problem:
+                rejected.append(f"{Path(f).name}: {problem}")
+            else:
+                images.append(str(f))
+        if rejected:
+            n = len(rejected)
+            self._warn(
+                "Not a disk image" if n == 1 else "Not disk images",
+                f"{'This file' if n == 1 else f'These {n} files'} can't be opened as {'a disk image' if n == 1 else 'disk images'}."
+                + (" To add files to a volume, drop them on the volume in the list of disks." if dropped else ""),
+                rejected,
+            )
+        return images
 
     def closeEvent(self, event) -> None:
         QSettings().setValue("window/geometry", self.saveGeometry())
