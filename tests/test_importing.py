@@ -156,6 +156,30 @@ def test_the_real_disk_images_are_disk_images(images):
         assert importing.disk_image_problem(image) is None
 
 
+def test_an_mp4_or_m4a_file_is_not_a_disk_image(audio):
+    f = audio / "song.m4a"
+    f.write_bytes(b"\x00\x00\x00\x20ftypM4A " + bytes(importing.DISK_IMAGE_MIN_BYTES))
+    assert importing.disk_image_problem(f) == "it's an MP4 or M4A file, not a disk image"
+
+
+def test_a_blank_image_is_blank_and_a_formatted_one_is_not(audio, images):
+    blank = audio / "blank.img"
+    blank.write_bytes(bytes(200000))
+    assert importing.is_blank_image(blank) and not importing.is_blank_image(images["hd"])
+    assert not importing.is_blank_image(audio / "gone.img")
+
+
+@pytest.mark.parametrize("name", ["song.m4a", "SONG.AAC", "a.wma", "a.opus"])
+def test_audio_the_app_cant_read_says_so_instead_of_being_taken_for_something_else(audio, name):
+    f = audio / name
+    f.write_bytes(b"\x00\x00\x00\x20ftypM4A " + bytes(5000))
+    assert importing.kind_of(f) == "audio"
+    src = importing.inspect(f)
+    assert src.problem == f"{name.rsplit('.', 1)[1].upper()} files can't be read (convert it to WAV, AIFF or FLAC first)"
+    assert not src.forceable
+    assert importing.describe(src, "S3000") == f"skipped: {src.problem}"
+
+
 # ------------------------------------------------------------------------ inspecting
 def test_inspecting_audio_reads_what_the_converter_needs(audio):
     src = importing.inspect(make(audio / "a.flac", tone(rate=48000, channels=2), 48000, "PCM_24"))

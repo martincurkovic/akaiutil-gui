@@ -177,6 +177,16 @@ def test_a_folder_can_be_dropped(qt_app, window, editable_hd, audio, answers):
     assert [a[2] for a in answers.asked if a[0] == "import"] == [["a.wav", "b.wav"]]  # the .txt in the folder never reaches the dialog
 
 
+def test_dropping_an_m4a_is_treated_as_audio_it_cant_read_not_as_a_disk_image(qt_app, window, editable_hd, audio, answers):
+    open_volume(qt_app, window, editable_hd)
+    song = audio / "song.m4a"
+    song.write_bytes(b"\x00\x00\x00\x20ftypM4A " + bytes(importing.DISK_IMAGE_MIN_BYTES))
+    drop(window, [song])
+    assert pump(qt_app, lambda: any(a[0] == "import" for a in answers.asked))
+    assert [a[2] for a in answers.asked if a[0] == "import"] == [["song.m4a"]]
+    assert window.tree.topLevelItemCount() == 1 and window._images == [str(editable_hd)]
+
+
 def test_dropping_a_pdf_on_the_window_doesnt_open_it_as_a_disk_image(qt_app, window, editable_hd, audio, answers):
     open_volume(qt_app, window, editable_hd)
     pdf = audio / "manual.pdf"

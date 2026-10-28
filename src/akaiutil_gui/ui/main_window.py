@@ -749,6 +749,39 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(1)
         self._sync_status_labels()
         select, self._open_select = self._open_select, None
+        self._run(
+            engine.list_disks,
+            lambda disks: self._scanned(engine, disks, select),
+            self._open_failed,
+        )
+
+    def _scanned(self, engine: AkaiEngine, disks: list[Disk], select) -> None:
+        """akaiutil has opened the images. Whatever it found no Akai disk in (no partitions, and not an empty image waiting to
+        be formatted) is closed again with a message, since it is something else, and showing it would look like a disk."""
+        if engine is not self._engine:
+            return
+        not_akai = {
+            Path(self._disk_files[d.index]).resolve(): Path(self._disk_files[d.index]).name
+            for d in disks
+            if d.partitions == 0
+            and d.index in self._disk_files
+            and not importing.is_blank_image(self._disk_files[d.index])
+        }
+        if not_akai:
+            n = len(not_akai)
+            log.info("not Akai disks: %s", ", ".join(not_akai.values()))
+            remaining = [p for p in self._images if Path(p).resolve() not in not_akai]
+            if remaining:
+                self.open_images(remaining, writable=self._writable)
+            else:
+                self.close_images()
+            self._warn(
+                "Not an Akai disk image" if n == 1 else "Not Akai disk images",
+                f"akaiutil found no Akai disk in {'this file' if n == 1 else f'these {n} files'}, so "
+                f"{'it was' if n == 1 else 'they were'} not opened.",
+                [f"{name}: not an Akai disk image" for name in not_akai.values()],
+            )
+            return
         self.tree.load(engine, select=select, files=self._disk_files)
         self._update_actions()
 

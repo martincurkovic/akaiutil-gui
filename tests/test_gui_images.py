@@ -41,6 +41,15 @@ def delete_widgets(qt_app):
 
 
 @pytest.fixture
+def warnings(monkeypatch):
+    from akaiutil_gui.ui.main_window import MainWindow
+
+    seen = []
+    monkeypatch.setattr(MainWindow, "_warn", lambda self, title, text, details=None: seen.append((title, text, details)))
+    return seen
+
+
+@pytest.fixture
 def window(qt_app, binary):
     from akaiutil_gui.ui.main_window import MainWindow
 
@@ -305,3 +314,32 @@ def test_reveal_falls_back_to_opening_the_folder(monkeypatch):
     monkeypatch.setattr(reveal.shutil, "which", lambda name: None)
     monkeypatch.setattr(reveal.QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()) or True)
     assert reveal.reveal("/x/disk.img") is True and opened == ["/x"]
+
+
+# --------------------------------------------------------------- files that aren't Akai disks
+def test_a_file_with_no_akai_disk_in_it_is_closed_again_with_a_message(qt_app, window, tmp_path, warnings):
+    junk = tmp_path / "noise.dat"
+    junk.write_bytes(os.urandom(3_000_000))
+    window.open_images([str(junk)])
+    assert pump(qt_app, lambda: bool(warnings))
+    title, text, details = warnings[-1]
+    assert title == "Not an Akai disk image" and details == ["noise.dat: not an Akai disk image"]
+    assert pump(qt_app, lambda: window._engine is None and window.tree.topLevelItemCount() == 0 and window.stack.currentIndex() == 0)
+
+
+def test_the_good_images_stay_open_when_another_turns_out_not_to_be_a_disk(qt_app, window, images, tmp_path, warnings):
+    junk = tmp_path / "noise.dat"
+    junk.write_bytes(os.urandom(3_000_000))
+    window.open_images([str(images["hd"]), str(junk), str(images["fl9"])])
+    assert pump(qt_app, lambda: bool(warnings))
+    assert disks_loaded(qt_app, window, 2)
+    assert names(window) == ["s3000_hd.img", "s900_floppy.img"]
+    assert warnings[-1][2] == ["noise.dat: not an Akai disk image"]
+
+
+def test_a_blank_image_waiting_to_be_formatted_still_opens(qt_app, window, tmp_path, warnings):
+    blank = tmp_path / "blank.img"
+    blank.write_bytes(bytes(3_000_000))
+    window.open_images([str(blank)])
+    assert disks_loaded(qt_app, window, 1)
+    assert warnings == [] and names(window) == ["blank.img"]

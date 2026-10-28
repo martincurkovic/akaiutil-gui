@@ -100,13 +100,26 @@ def test_missing_image_shows_an_error(app, window, tmp_path, monkeypatch):
 
 
 def test_unformatted_image_is_flagged_not_silent(app, window, tmp_path):
-    junk = tmp_path / "junk.img"
-    junk.write_bytes(os.urandom(4096))
-    window.open_images([str(junk)])
+    blank = tmp_path / "blank.img"
+    blank.write_bytes(bytes(4096))  # (an empty image: it can be formatted, so it is shown, with a note)
+    window.open_images([str(blank)])
     assert pump(app, lambda: window.tree.topLevelItemCount() == 1)
     item = window.tree.topLevelItem(0)
     assert "no Akai filesystem" in item.text(0) and item.childCount() == 0
     assert window.statusBar().currentMessage().startswith("⚠")
+
+
+def test_a_file_that_isnt_a_disk_at_all_is_not_shown_as_one(app, window, tmp_path, monkeypatch):
+    from akaiutil_gui.ui.main_window import MainWindow
+
+    shown = []
+    monkeypatch.setattr(MainWindow, "_warn", lambda self, title, text, details=None: shown.append((title, details)))
+    junk = tmp_path / "junk.img"
+    junk.write_bytes(os.urandom(4096))
+    window.open_images([str(junk)])
+    assert pump(app, lambda: shown)
+    assert shown[0] == ("Not an Akai disk image", ["junk.img: not an Akai disk image"])
+    assert pump(app, lambda: window.tree.topLevelItemCount() == 0 and window.stack.currentIndex() == 0)
 
 
 @pytest.mark.parametrize("pref", [settings.THEME_DARK, settings.THEME_LIGHT])

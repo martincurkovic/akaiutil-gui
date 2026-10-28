@@ -28,6 +28,8 @@ from .audio import resample, wavfile
 from .engine.models import ImportJob
 
 AUDIO_EXTENSIONS = {".wav", ".wave", ".aif", ".aiff", ".aifc", ".flac", ".ogg", ".oga", ".mp3", ".caf", ".w64"}
+# Audio the app can't read. It is still audio, so such a file is told so rather than taken for a disk image or stored as it is.
+UNSUPPORTED_AUDIO_EXTENSIONS = {".m4a", ".aac", ".wma", ".opus", ".mp4", ".m4b", ".alac", ".ape", ".wv", ".mid", ".midi", ".mka", ".ac3", ".dts"}
 # What akaiutil's own files end in: a type letter, then 9, 1 or 3 for the sampler (none: S1000 and S3000 share it).
 # (.C and .C3 are operating-system images: not something to drop in by accident.)
 AKAI_EXTENSIONS = {
@@ -54,7 +56,7 @@ _WAV_JOB = {"S3000": "wav3", "S1000": "wav1", "S900": "wav9"}
 def kind_of(path: str | Path) -> str:
     """"audio", "akai" or "other" (anything else is taken to be a disk image)."""
     ext = Path(path).suffix.lower()
-    if ext in AUDIO_EXTENSIONS:
+    if ext in AUDIO_EXTENSIONS or ext in UNSUPPORTED_AUDIO_EXTENSIONS:
         return "audio"
     if ext in AKAI_EXTENSIONS:
         return "akai"
@@ -172,7 +174,8 @@ _NOT_DISK_MAGIC = (  # what the start of some other kind of file looks like
 
 def disk_image_problem(path: str | Path) -> str | None:
     """Why this can't be a disk image (None: it might be, and akaiutil can look). Only what is plainly something else is
-    refused: a file too small to hold the smallest disk, one that begins like a PDF, a picture or an archive, or one that is just text."""
+    refused: a file too small to hold the smallest disk, one that begins like a PDF, a picture or an archive, or one that is just text.
+    That is only a first look; what akaiutil finds in a file it is given settles it (see MainWindow._scanned)."""
     path = Path(path)
     try:
         size = path.stat().st_size
@@ -185,11 +188,22 @@ def disk_image_problem(path: str | Path) -> str | None:
     for magic, what in _NOT_DISK_MAGIC:
         if head.startswith(magic):
             return f"it's {what}, not a disk image"
+    if head[4:8] == b"ftyp":
+        return "it's an MP4 or M4A file, not a disk image"
     if size < DISK_IMAGE_MIN_BYTES:
         return f"it's too small to be a disk image (the smallest, a floppy, is {DISK_IMAGE_MIN_BYTES // 1024} KB)"
     if path.suffix.lower() not in _IMAGE_EXTENSIONS and all(b in (9, 10, 13) or 32 <= b < 127 or b >= 128 for b in head) and b"\x00" not in head:
         return "it's a text file, not a disk image"
     return None
+
+
+def is_blank_image(path: str | Path) -> bool:
+    """Whether the start of the file is nothing but zeros: an empty image, waiting to be formatted."""
+    try:
+        with open(path, "rb") as f:
+            return not any(f.read(64 * 1024))
+    except OSError:
+        return False
 
 
 # ----------------------------------------------------------------------- looking at a file
@@ -229,6 +243,8 @@ def inspect(path: str | Path) -> Source:
                 problem = "this doesn't look like an Akai sample"
                 return Source(path, kind, problem=problem, forceable=True)
         return Source(path, kind, problem=problem)
+    if path.suffix.lower() in UNSUPPORTED_AUDIO_EXTENSIONS:
+        return Source(path, kind, problem=f"{path.suffix.upper()[1:]} files can't be read (convert it to WAV, AIFF or FLAC first)")
     try:
         info = soundfile.info(str(path))
     except Exception as e:  # soundfile raises its own error types

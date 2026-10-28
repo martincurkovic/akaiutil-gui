@@ -11,6 +11,12 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
 - `-r` is the read-only switch. Without it, an image file the user can't write makes akaiutil exit quietly: the GUI checks
   `os.access` first and says which file.
 
+## What counts as a disk
+- akaiutil "opens" any file as a disk. A file that isn't one comes back as `HD9` or a floppy with **0 partitions** (it guesses from the size),
+  while every format the app makes has at least one (a blank floppy gets one too). So `MainWindow._scanned` closes an image that
+  has none, unless its start is all zeros (an empty image waiting for `format…`). `importing.disk_image_problem` is only the quick first
+  look, so that the obvious cases (a PDF, a text file, an MP4) get a reason without starting akaiutil.
+
 ## Names
 - akaiutil only takes a file name that ends in a type: `.` and a letter (+ `1`, `3` or `9`), `.S9C`, `.CD`, `.S+`, or `.X` and two hex
   digits (the type byte itself; `.X00` and `.XFF` are refused). So a `.txt` can't be written under its own name. The GUI stores any
