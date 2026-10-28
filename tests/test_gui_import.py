@@ -350,6 +350,32 @@ def test_ticking_add_anyway_makes_the_file_importable(qt_app, audio):
     assert "Add anyway" not in d.files.item(1).text()
 
 
+def test_the_dialog_offers_add_anyway_for_a_file_made_for_another_sampler(qt_app, audio):
+    sample = audio / "KICK.S3"
+    sample.write_bytes(b"\x03" + bytes(300))
+    sources = [importing.inspect(sample)]
+    d = edit_dialogs.ImportDialog(None, vol("S3000"), sources)
+    d.show()
+    assert not d.add_anyway.isVisible() and d.importable == 1  # (it belongs in an S3000 volume)
+    d = edit_dialogs.ImportDialog(None, vol("S1000"), sources)
+    d.show()
+    assert d.add_anyway.isVisible() and not d.add_anyway.isChecked()
+    assert d.importable == 0 and not d.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
+    assert d.files.item(0).text() == "KICK.S3   —   skipped: S3000 files don't belong in an S1000 volume  (tick “Add anyway” to import it as it is)"
+    d.add_anyway.setChecked(True)
+    assert d.importable == 1 and d.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
+    assert d.files.item(0).text().startswith("KICK.S3   —   added anyway: S3000 files don't belong in an S1000 volume")
+
+
+def test_a_compressed_s900_sample_cant_be_added_anyway_to_another_volume(qt_app, audio):
+    sample = audio / "X.S9C"
+    sample.write_bytes(bytes(400))
+    d = edit_dialogs.ImportDialog(None, vol("S3000"), [importing.inspect(sample)])
+    d.show()
+    assert not d.add_anyway.isVisible() and d.importable == 0
+    assert d.files.item(0).text() == "X.S9C   —   skipped: compressed S900 samples only work in an S900 volume"
+
+
 def test_add_anyway_is_not_remembered_for_the_next_import(qt_app, audio):
     image = audio / "S2K PATCH.C"
     image.write_bytes(bytes(1000))

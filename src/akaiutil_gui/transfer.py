@@ -4,6 +4,9 @@ A move inside one partition is akaiutil's own `reni`, which changes nothing but 
 partition, another disk, or a copy) reads the file out and puts it back byte for byte; a move of that kind deletes the
 original only once the copy is there. A tagged S3000 file keeps its tags (matched by name, see tags.py). The new file gets a numbered name if the volume already has
 one of that name, because akaiutil would otherwise replace the old file.
+
+A file made for another sampler than the destination volume's (an S3000 sample in an S1000 volume) is left out unless the
+caller says to add it anyway; `mismatches` finds those beforehand so the user can be asked.
 """
 
 from collections.abc import Callable
@@ -21,14 +24,28 @@ class TransferResult:
     notes: list[str] = field(default_factory=list)  # "NAME: tags that couldn't come along"
 
 
+def mismatches(items: list[tuple[Volume, FileEntry]], dst: Volume, move: bool) -> list[tuple[str, importing.Mismatch]]:
+    """(file name, how it doesn't suit `dst`) for each of the files that `transfer_files` would hold back."""
+    found = []
+    for src, f in items:
+        if move and (src.disk, src.partition, src.index) == (dst.disk, dst.partition, dst.index):
+            continue  # (nothing is done to it)
+        mismatch = importing.sampler_mismatch(akai_names.split_extension(f.name)[1], dst.type)
+        if mismatch is not None:
+            found.append((f.name, mismatch))
+    return found
+
+
 def transfer_files(
     engine,
     items: list[tuple[Volume, FileEntry]],
     dst: Volume,
     move: bool,
     progress: Callable[[int, int, str], None] | None = None,
+    add_anyway: bool = False,
 ) -> TransferResult:
-    """Copy (or move) files into `dst`, in the order given. Each one succeeds or fails on its own."""
+    """Copy (or move) files into `dst`, in the order given. Each one succeeds or fails on its own. With `add_anyway`, files made
+    for another sampler than the volume's go in as they are instead of being refused (except the ones that would come out wrong)."""
     result = TransferResult()
     taken = {f.name.casefold() for f in engine.list_files(dst)}
     limit = akai_names.name_limit(dst.type)
@@ -39,9 +56,11 @@ def transfer_files(
             result.skipped.append(f"{f.name}: already in {dst.name}")
             continue
         base, ext = akai_names.split_extension(f.name)
-        problem = importing.akai_file_problem(ext, dst.type)
+        problem = importing.akai_file_problem(ext, dst.type, force=add_anyway)
         if problem:
-            result.failed.append(f"{f.name}: {problem}")
+            mismatch = importing.sampler_mismatch(ext, dst.type)
+            hint = " (left out)" if mismatch is not None and mismatch.forceable else ""
+            result.failed.append(f"{f.name}: {problem}{hint}")
             continue
         name_base = importing.unique_base(base, ext, 1, max(limit, len(base)), taken)
         new_name = name_base + ext

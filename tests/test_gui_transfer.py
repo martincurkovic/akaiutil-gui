@@ -162,20 +162,72 @@ def test_pasting_into_the_same_volume_makes_a_numbered_copy(qt_app, window, edit
     assert pump(qt_app, lambda: names(window) == ["KICK.S3", "SNARE.S3", "KICK 2.S3"])
 
 
-def test_pasting_files_the_volume_cant_hold_says_which_and_why(qt_app, window, editable_hd, images, answers):
-    window.open_images([str(editable_hd), str(images["fl9"])])
-    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 2)
-    select(qt_app, window, 1, 2)
+@pytest.fixture
+def floppy_copy(images, tmp_path):
+    """A private copy of the S900 floppy (the images fixture is shared by the whole run)."""
+    import shutil
+
+    copy = tmp_path / "s900.img"
+    shutil.copy(images["fl9"], copy)
+    return copy
+
+
+def paste_s3000_file_into_s900_floppy(app, window, editable_hd, floppy_copy, monkeypatch, answer):
+    """Copy KICK.S3 and paste it into an S900 floppy; the question about it is answered with `answer`. Returns what was asked."""
+    asked = []
+
+    def confirm(parent, title, text, detail="", action="Delete", details_lines=(), other_action=None, default_is_action=False):
+        if title != "Incompatible Files":
+            return True  # (turning editing on)
+        asked.append((title, text, detail, action, other_action, list(details_lines)))
+        return answer
+
+    monkeypatch.setattr(edit_dialogs, "confirm", confirm)
+    window.open_images([str(editable_hd), str(floppy_copy)])
+    assert pump(app, lambda: window.tree.topLevelItemCount() == 2)
+    select(app, window, 1, 2)
     window.table.selectRow(0)
     window.act_copy.trigger()
     floppy = Volume(1, "A", 1, "", "-", "", "", "")
     window.tree.reveal_volume(floppy)
-    assert pump(qt_app, lambda: window._volume is not None and window._volume.disk == 1)
+    assert pump(app, lambda: window._volume is not None and window._volume.disk == 1)
     window.act_paste.trigger()
+    return asked
+
+
+def test_pasting_a_file_for_another_sampler_asks_and_skipping_says_which_and_why(qt_app, window, editable_hd, floppy_copy, answers, monkeypatch):
+    asked = paste_s3000_file_into_s900_floppy(qt_app, window, editable_hd, floppy_copy, monkeypatch, edit_dialogs.OTHER)
     assert pump(qt_app, lambda: bool(answers.warnings))
+    title, text, detail, action, other, lines = asked[0]
+    assert title == "Incompatible Files" and (action, other) == ("Add Anyway", "Skip")
+    assert text == f"1 incompatible file for S900 volume “{window._volume.name}”. Add anyway?"
+    assert detail == "These are S3000 files and the destination volume is an S900 one."
+    assert lines == ["KICK.S3: S3000 files don't belong in an S900 volume"]
     title, text, details = answers.warnings[-1]
     assert title == "Some files weren't transferred" and text == "1 of 1 files weren't copied."
-    assert details == ["KICK.S3: S3000 files don't belong in an S900 volume"]
+    assert details == ["KICK.S3: S3000 files don't belong in an S900 volume (left out)"]
+
+
+def test_adding_a_file_for_another_sampler_anyway_copies_it(qt_app, window, editable_hd, floppy_copy, answers, monkeypatch):
+    paste_s3000_file_into_s900_floppy(qt_app, window, editable_hd, floppy_copy, monkeypatch, True)
+    assert pump(qt_app, lambda: "Copied 1 file to" in window.statusBar().currentMessage())
+    assert answers.warnings == []
+    assert pump(qt_app, lambda: names(window) == ["KICK.S9", "KICK.S3"])
+
+
+def test_cancelling_the_question_copies_nothing_and_shows_no_message(qt_app, window, editable_hd, floppy_copy, answers, monkeypatch):
+    paste_s3000_file_into_s900_floppy(qt_app, window, editable_hd, floppy_copy, monkeypatch, False)
+    pump(qt_app, lambda: False, timeout=0.5)
+    assert answers.warnings == [] and names(window) == ["KICK.S9"]
+
+
+def test_a_matching_paste_asks_nothing(qt_app, window, editable_hd, answers, monkeypatch):
+    monkeypatch.setattr(edit_dialogs, "confirm", lambda parent, title, *a, **kw: pytest.fail("nothing needs asking") if title == "Incompatible Files" else True)
+    open_volume(qt_app, window, editable_hd)
+    window.table.selectRow(0)
+    window.act_copy.trigger()
+    window.act_paste.trigger()
+    assert pump(qt_app, lambda: names(window) == ["KICK.S3", "SNARE.S3", "KICK 2.S3"])
 
 
 # ------------------------------------------------------------------------ dragging in the app

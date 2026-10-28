@@ -2433,6 +2433,9 @@ class MainWindow(QMainWindow):
         engine = self._engine
         if engine is None:
             return
+        add_anyway = self._ask_add_anyway(rows, dst, move)
+        if add_anyway is None:
+            return
         relay = _ProgressRelay(self)
         relay.message.connect(lambda text: self.statusBar().showMessage(text))
         verb = "Moving" if move else "Copying"
@@ -2448,6 +2451,7 @@ class MainWindow(QMainWindow):
                 progress=lambda i, n, name: relay.message.emit(
                     f"{verb} {i + 1} of {n}: {name}…"
                 ),
+                add_anyway=add_anyway,
             )
             return result, (
                 self._sort_after(engine, dst) if sort_after and result.done else ""
@@ -2487,6 +2491,33 @@ class MainWindow(QMainWindow):
             self._edit_failed(dst.disk, message)
 
         self._run_edit(work, done, failed)
+
+    def _ask_add_anyway(
+        self, rows: list[tuple[Volume, FileEntry]], dst: Volume, move: bool
+    ) -> bool | None:
+        """Files made for another sampler than the volume's: put them in anyway, or leave them out? (None: cancel the whole
+        transfer; False when nothing needs asking.) Files that would come out wrong are left out without a question."""
+        found = [
+            (name, m)
+            for name, m in transfer.mismatches(rows, dst, move)
+            if m.forceable
+        ]
+        if not found:
+            return False
+        n = len(found)
+        samplers = list(dict.fromkeys(m.file_sampler for _, m in found))
+        answer = edit_dialogs.confirm(
+            self,
+            "Incompatible Files",
+            f"{n} incompatible file{'s' if n != 1 else ''} for {dst.type} volume “{dst.name}”. Add anyway?",
+            f"These are {' and '.join(samplers)} files and the destination volume is {importing.article(dst.type)} {dst.type} one.",
+            action="Add Anyway",
+            other_action="Skip",
+            details_lines=[f"{name}: {m.reason}" for name, m in found],
+        )
+        if answer is edit_dialogs.OTHER:
+            return False
+        return True if answer else None
 
     def _file_drag_mime(self):
         """What dragging the selected files carries (see ui/file_drag.py)."""

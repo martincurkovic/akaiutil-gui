@@ -20,9 +20,12 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
 
 ## Things that silently go wrong
 - **`wav2sample*` and `put` replace a file of the same name without asking.** `importing.unique_base` numbers new names instead.
-- **`put` and `wav2sample*` accept the wrong sampler's files in a volume** (an S3000 sample in an S900 floppy). The GUI refuses
-  (`importing.akai_file_problem`).
-- `put` of a `.S9C` into a non-S900 volume writes a wrong OS version; refused. Into an S900 volume it keeps the "uncompr" value.
+- **`put` and `wav2sample*` accept the wrong sampler's files in a volume** (an S3000 sample in an S900 floppy). The GUI holds them
+  back by default and asks (`importing.sampler_mismatch`; "Add anyway" in the import dialog, a question before a paste or drop,
+  `transfer.mismatches`), because people do keep S1000/S900 images for an S3000 sampler. The contents are copied byte for byte but the
+  **OS version is replaced by the volume's**: an S3000 sample (17.00) put into an S1000 volume reads 4.40, and an S900 volume has none.
+  Whether a real S3000 lists such a file is untested (see the roadmap).
+- `put` of a `.S9C` into a non-S900 volume writes a wrong OS version; refused, and the one mismatch "Add anyway" doesn't lift. Into an S900 volume it keeps the "uncompr" value.
 - `put` doesn't carry a file's **tags**; `reni` (a move inside one partition) does. A cross-partition move is copy + delete.
 - **`settagi`, `clrtagi`, `settagall` and `clrtagall` crash akaiutil 4.6.7 and 4.6.8** (exit 139): they call
   `akai_rename_file(..., vp=NULL, ...)`, which then reads `vp->type` in its tags section. Nothing is written first. The GUI never

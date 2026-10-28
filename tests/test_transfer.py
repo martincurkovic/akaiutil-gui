@@ -175,10 +175,78 @@ def test_files_of_the_wrong_sampler_arent_copied_into_a_volume(binary, images, e
         hd, fl = vols(eng, "A", 0)["DRUMS"], next(iter(vols(eng, "A", 1).values()))
         assert fl.type == "S900"
         refused = transfer.transfer_files(eng, [(hd, file(eng, hd, "KICK.S3"))], fl, move=False)
-        assert refused.done == [] and refused.failed == ["KICK.S3: S3000 files don't belong in an S900 volume"]
+        assert refused.done == [] and refused.failed == ["KICK.S3: S3000 files don't belong in an S900 volume (left out)"]
         assert names(eng, fl) == ["KICK.S9"]
         accepted = transfer.transfer_files(eng, [(fl, file(eng, fl, "KICK.S9"))], hd, move=False)  # an S3000 volume takes S900 samples
         assert accepted.done == ["KICK.S9"] and "KICK.S9" in names(eng, hd)
+    finally:
+        eng.close()
+
+
+def test_mismatches_lists_the_files_that_would_be_held_back(ed):
+    a = vols(ed, "A")
+    oldie = ed.create_volume(part(ed, "B"), 1, "OLDIE", "S1000")
+    kick, snare = ed.list_files(a["DRUMS"])
+    found = transfer.mismatches([(a["DRUMS"], kick), (a["DRUMS"], snare)], oldie, move=False)
+    assert [name for name, _ in found] == ["KICK.S3", "SNARE.S3"]
+    assert found[0][1].reason == "S3000 files don't belong in an S1000 volume" and found[0][1].forceable
+    assert transfer.mismatches([(a["DRUMS"], kick)], a["BASS"], move=False) == []
+    assert transfer.mismatches([(oldie, kick)], oldie, move=True) == []  # (a move into its own volume does nothing)
+
+
+def test_an_s3000_sample_is_left_out_of_an_s1000_volume_unless_added_anyway(ed, tmp_path):
+    a = vols(ed, "A")
+    oldie = ed.create_volume(part(ed, "B"), 1, "OLDIE", "S1000")
+    kick = file(ed, a["DRUMS"], "KICK.S3")
+    left_out = transfer.transfer_files(ed, [(a["DRUMS"], kick)], oldie, move=False)
+    assert left_out.done == [] and left_out.failed == ["KICK.S3: S3000 files don't belong in an S1000 volume (left out)"]
+    assert names(ed, oldie) == []
+    forced = transfer.transfer_files(ed, [(a["DRUMS"], kick)], oldie, move=False, add_anyway=True)
+    assert forced.done == ["KICK.S3"] and forced.failed == []
+    copy = file(ed, oldie, "KICK.S3")
+    assert copy.size == kick.size and (kick.os_version, copy.os_version) == ("17.00", "4.40")  # (akaiutil puts the volume's highest OS version)
+    assert raw(ed, oldie, copy, tmp_path / "a") == raw(ed, a["DRUMS"], kick, tmp_path / "b")
+
+
+def test_moving_a_mismatched_file_anyway_takes_it_out_of_the_source(ed):
+    a = vols(ed, "A")
+    oldie = ed.create_volume(part(ed, "A"), 5, "OLDIE", "S1000")  # (the same partition: akaiutil's own move)
+    kick = file(ed, a["DRUMS"], "KICK.S3")
+    result = transfer.transfer_files(ed, [(a["DRUMS"], kick)], oldie, move=True, add_anyway=True)
+    assert result.done == ["KICK.S3"] and result.failed == []
+    assert names(ed, oldie) == ["KICK.S3"] and names(ed, a["DRUMS"]) == ["SNARE.S3"]
+
+
+def test_adding_anyway_puts_an_s3000_sample_in_an_s900_floppy_as_it_is(binary, images, editable_hd, tmp_path):
+    floppy = tmp_path / "f9.img"
+    shutil.copy(images["fl9"], floppy)
+    eng = AkaiEngine(binary)
+    eng.open([editable_hd, floppy])
+    eng.set_writable(True)
+    try:
+        hd, fl = vols(eng, "A", 0)["DRUMS"], next(iter(vols(eng, "A", 1).values()))
+        result = transfer.transfer_files(eng, [(hd, file(eng, hd, "SNARE.S3"))], fl, move=False, add_anyway=True)
+        assert result.done == ["SNARE.S3"] and result.failed == []
+        assert names(eng, fl) == ["KICK.S9", "SNARE.S3"]
+        assert file(eng, fl, "SNARE.S3").size == file(eng, hd, "SNARE.S3").size  # (an S900 volume has no OS version to keep)
+    finally:
+        eng.close()
+
+
+def test_a_compressed_s900_sample_is_never_added_anyway_to_another_kind_of_volume(binary, images, editable_hd, tmp_path):
+    floppy = tmp_path / "f9.img"
+    shutil.copy(images["fl9"], floppy)
+    wav = tmp_path / "tone.wav"
+    t = np.arange(8000) / 40000
+    soundfile.write(str(wav), 0.4 * np.sin(2 * np.pi * 440 * t), 40000, subtype="PCM_16")
+    eng = AkaiEngine(binary)
+    eng.open([editable_hd, floppy])
+    eng.set_writable(True)
+    try:
+        hd, fl = vols(eng, "A", 0)["DRUMS"], next(iter(vols(eng, "A", 1).values()))
+        importing.run_import(eng, fl, [importing.inspect(wav)], tmp_path / "w", "S900", compress=True)
+        result = transfer.transfer_files(eng, [(fl, file(eng, fl, "TONE.S9C"))], hd, move=False, add_anyway=True)
+        assert result.done == [] and result.failed == ["TONE.S9C: compressed S900 samples only work in an S900 volume"]
     finally:
         eng.close()
 

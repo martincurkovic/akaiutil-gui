@@ -105,8 +105,25 @@ def generation(ext: str) -> str:
     return "13"
 
 
-def akai_file_problem(ext: str, volume_type: str) -> str | None:
-    """Why a file of this type can't go into a volume of this type (None: it can)."""
+_SAMPLERS = {"9": "S900", "1": "S1000", "3": "S3000", "13": "S1000/S3000"}
+
+
+def article(volume_type: str) -> str:
+    """"an" or "a" for a volume type's name, as it is said: an S900, an S1000, a S3000, a CD3000."""
+    return "an" if volume_type[1] in "19" else "a"
+
+
+@dataclass(frozen=True)
+class Mismatch:
+    """A file made for one sampler going into a volume of another's kind."""
+
+    reason: str  # one line, for the lists of what wasn't done
+    file_sampler: str  # which sampler's files these are: "S3000", "S1000/S3000"...
+    forceable: bool  # whether the user may go ahead anyway (False: akaiutil would write something wrong)
+
+
+def sampler_mismatch(ext: str, volume_type: str) -> Mismatch | None:
+    """Whether a file of this type doesn't belong in a volume of this type (None: it does)."""
     gen = generation(ext)
     if volume_type == "S900":
         ok = gen == "9"
@@ -116,10 +133,19 @@ def akai_file_problem(ext: str, volume_type: str) -> str | None:
         ok = gen in ("3", "1", "13") or (gen == "9" and ext.lower() != ".s9c")
     if ok:
         return None
-    names = {"9": "S900", "1": "S1000", "3": "S3000", "13": "S1000/S3000"}
     if ext.lower() == ".s9c":
-        return "compressed S900 samples only work in an S900 volume"
-    return f"{names[gen]} files don't belong in {'an' if volume_type[1] in '19' else 'a'} {volume_type} volume"
+        return Mismatch("compressed S900 samples only work in an S900 volume", "S900", False)  # (akaiutil would write a wrong OS version)
+    file_sampler = _SAMPLERS[gen]
+    return Mismatch(f"{file_sampler} files don't belong in {article(volume_type)} {volume_type} volume", file_sampler, True)
+
+
+def akai_file_problem(ext: str, volume_type: str, force: bool = False) -> str | None:
+    """Why a file of this type can't go into a volume of this type (None: it can). With `force` the user has said to add it
+    anyway, which lifts every problem but the ones that would make akaiutil write something wrong."""
+    mismatch = sampler_mismatch(ext, volume_type)
+    if mismatch is None or (force and mismatch.forceable):
+        return None
+    return mismatch.reason
 
 
 # ----------------------------------------------------------------------- looking at a file
@@ -182,7 +208,7 @@ class ImportOptions:
     root_from_name: bool = False  # a name ending in a note (Piano_C3) is the root note, if the file doesn't say
     trim: bool = False  # cut silence from the start and end
     normalize: bool = False  # make the loudest sample -1 dBFS
-    add_anyway: bool = False  # import the files the app can't check (Source.forceable) as Akai files, exactly as they are
+    add_anyway: bool = False  # import the files the app can't check (Source.forceable), and Akai files made for another sampler than the volume's, exactly as they are
 
 
 def effective(src: Source, options: ImportOptions) -> Source:
@@ -227,13 +253,40 @@ def conversion_steps(src: Source, sample_type: str, stereo: str = STEREO_SPLIT, 
     return steps
 
 
-def describe(src: Source, sample_type: str, stereo: str = STEREO_SPLIT, options: ImportOptions = ImportOptions()) -> str:
-    """One line for the import dialog."""
+def mismatch_of(src: Source, volume_type: str | None, options: ImportOptions = ImportOptions()) -> Mismatch | None:
+    """How an Akai file (as it will be imported) is for another sampler than the volume's."""
+    src = effective(src, options)
+    if volume_type is None or src.problem or src.kind != "akai":
+        return None
+    return sampler_mismatch(src.path.suffix, volume_type)
+
+
+def can_add_anyway(src: Source, volume_type: str | None = None) -> bool:
+    """Whether ticking "Add anyway" would let this file in: the app can't check it, or it is for another sampler than the volume's."""
+    mismatch = mismatch_of(src, volume_type, ImportOptions(add_anyway=True))
+    return src.forceable or (mismatch is not None and mismatch.forceable)
+
+
+def import_problem(src: Source, volume_type: str | None = None, options: ImportOptions = ImportOptions()) -> str:
+    """Why `src` won't be imported ("" if it will)."""
+    src = effective(src, options)
     if src.problem:
-        if src.forceable and options.add_anyway:
-            return "added anyway: an Akai file, imported as it is (not checked)"
-        hint = "  (tick “Add anyway” to import it as it is)" if src.forceable else ""
-        return f"skipped: {src.problem}{hint}"
+        return src.problem
+    mismatch = mismatch_of(src, volume_type, options)
+    if mismatch is not None and not (options.add_anyway and mismatch.forceable):
+        return mismatch.reason
+    return ""
+
+
+def describe(src: Source, sample_type: str, stereo: str = STEREO_SPLIT, options: ImportOptions = ImportOptions(), volume_type: str | None = None) -> str:
+    """One line for the import dialog. (`volume_type` is for noticing an Akai file made for another sampler than the volume's.)"""
+    problem = import_problem(src, volume_type, options)
+    if problem:
+        return f"skipped: {problem}" + ("  (tick “Add anyway” to import it as it is)" if can_add_anyway(src, volume_type) else "")
+    if options.add_anyway and can_add_anyway(src, volume_type):
+        mismatch = mismatch_of(src, volume_type, options)
+        what = f"{mismatch.reason}; " if mismatch else ""
+        return f"added anyway: {what}an Akai file, imported as it is (not checked)"
     if src.kind == "akai":
         return "Akai file, imported as it is"
     channels = "stereo" if src.channels == 2 else "mono"
@@ -365,7 +418,7 @@ def _make_job(src, volume, work_dir: Path, sample_type: str, compress: bool, ste
     for old in work_dir.iterdir():
         old.unlink()
     if src.kind == "akai":
-        problem = akai_file_problem(src.path.suffix, volume.type)
+        problem = akai_file_problem(src.path.suffix, volume.type, force=options.add_anyway)
         if problem:
             raise ValueError(problem)
         ext = src.path.suffix.upper()
@@ -375,7 +428,7 @@ def _make_job(src, volume, work_dir: Path, sample_type: str, compress: bool, ste
         shutil.copyfile(src.path, local)
         return ImportJob(local, "put")
     if sample_type not in allowed_types(volume.type):
-        raise ValueError(f"{sample_type} samples don't belong in {'an' if volume.type[1] in '19' else 'a'} {volume.type} volume")
+        raise ValueError(f"{sample_type} samples don't belong in {article(volume.type)} {volume.type} volume")
     ext = ".S9C" if sample_type == "S900" and compress else _SAMPLE_EXT[sample_type]
     limit = akai_names.NAME_LENGTH_S900 if sample_type == "S900" or volume.type == "S900" else akai_names.NAME_LENGTH
     channels_out = 1 if (src.channels == 1 or stereo == STEREO_MIX) else 2

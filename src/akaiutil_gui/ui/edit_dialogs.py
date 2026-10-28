@@ -743,7 +743,8 @@ class ImportDialog(QDialog):
             box.toggled.connect(lambda _on: self._refresh())
         self.add_anyway = QCheckBox("Add anyway: import the skipped files as Akai files, unchanged")
         self.add_anyway.setToolTip(
-            "For a file the app can't check, like an operating system image (.C or .C3). It goes in exactly as it is, as the type its "
+            "For a file the app can't check, like an operating system image (.C or .C3), and for Akai files made for another "
+            "sampler than the volume's (an S3000 sample in an S1000 volume). It goes in exactly as it is, as the type its "
             "extension says, with no conversion and no checks. Not remembered: it has to be ticked each time"
         )
         self.add_anyway.toggled.connect(lambda _on: self._refresh())
@@ -781,7 +782,7 @@ class ImportDialog(QDialog):
             widget.setVisible(bool(audio))
         for box in self.option_boxes:
             box.setVisible(bool(audio))
-        self.add_anyway.setVisible(any(s.forceable for s in sources))  # (only when there is something to add anyway)
+        self.add_anyway.setVisible(any(importing.can_add_anyway(s, volume.type) for s in sources))  # (only when there is something to add anyway)
         self.stereo_row[0].setVisible(any(s.channels == 2 for s in audio))
         self.stereo_row[1].setVisible(any(s.channels == 2 for s in audio))
         self.type_combo.currentIndexChanged.connect(self._refresh)
@@ -835,13 +836,13 @@ class ImportDialog(QDialog):
     @property
     def importable(self) -> int:
         options = self.options
-        return sum(1 for s in self._sources if not importing.effective(s, options).problem)
+        return sum(1 for s in self._sources if not importing.import_problem(s, self._volume.type, options))
 
     def _refresh(self) -> None:
         self.compress.setVisible(self.sample_type == "S900" and self.type_row[1].isVisible())
         self.files.clear()
         for s in self._sources:
-            self.files.addItem(f"{s.path.name}   —   {importing.describe(s, self.sample_type, self.stereo, self.options)}")
+            self.files.addItem(f"{s.path.name}   —   {importing.describe(s, self.sample_type, self.stereo, self.options, self._volume.type)}")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(self.importable > 0)
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Import")
 
@@ -988,12 +989,20 @@ class ThreeWayDialog(QDialog):
         layout.addWidget(self.details)
         layout.addLayout(buttons)
         self.go_button.setFocus()
+        self._fit_height()
+
+    def _fit_height(self) -> None:
+        """Make the dialog as tall as its layout needs at its fixed width. Word-wrapped text reports the height of one line
+        to the dialog, which would otherwise be shown too short, with the text cut off."""
+        layout = self.layout()
+        layout.activate()
+        self.setFixedHeight(max(self.sizeHint().height(), layout.heightForWidth(self.WIDTH)))
 
     def _toggle_details(self) -> None:
         show = self.details.isHidden()
         self.details.setVisible(show)
         self.details_button.setText("Hide Details" if show else "Show Details…")
-        self.adjustSize()
+        self._fit_height()
 
     def _finish(self, result) -> None:
         self._result = result

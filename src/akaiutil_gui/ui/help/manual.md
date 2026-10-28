@@ -159,12 +159,12 @@ Right-clicking a volume, a disk or some files shows what you can do with it:
 What you can import:
 
 - **Audio:** WAV, AIFF, FLAC, OGG, MP3, CAF and W64 are all supported. Anything that isn't 16-bit, or is above the maximum sample rate (40 kHz for an S900, 44.1 kHz for all other samplers), is converted first.
-- **Akai files:** `KICK.S3`, programs (`.P3`), effects and so on go in unchanged, but only into a volume of the right sampler.
+- **Akai files:** `KICK.S3`, programs (`.P3`), effects and so on go in unchanged. A file made for a different sampler than the volume's (an S3000 sample in an S1000 volume, say) is marked as skipped until you tick **Add anyway**; see *Files for another sampler* below.
 - **Anything else with an Akai file type in its name**, such as an operating system image (`.C`, `.C3`). The app can't check these, so the dialog marks them as skipped until you tick **Add anyway**. They then go in exactly as they are, as the type the extension says. The choice isn't remembered, and a name with no Akai type (`.bin`, `.txt`) can't be added. Choose **Operating system images** in the file picker's list of file types, or **All files**. (Dropping a `.C` file on the window opens it as a disk image instead, so use **Import Files…**.)
 
 Choices in the dialog:
 
-- **Sample type:** S1000, S3000 or S900 (and for an S900, whether to compress). An S900 volume only takes S900 samples and an S1000 volume only S1000 ones; an S3000 volume takes any.
+- **Sample type:** S1000, S3000 or S900 (and for an S900, whether to compress). Audio is converted to the volume's own kind: an S900 volume gets S900 samples, an S1000 volume S1000 ones, and an S3000 volume any of the three.
 - **Stereo files:** split into a left and a right sample (named `…-L` and `…-R`) or mixed to mono.
 - **Use the loop points and root note stored in the files:** many DAWs and sample editors write these into a WAV. The sample is imported with its loop and root key.
 - **Take the root note from a name ending in a note,** like `Piano_C3`.
@@ -178,6 +178,17 @@ Files are added in **alphabetical order**. A name that's already in the volume g
 
 - **Copy / Cut / Paste:** select files and choose **Edit > Copy Files** (Ctrl/Cmd+C) or **Cut Files** (Ctrl/Cmd+X), select a volume, and choose **Paste Files** (Ctrl/Cmd+V).
 - **Drag and drop:** drag files from the list onto any volume in the disk tree, in any partition or any open disk. A plain drag **copies**; hold **Shift** (Cmd on a Mac) to **move** instead.
+
+### Files for another sampler
+
+Pasting or dropping a file that was made for a different sampler than the volume's (an S3000 sample in an S1000 or S900 volume, or an S900 sample in an S1000 volume) shows a question first, listing the files: **Add Anyway** copies them, **Skip** leaves them out and carries on with the rest, and Cancel stops. Skipped files are named in the message afterwards. Importing Akai files from your computer has the same choice, as the **Add anyway** tick box in the import dialog.
+
+Some people keep S1000 or S900 disk images for their S3000-series sampler and write `.S3` files to them, and that is what this is for. A few things to know:
+
+- The file's contents are copied untouched, but its OS version isn't kept. akaiutil gives it the volume's (an S3000 sample in an S1000 volume shows `4.40`; an S900 volume has no OS version at all).
+- The app can't tell whether your sampler will list the file. A sampler only knows the kinds of file its own generation made, so check on the sampler.
+- Tags aren't carried between volumes of different kinds, and only S3000 and CD3000 volumes have them.
+- A compressed S900 sample (`.S9C`) can't be added anyway outside an S900 volume: akaiutil writes a wrong OS version for it, and the file would come out wrong.
 
 ### Copying a whole volume
 
@@ -290,7 +301,7 @@ On a Mac use Cmd where this says Ctrl.
 
 **Preview is silent or clicks.** Check **Settings > Audio Preview**: pick the right output device, and raise the buffer size if it clicks. Samples that don't have a loop set, or whose play mode isn't set to loop, will only play once even with Loop Preview checked.
 
-**A file can't be imported or pasted.** The message after the import lists each file and why. The usual reasons are a file that isn't audio (an Akai file the app can't check can be imported with **Add anyway**), a file with more than two channels, or a sample for the wrong sampler (an S3000 sample can't go into an S900 volume).
+**A file can't be imported or pasted.** The message after the import lists each file and why. The usual reasons are a file that isn't audio (an Akai file the app can't check can be imported with **Add anyway**), a file with more than two channels, or a file for a different sampler than the volume's (an S3000 sample in an S900 volume). Those can be added anyway, apart from compressed S900 samples (see *Files for another sampler*).
 
 **Dragging files out of the list does nothing.** Use **File > Export…** instead.
 

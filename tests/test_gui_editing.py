@@ -885,6 +885,18 @@ def three_way(lines=("HD5.img  ·  512.0 MB",)):
                                        "There is no undo. Back up this image first?", "Back Up and Edit", "Edit Without Backup", list(lines))
 
 
+def test_the_question_is_tall_enough_for_its_wrapped_text(qt_app):
+    from akaiutil_gui.ui import edit_dialogs
+
+    d = edit_dialogs.ThreeWayDialog(None, "Incompatible Files", "12 incompatible files for S1000 volume “VOLUME 0001”. Add anyway? " * 2,
+                                    "These are S3000 files and the destination volume is an S1000 one. " * 6, "Add Anyway", "Skip", ["a.S3", "b.S3"])
+    d.show()
+    assert d.height() >= d.layout().heightForWidth(d.width())  # (a fixed width and a height for one line of text cut the text off)
+    d.details_button.click()
+    assert d.height() >= d.layout().heightForWidth(d.width()) and not d.details.isHidden()
+    d.close()
+
+
 def test_the_backup_question_has_its_buttons_in_this_order_and_the_last_is_the_default(qt_app):
     d = three_way()
     d.show()

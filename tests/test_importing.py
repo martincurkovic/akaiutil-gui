@@ -100,6 +100,27 @@ def test_the_reason_a_file_doesnt_belong_is_in_words():
     assert importing.akai_file_problem(".S9C", "S3000") == "compressed S900 samples only work in an S900 volume"
 
 
+@pytest.mark.parametrize(
+    "ext, volume, forceable",
+    [(".S3", "S1000", True), (".S3", "S900", True), (".S9", "S1000", True), (".S1", "S900", True), (".P", "S900", True), (".S9C", "S3000", False), (".S9C", "S1000", False)],
+)
+def test_only_files_that_would_come_out_wrong_are_beyond_adding_anyway(ext, volume, forceable):
+    mismatch = importing.sampler_mismatch(ext, volume)
+    assert mismatch is not None and mismatch.forceable is forceable
+    assert (importing.akai_file_problem(ext, volume, force=True) is None) is forceable
+    assert importing.akai_file_problem(ext, volume) == mismatch.reason  # (without the say-so, the same reason as ever)
+
+
+def test_a_matching_file_has_no_mismatch():
+    assert importing.sampler_mismatch(".S3", "S3000") is None and importing.sampler_mismatch(".S9", "S900") is None
+
+
+def test_a_mismatch_says_which_samplers_files_they_are():
+    assert importing.sampler_mismatch(".S3", "S1000").file_sampler == "S3000"
+    assert importing.sampler_mismatch(".S", "S900").file_sampler == "S1000/S3000"
+    assert importing.article("S1000") == "an" and importing.article("S3000") == "a"
+
+
 # ------------------------------------------------------------------------ inspecting
 def test_inspecting_audio_reads_what_the_converter_needs(audio):
     src = importing.inspect(make(audio / "a.flac", tone(rate=48000, channels=2), 48000, "PCM_24"))
@@ -489,12 +510,47 @@ def test_an_os_image_is_refused_unless_added_anyway_and_then_goes_in_byte_for_by
     assert (back / "S2K PATCH.C").read_bytes() == raw
 
 
-def test_adding_anyway_still_honours_the_volumes_sampler(tmp_path):
+def test_an_os_image_for_another_sampler_needs_adding_anyway_for_that_too(tmp_path):
     image = tmp_path / "OS.C3"
     image.write_bytes(bytes(400))
-    forced = importing.effective(importing.inspect(image), importing.ImportOptions(add_anyway=True))
+    s1000 = Volume(0, "A", 1, "V", "-", "", "", "S1000")
+    src = importing.inspect(image)
+    anyway = importing.ImportOptions(add_anyway=True)
+    assert importing.import_problem(src, "S1000").startswith("can't read it as audio")
+    assert importing.import_problem(src, "S1000", anyway) == ""
+    as_akai = importing.effective(src, anyway)
     with pytest.raises(ValueError, match="S3000 files don't belong in an S1000 volume"):
-        importing._make_job(forced, Volume(0, "A", 1, "V", "-", "", "", "S1000"), tmp_path / "w", "S3000", False, importing.STEREO_SPLIT, set(), importing.ImportOptions())
+        importing._make_job(as_akai, s1000, tmp_path / "w", "S3000", False, importing.STEREO_SPLIT, set(), importing.ImportOptions())
+    job = importing._make_job(as_akai, s1000, tmp_path / "w", "S3000", False, importing.STEREO_SPLIT, set(), anyway)
+    assert job.local.name == "OS.C3" and job.kind == "put"
+
+
+def test_an_s3000_sample_goes_into_an_s1000_volume_only_when_added_anyway(ed, audio, tmp_path):
+    oldie = ed.create_volume(ed.list_partitions(ed.list_disks()[0])[0], 5, "OLDIE", "S1000")
+    sample = audio / "NEW KICK.S3"
+    sample.write_bytes(b"\x03" + bytes(400))
+    refused = run(ed, oldie, [sample], tmp_path)
+    assert refused.imported == [] and refused.failed == ["NEW KICK.S3: S3000 files don't belong in an S1000 volume"]
+    assert files(ed, oldie) == []
+    result = run(ed, oldie, [sample], tmp_path, options=importing.ImportOptions(add_anyway=True))
+    assert result.imported == ["NEW KICK.S3"] and result.failed == []
+    assert files(ed, oldie) == ["NEW KICK.S3"]
+
+
+def test_describe_notices_a_file_for_another_sampler(tmp_path):
+    sample = tmp_path / "KICK.S3"
+    sample.write_bytes(b"\x03" + bytes(300))
+    src = importing.inspect(sample)
+    assert importing.describe(src, "S3000", volume_type="S3000") == "Akai file, imported as it is"
+    assert importing.describe(src, "S1000", volume_type="S1000") == "skipped: S3000 files don't belong in an S1000 volume  (tick “Add anyway” to import it as it is)"
+    anyway = importing.ImportOptions(add_anyway=True)
+    assert importing.describe(src, "S1000", options=anyway, volume_type="S1000") == "added anyway: S3000 files don't belong in an S1000 volume; an Akai file, imported as it is (not checked)"
+    assert importing.can_add_anyway(src, "S1000") and not importing.can_add_anyway(src, "S3000")
+    compressed = tmp_path / "X.S9C"
+    compressed.write_bytes(bytes(400))
+    hard = importing.inspect(compressed)
+    assert importing.describe(hard, "S3000", options=anyway, volume_type="S3000") == "skipped: compressed S900 samples only work in an S900 volume"
+    assert not importing.can_add_anyway(hard, "S3000")
 
 
 def test_exported_wavs_keep_their_loops_when_they_come_back(binary, editable_hd, tmp_path):
