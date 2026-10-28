@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QToolTip, QTreeWidget, QTreeWidgetItem
 
@@ -269,9 +269,11 @@ class DiskTree(QTreeWidget):
         painter.restore()
 
     # ------------------------------------------------------------------ API
-    def load(self, engine: AkaiEngine, select: tuple[int, str | None, int | None] | None = None, files: dict[int, str] | None = None) -> None:
+    def load(self, engine: AkaiEngine, select: tuple[int, str | None, int | None] | None = None, files: dict[int, str] | None = None,
+             disks: list[Disk] | None = None) -> None:
         """Show the disks of an engine. `select` is a (disk, partition, volume number) to land on once loaded (default:
-        the first disk); `files` says which image file each disk came from."""
+        the first disk); `files` says which image file each disk came from; `disks` is what the engine already listed
+        (if not given, it is asked)."""
         self._engine = engine
         self._generation += 1
         self._disks = {}
@@ -280,7 +282,10 @@ class DiskTree(QTreeWidget):
         self._reveal = select
         self.clear()
         gen = self._generation
-        run_async(engine.list_disks, lambda disks: self._add_disks(gen, disks), self.failed.emit)
+        if disks is not None:
+            QTimer.singleShot(0, lambda: self._add_disks(gen, disks))
+        else:
+            run_async(engine.list_disks, lambda found: self._add_disks(gen, found), self.failed.emit)
 
     def disk_indexes(self) -> list[int]:
         return sorted(self._disks)

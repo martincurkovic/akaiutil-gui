@@ -782,7 +782,7 @@ class MainWindow(QMainWindow):
                 [f"{name}: not an Akai disk image" for name in not_akai.values()],
             )
             return
-        self.tree.load(engine, select=select, files=self._disk_files)
+        self.tree.load(engine, select=select, files=self._disk_files, disks=disks)
         self._update_actions()
 
     # ----------------------------------------------- adding and closing single disks

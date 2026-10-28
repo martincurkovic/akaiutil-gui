@@ -157,7 +157,7 @@ def open_volume(qt_app, window, image, name):
     window.open_images([str(image)])
     assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1)
     disk = window.tree.topLevelItem(0)
-    assert pump(qt_app, lambda: disk.childCount() >= 1)
+    assert pump(qt_app, lambda: disk.childCount() >= 1 and disk.child(0).text(0).startswith("A"))  # (not the "Loading…" row that stands in until the partitions arrive)
     part = disk.child(0)
     part.setExpanded(True)
     assert pump(qt_app, lambda: part.childCount() == 3)
