@@ -79,6 +79,10 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   `not enough space left` / `cannot create file` / `copy error` and **leaves the half-made volume behind**.
   `engine.copy_volume` checks the name and the room first, clears a clashing load number (`setlnumi <n> OFF`), and deletes the
   copy (`delvoli`) if the output says it failed or the file counts differ.
+- **`copypart` has the same faults for every volume** (merges same-named volumes and replaces their files, stops half way when the
+  partition fills, copies no tag names, takes the load numbers as they are). `engine.copy_partition` doesn't use it: it checks names,
+  volume slots and room for all volumes first, then runs `copy_volume` per volume, removes the ones already copied if one fails, and
+  runs `copytags` afterwards if the destination still has the default names (`TAG A`..`TAG Z`).
 - A destination is a path like `/disk1/B/NEW_NAME`: an underscore for a space, as everywhere.
 - Native `copyi` also keeps tags (by number), so the tar route in `tags.py` is only needed to map tags by name.
 

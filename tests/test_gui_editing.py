@@ -78,6 +78,7 @@ def answers(monkeypatch):
         name = None
         new_volume = None
         copy_volume = None
+        copy_partition = None
         revert = None
         sample_settings = None
         format = None
@@ -102,6 +103,7 @@ def answers(monkeypatch):
     monkeypatch.setattr(MainWindow, "_ask_name", lambda self, what, current, vtype, taken, suffix="": (a.asked.append(("name", what, current, list(taken), suffix)), a.name)[1])
     monkeypatch.setattr(MainWindow, "_ask_new_volume", lambda self, *args: (a.asked.append(("new", args)), a.new_volume)[1])
     monkeypatch.setattr(MainWindow, "_ask_copy_volume", lambda self, vol, count, need, targets: (a.asked.append(("copy", vol.name, count, [t.label for t in targets])), a.copy_volume(targets) if callable(a.copy_volume) else None)[1])
+    monkeypatch.setattr(MainWindow, "_ask_copy_partition", lambda self, part, names, files, need, targets: (a.asked.append(("copypart", part.name, names, files, [t.label for t in targets])), a.copy_partition(targets) if callable(a.copy_partition) else None)[1])
     monkeypatch.setattr(MainWindow, "_ask_revert", lambda self, entries: (a.asked.append(("revert", [(p.name, b.created) for p, b in entries])), a.revert(entries) if callable(a.revert) else None)[1])
     monkeypatch.setattr(MainWindow, "_ask_sample_settings", lambda self, f, current, audio=None: (a.asked.append(("settings", f.name, None if audio is None else len(audio))), a.sample_settings(current) if callable(a.sample_settings) else None)[1])
     monkeypatch.setattr(MainWindow, "_ask_format", lambda self, disk: (a.asked.append(("format", disk.index, disk.type)), a.format)[1])
@@ -375,7 +377,7 @@ def test_context_menus_offer_what_fits_what_was_clicked(qt_app, window, editable
     open_and_show(qt_app, window, editable_hd)
     texts = lambda menu: [a.text().replace("&", "") for a in menu.actions() if not a.isSeparator()]  # noqa: E731
     assert texts(window._tree_menu(window._volume)) == ["Import Files…", "Paste Files", "Sort Files by Name…", "Select Unused Samples", "Export Samples as WAV…", "Copy Volume To…", "Rename…", "Delete…"]
-    assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…", "Export Samples as WAV…"]
+    assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…", "Copy Partition To…", "Export Samples as WAV…"]
 
     window.table.selectRow(0)
     rows = window._selected_rows()
@@ -732,6 +734,49 @@ def test_a_volume_is_copied_from_its_context_menu(qt_app, window, images, editab
     assert asked[1:3] == ("DRUMS", 2) and asked[3][0].startswith("disk0")
     assert pump(qt_app, lambda: window._volume is not None and window._volume.name == "DRUMS COPY" and window.table.rowCount() == 2)
     assert answers.warnings == []
+
+
+def test_a_partition_is_copied_from_its_context_menu(qt_app, window, editable_hd, answers):
+    open_and_show(qt_app, window, editable_hd)
+    part_a = window.tree.partition(0, "A")
+    texts = [a.text() for a in window._tree_menu(part_a).actions() if not a.isSeparator()]
+    assert "Copy Partition To…" in texts
+    answers.copy_partition = lambda targets: next(t.partition for t in targets if t.partition.name == "B")
+    window._copy_partition(part_a)
+    assert pump(qt_app, lambda: window._writable and "Copied 3 volumes of partition A to partition B" in window.statusBar().currentMessage())
+    asked = next(a for a in answers.asked if a[0] == "copypart")
+    assert asked[1:4] == ("A", ("DRUMS", "BASS", "MY SYNTH"), 4) and not any(l.startswith("disk0  ·  partition A") for l in asked[4])
+    assert pump(qt_app, lambda: window._volume is not None and (window._volume.partition, window._volume.name) == ("B", "DRUMS"))
+    assert [v.name for v in window.tree.volumes_in(0, "B")] == ["DRUMS", "BASS", "MY SYNTH"]
+    assert answers.warnings == []
+
+
+def test_a_partition_with_no_volumes_is_not_copied(qt_app, window, editable_hd, answers, monkeypatch):
+    open_and_show(qt_app, window, editable_hd)
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
+    part_b = window.tree.partition(0, "B")
+    window._copy_partition(part_b)
+    assert pump(qt_app, lambda: bool(shown))
+    assert "no volumes to copy" in shown[0] and not any(a[0] == "copypart" for a in answers.asked)
+
+
+def test_the_partition_dialog_warns_about_names_and_room(qt_app):
+    from akaiutil_gui.engine.models import Partition
+    from akaiutil_gui.ui import edit_dialogs
+
+    src = Partition(0, "A", "HD", 8192, 7680, 100, 60.0, 0.8, 1.0)
+    taken = Partition(0, "B", "HD", 8192, 7680, 2000, 60.0, 15.6, 26.0)
+    small = Partition(0, "C", "HD", 8192, 7680, 4, 60.0, 0.03, 0.1)
+    ok = Partition(0, "D", "HD", 8192, 7680, 2000, 60.0, 15.6, 26.0)
+    targets = [edit_dialogs.CopyTarget(taken, ("drums", "OTHER")), edit_dialogs.CopyTarget(small, ()), edit_dialogs.CopyTarget(ok, ("OTHER",))]
+    dialog = edit_dialogs.CopyPartitionDialog(None, src, ("DRUMS", "BASS"), 4, 1_000_000, targets)
+    ok_button = dialog.buttons.button(dialog.buttons.StandardButton.Ok)
+    assert not ok_button.isEnabled() and "already has a volume called “DRUMS”" in dialog.problem.text()
+    dialog.where.setCurrentIndex(1)
+    assert not ok_button.isEnabled() and "only has 0.0 MB free" in dialog.problem.text()
+    dialog.where.setCurrentIndex(2)
+    assert ok_button.isEnabled() and dialog.problem.text() == "" and dialog.target.partition.name == "D"
 
 
 def test_cancelling_the_copy_dialog_changes_nothing(qt_app, window, editable_hd, answers):

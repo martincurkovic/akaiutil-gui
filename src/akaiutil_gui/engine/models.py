@@ -188,6 +188,14 @@ class CatalogEntry:
 
 
 @dataclass(frozen=True)
+class PartitionCopy:
+    """The volumes a partition copy made, and anything about the copy the user should know."""
+
+    volumes: list[Volume]
+    notes: list[str]
+
+
+@dataclass(frozen=True)
 class VolumeCopy:
     """A volume that was copied: where it is now, and anything about the copy the user should know."""
 

@@ -611,6 +611,50 @@ class CopyVolumeDialog(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
 
 
+class CopyPartitionDialog(QDialog):
+    """Which partition to copy a whole partition into."""
+
+    def __init__(self, parent, source: Partition, volume_names: tuple[str, ...], files: int, need_bytes: int, targets: list[CopyTarget]):
+        super().__init__(parent)
+        self.setWindowTitle("Copy Partition")
+        self.setMinimumWidth(420)
+        self._names = volume_names
+        self._need = need_bytes
+        self._targets = targets
+        self.where = QComboBox()
+        for t in targets:
+            self.where.addItem(t.label)
+        self.where.currentIndexChanged.connect(self._validate)
+        self.problem = _problem_label()
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        n = len(volume_names)
+        what = f"Partition {source.name}: {n} volume{'s' if n != 1 else ''}, {files} file{'s' if files != 1 else ''}, about {need_bytes / 2**20:.1f} MB."
+        form = QFormLayout()
+        form.addRow("Copy to", self.where)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(what))
+        layout.addLayout(form)
+        layout.addWidget(self.problem)
+        layout.addWidget(self.buttons)
+        self._validate()
+
+    @property
+    def target(self) -> CopyTarget:
+        return self._targets[self.where.currentIndex()]
+
+    def _validate(self) -> None:
+        problem = None
+        clashes = [n for n in self._names if any(akai_names.same_name(n, t) for t in self.target.volume_names)]
+        if clashes:
+            problem = f"That partition already has {'a volume' if len(clashes) == 1 else 'volumes'} called “{clashes[0]}”" + (f" and {len(clashes) - 1} more." if len(clashes) > 1 else ".")
+        elif self._need > self.target.free_bytes:
+            problem = f"That partition only has {self.target.free_bytes / 2**20:.1f} MB free."
+        self.problem.setText(problem or "")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(problem is None)
+
+
 class DiskFormatDialog(QDialog):
     """What kind of disk, how big, and how it is cut into partitions: for a new image (disk=None) or to
     reformat one that is open (then its size is whatever the image already is)."""

@@ -31,7 +31,7 @@ None of this could be checked by the test runs, which use a fake audio device, o
    rails against picking the wrong disk; start read-only, add editing later.
 2. **Multis.** akaiutil only prints "S3000 multi" for one, so showing its parts means reading the file's bytes ourselves, which
    needs the format. A multi names programs, so it would also allow "programs no multi uses".
-3. **Copy a whole partition** (`copypart`, or `pget`/`pput` to a file): volume copy is done and `copypart` would reuse it.
+3. **Copy a whole partition to a file and back** (`pget`/`pput`). Partition to partition is done (Copy Partition To…); it is not checked on a real sampler.
 4. **Editing tags** (setting, clearing, renaming a partition's tag names). Showing them and keeping them on copy are done.
    akaiutil's `settagi` & co crash (see akaiutil-notes.md), so editing means either patching akaiutil or rewriting a file's tags
    with the same tar trick (delete + import, which moves the file's slot), or `rentag` for the names.

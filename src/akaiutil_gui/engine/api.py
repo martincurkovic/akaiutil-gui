@@ -23,7 +23,7 @@ from pathlib import Path
 from .. import akai_header, akai_names, describe, references, sorting, tags as filetags
 from ..audio import wavfile
 from . import formats, parse
-from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, SampleInfo, Volume, VolumeCopy
+from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, PartitionCopy, SampleInfo, Volume, VolumeCopy
 from .session import EngineError, Session, TrafficCallback
 
 log = logging.getLogger(__name__)
@@ -280,7 +280,7 @@ class AkaiEngine:
                 raise EngineError("akaiutil didn't create the volume.")
             return created
 
-    def copy_volume(self, src: Volume, part: Partition, new_name: str) -> VolumeCopy:
+    def copy_volume(self, src: Volume, part: Partition, new_name: str, tag_notes: bool = True) -> VolumeCopy:
         """Copy a whole volume (every file, its load number and settings) into a hard disk partition, on any open disk, as a
         new volume called `new_name`. akaiutil's `copyvoli` does the work, but it would silently merge into a volume that
         already has the name, copy a load number that another volume already uses, and leave half a volume behind if the
@@ -305,10 +305,7 @@ class AkaiEngine:
                 raise EngineError(f"Partition {part.name} already holds the most volumes it can ({limit}).")
             if any(akai_names.same_name(v.name, clean) for v in self._volumes_at(part.disk, part.name)):
                 raise EngineError(f"There is already a volume called “{clean}” in partition {part.name}.")
-            free_blocks = next(
-                (p.free_blocks for p in parse.parse_partitions(self._run(f"dir /disk{part.disk}").text, part.disk, part.block_size) if p.name == part.name),
-                part.free_blocks,
-            )
+            free_blocks = self._free_blocks(part)
             needed = sum(-(-f.size // part.block_size) for f in files) + COPY_SPARE_BLOCKS
             if needed > free_blocks:
                 raise EngineError(
@@ -332,13 +329,86 @@ class AkaiEngine:
                     self._write(f"setlnumi {created.index} OFF")
                     notes.append(f"Load number {created.load_number} is already used in partition {part.name}, so the copy has none.")
                     created = self._find_volume(part.disk, part.name, created.index) or created
-            if src.type in ("S3000", "CD3000") and any(f.tags for f in files):
+            if tag_notes and src.type in ("S3000", "CD3000") and any(f.tags for f in files):
                 here, there = self.tag_names(src), self.tag_names(created)
                 differing = sorted({n for f in files for n in f.tag_numbers if here.get(n) != there.get(n)})
                 if differing:
                     notes.append("Some files are tagged with tags that are named differently in partition " + part.name
                                  + " (" + ", ".join(f"{n}: “{here.get(n, '')}” became “{there.get(n, '')}”" for n in differing[:5]) + ").")
             return VolumeCopy(created, notes)
+
+    def copy_partition(self, src: Partition, dst: Partition) -> PartitionCopy:
+        """Copy every volume of a hard disk partition into another one (any open disk), under the same names and with everything
+        in them. akaiutil's `copypart` would merge into volumes that share a name, replace their files, and stop half way
+        when the partition fills up, so this does what `copy_volume` does for each volume, after checking the names, the
+        number of volume slots and the room for all of them first. If a volume still fails, the ones already copied are
+        removed again. The tag names go along when the destination still has the default ones."""
+        for part in (src, dst):
+            if part.is_dd or part.type.startswith("FL"):
+                raise EngineError("Only hard disk partitions can be copied.")
+        if (src.disk, src.name) == (dst.disk, dst.name):
+            raise EngineError("Choose a different partition to copy into.")
+        if (src.type == "HD9") != (dst.type == "HD9"):
+            raise EngineError("An S900 partition can only be copied to an S900 hard disk, and other partitions can't.")
+        with self._lock:
+            log.info("copy partition disk%d %s -> disk%d %s", src.disk, src.name, dst.disk, dst.name)
+            self._need_writable()
+            sources = self._volumes_at(src.disk, src.name)
+            if not sources:
+                raise EngineError(f"Partition {src.name} has no volumes to copy.")
+            there = self._volumes_at(dst.disk, dst.name)
+            clashes = [v.name for v in sources if any(akai_names.same_name(v.name, t.name) for t in there)]
+            if clashes:
+                shown = ", ".join(f"“{n}”" for n in clashes[:4]) + (f" and {len(clashes) - 4} more" if len(clashes) > 4 else "")
+                raise EngineError(f"Partition {dst.name} already has {'a volume' if len(clashes) == 1 else 'volumes'} called {shown}.")
+            used, limit = self.volume_slots(dst)
+            if len(used) + len(sources) > limit:
+                raise EngineError(f"Partition {dst.name} would hold {len(used) + len(sources)} volumes, and the most it can hold is {limit}.")
+            files = {v.index: self.list_files(v) for v in sources}
+            needed = sum(-(-f.size // dst.block_size) for fs in files.values() for f in fs) + COPY_SPARE_BLOCKS * len(sources)
+            free_blocks = self._free_blocks(dst)
+            if needed > free_blocks:
+                raise EngineError(
+                    f"Partition {dst.name} hasn't got room: the volumes need about {needed * dst.block_size / 2**20:.1f} MB "
+                    f"and {free_blocks * dst.block_size / 2**20:.1f} MB is free."
+                )
+            copied: list[Volume] = []
+            notes: list[str] = []
+            try:
+                for vol in sources:
+                    result = self.copy_volume(vol, dst, vol.name, tag_notes=False)
+                    copied.append(result.volume)
+                    notes += result.notes
+            except EngineError as e:
+                if not copied:
+                    raise
+                self._run(f"cd /disk{dst.disk}/{dst.name}")
+                for done in copied:
+                    self._run(f"delvoli {done.index}")
+                many = len(copied) != 1
+                raise EngineError(f"{e} The {len(copied)} volume{'s' if many else ''} copied before it {'were' if many else 'was'} removed again.") from e
+            notes += self._carry_tags(sources, files, copied, dst)
+            return PartitionCopy(copied, notes)
+
+    def _carry_tags(self, sources: list[Volume], files: dict[int, list[FileEntry]], copied: list[Volume], dst: Partition) -> list[str]:
+        """After a partition copy: give the destination the source's tag names if it still has the default ones, and say which
+        tags that are in use end up with other names otherwise."""
+        tagged = [v for v in sources if v.type in ("S3000", "CD3000") and any(f.tags for f in files[v.index])]
+        if not tagged:
+            return []
+        here, there = self.tag_names(sources[0]), self.tag_names(copied[0])
+        defaults = {n: f"TAG {chr(64 + n)}" for n in range(1, 27)}
+        if here != there and all(there.get(n, d) == d for n, d in defaults.items()):
+            src_path = f"/disk{sources[0].disk}/{sources[0].partition}"
+            self._write(f"copytags {src_path} /disk{dst.disk}/{dst.name}")
+            self._tag_names.pop((dst.disk, dst.name), None)
+            return []
+        used = sorted({n for v in tagged for f in files[v.index] for n in f.tag_numbers})
+        differing = [n for n in used if here.get(n) != there.get(n)]
+        if not differing:
+            return []
+        return ["Some files are tagged with tags that are named differently in partition " + dst.name
+                + " (" + ", ".join(f"{n}: “{here.get(n, '')}” became “{there.get(n, '')}”" for n in differing[:5]) + ")."]
 
     # ---------------------------------------------------------- a sample's own settings
     def _header_size(self, vol: Volume, f: FileEntry) -> int:
@@ -736,6 +806,13 @@ class AkaiEngine:
             return files
         names = self._partition_tag_names(disk, partition)
         return [_with_tag_names(f, names) for f in files]
+
+    def _free_blocks(self, part: Partition) -> int:
+        """The blocks free in a partition right now (the listing the window holds may be older)."""
+        return next(
+            (p.free_blocks for p in parse.parse_partitions(self._run(f"dir /disk{part.disk}").text, part.disk, part.block_size) if p.name == part.name),
+            part.free_blocks,
+        )
 
     def _find_volume(self, disk: int, partition: str, index: int) -> Volume | None:
         return next((v for v in self._volumes_at(disk, partition) if v.index == index), None)

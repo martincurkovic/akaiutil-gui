@@ -213,6 +213,10 @@ Some people keep S1000 or S900 disk images for their S3000-series sampler and wr
 
 Right-click a volume and choose **Copy Volume To…** to copy it into a hard disk partition. Pick the partition and a name for the copy. The dialog tells you if the partition hasn't got enough free space.
 
+### Copying a whole partition
+
+Right-click a partition and choose **Copy Partition To…** to copy all its volumes into another hard disk partition, on this disk or another. The volumes keep their names, and the dialog tells you if that partition has a volume with the same name or not enough free space. Nothing is merged or overwritten, and if a volume can't be copied the ones already done are taken away again. The tag names go along if the other partition still has the default ones.
+
 ---
 
 ## Changing a sample's settings
