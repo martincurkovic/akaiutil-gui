@@ -151,13 +151,49 @@ damaged (tracks and sectors named), HFE v3 not supported yet.
       bit rate and header fields.
 - [ ] Whether the people using HFE here need **v3** files.
 
+## First real samples (2026-10-29)
+
+The maintainer downloaded six zips of Acrobatics' "AKAI S3000XL HFE Programs" (Vol 1-6) from the web into
+`~/Downloads/Akai HFE Images/`, 20 `.HFE` disks each. They are a commercial sound library, so **they are not in the repo and
+should not be added**. Two (`Alpha_DX.HFE`, `Sitar.HFE` from Vol 1) were unpacked into a scratch folder and checked with
+`dev_docs/hfe_decode_prototype.py` (throwaway Python, not product code: naive string-based MFM decode, about 2 s per disk).
+
+What the samples settled (all **HD, HFE v1**, so nothing here covers DD or v3):
+
+- **Header, as I remembered it:** `HXCPICFE`, revision 0, 80 tracks, 2 sides, track encoding 0 (ISO/IBM MFM), **bit rate 500**
+  (kbit/s: the *data* rate; the cells run at 1 Mbit/s), RPM field 0, interface mode 1, track table at block 1, write-allowed 0xFF,
+  single-step 0xFF, the rest of the header 0xFF. Whether bytes 0x1a-0x1f always read 0xFF isn't known (two files only).
+- **Track table:** 80 entries of `{offset in 512-byte blocks, length in bytes}`; every track is **50,336 bytes** (both sides),
+  99 blocks apart, first track at block 2. File size 4,056,064 = 512 + 512 + 80 x 99 x 512. About 25,168 bytes (201k cells) per
+  side, i.e. one 200 ms revolution at 1 Mcell/s, as expected for 300 RPM.
+- **Interleave and bit order:** 256 bytes of side 0, then 256 of side 1, per 512-byte block; bits **LSB first**. Decoding with
+  that gives clean sync marks (`0x4489` x3), ID marks and data marks.
+- **Sectors:** 10 per track, N=3 (1024 bytes), C and H in the ID fields equal the track and side, **every header and data CRC
+  good, nothing missing** on all 160 tracks of both files. Decoded to 1,638,400 bytes.
+- **akaiutil opens the decoded image as `FLH`**, one partition, volume `ALPHA DX`. So a flat image decoded this way is what the
+  rest of the app already handles.
+- **Skew differs from my table above.** On these disks the first sector on a track alternates **1, 6, 1, 6, ...** (tracks and
+  sides alike), not the `offset 6 / skew 4` that akaiutil's Windows formatter would give (7, 3, ...). So the skew table in
+  "What the flat image has to look like" describes akaiutil's formatter, not necessarily real disks. Decoding doesn't care (it
+  places sectors by number). For *writing*, patching an existing HFE in place keeps whatever the disk had, which is another reason
+  to prefer that over a fresh encode; a fresh encode should copy this 1/6 pattern (HD) unless a real sampler says otherwise.
+- Gap sizes and exact cell timing were **not** examined.
+- The two disks differ in content as expected (`cmp` differs from byte 1571).
+
+Still open: a **DD (800K)** HFE, a **v3** file, anything written by a tool other than the one that made these (the disks look
+like S3000XL-made images converted for Gotek; who made the HFEs is not stated), and the other 238 disks (a batch decode would
+be a good first test: every one should give 10 good sectors on all 160 tracks).
+
 ## State of play
 
-- The user who asked for this (a feature request, not the maintainer) is being asked for sample `.hfe` files; the maintainer
-  knew nothing about HFE beforehand and wants **both reading and writing**. Samples had not arrived when this was written.
-- When they do: put one under `testing_images/` (or `tests/` fixtures if small), note which tool made it and its version byte
-  (`HXCPICFE` = v1, `HXCHFEV3` = v3) here, and use it to settle every **(verify)** above.
-- Nothing in `src/` has changed for this. The only edits so far are these notes, the roadmap entry and the README index.
+- The user who asked for this (a feature request, not the maintainer) has not sent their own files yet; the samples above are
+  stand-ins found online. The maintainer knew nothing about HFE beforehand and wants **both reading and writing**.
+- Read is shown to be feasible in plain Python. **Write has not been tried.** The first thing to do for it is the check that
+  matters most: encode a decoded image back to HFE (and patch-in-place), then compare against the original file's bitstream and
+  confirm the decoder, and ideally Greaseweazle or HxC, accept it.
+- The Greaseweazle question in "Library research" is still open. Given how quickly the decode worked from the spec, the pure
+  Python route looks less costly than first thought; the encoder (CRCs, MFM clock bits, gaps) is the part that needs care.
+- Nothing in `src/` has changed for this. The edits so far are these notes, the prototype, the roadmap entry and the README index.
 
 ## Open questions for the user
 
