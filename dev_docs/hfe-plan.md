@@ -73,20 +73,23 @@ Read from `akaiutil_io.c` / `akaiutil_io.h` (the Windows raw-floppy code spells 
 
 Other Python libraries found were unrelated (`machfs` is Macintosh HFS volumes, not HFE).
 
-## Decision (not final): try Greaseweazle's code, else pure Python
+## Decision: our own `hfe.py` (done, 2026-10-29)
 
-If Greaseweazle's licence, API and bundling check out, reuse it; otherwise write it from the spec. Both live behind the same
-`hfe.py` interface below, so the app side of the plan doesn't depend on the choice. Whatever is chosen, the codec must be
-checked against files made by other software (the user's samples), because round-trip tests alone can't catch a mistake the
-encoder and decoder share.
-
-Proposed module: `src/akaiutil_gui/hfe.py` (Qt-free), keyed on the file's **signature**, not its extension:
+Written in pure Python from the spec and the sample files; Greaseweazle and `hxcfe` are not dependencies (see "Greaseweazle,
+what was found"). The module is `src/akaiutil_gui/hfe.py` (Qt-free), tests in `tests/test_hfe.py`. Its API, keyed on the file's
+**signature**, not its extension:
 
 ```text
-detect(path) -> "hfe" | None                       # HXCPICFE / HXCHFEV3 magic, cheap, used by importing.disk_image_problem
-read_hfe(path) -> FloppyImage                      # flat bytes + geometry + a report (see below)
-write_hfe(image, path, template=None)              # fresh encode, or patch `template` in place
+is_hfe(path) -> bool                      # HXCPICFE / HXCHFEV3 magic: cheap, for importing.disk_image_problem and the open flow
+decode(data, strict=True) -> Decoded      # .image (flat bytes), .sectors_per_track, .density, .problems
+read(path, strict=True) -> Decoded
+patch(original, image) -> bytes           # change only the sectors that differ, everything else bit for bit
+encode(image) -> bytes                    # a new HD file from a flat image (HD only: no DD sample to copy the layout from)
+save(path, image)                         # patch (or encode if there is no file), decode the result and compare, then replace
+HfeError                                  # every refusal, with a sentence for the user
 ```
+
+The design notes that led to it follow; the module docstring says what it does today.
 
 - **Decode** (`read_hfe`): unpack the interleaved bits, find the sync marks (`A1 A1 A1` with the missing clock) and the ID
   address mark, read C/H/R/N and check the header CRC, find the data mark, read 1024 bytes and check the data CRC (CRC-16/CCITT
@@ -156,7 +159,7 @@ damaged (tracks and sectors named), HFE v3 not supported yet.
 The maintainer downloaded six zips of Acrobatics' "AKAI S3000XL HFE Programs" (Vol 1-6) from the web into
 `~/Downloads/Akai HFE Images/`, 20 `.HFE` disks each. They are a commercial sound library, so **they are not in the repo and
 should not be added**. Two (`Alpha_DX.HFE`, `Sitar.HFE` from Vol 1) were unpacked into a scratch folder and checked with
-`dev_docs/hfe_prototype.py` (throwaway Python, not product code: naive string-based MFM decode and encode; `python3 -I hfe_prototype.py selftest <file.hfe>` re-runs every check below).
+a throwaway Python prototype (naive string-based MFM decode and encode; it became `src/akaiutil_gui/hfe.py`, and `tests/test_hfe.py` repeats its checks).
 
 What the samples settled (all **HD, HFE v1**, so nothing here covers DD or v3):
 
@@ -193,9 +196,9 @@ Still open: a **DD (800K)** HFE, a **v3** file, anything written by a tool other
 like S3000XL-made images converted for Gotek; who made the HFEs is not stated), and the other 238 disks (a batch decode would
 be a good first test: every one should give 10 good sectors on all 160 tracks).
 
-## Encoder results (2026-10-29, `hfe_prototype.py`, on `Alpha_DX.HFE` and `Sitar.HFE`)
+## Encoder results (2026-10-29, from the prototype, on `Alpha_DX.HFE` and `Sitar.HFE`)
 
-Two ways of writing, as designed above. About 8 s for the whole self-test per disk, in naive Python.
+Two ways of writing, as designed above.
 
 1. **Patch in place** (`patch(file, flat_image)`: find each sector's data field in the cell stream, re-encode its 1024 bytes + CRC,
    fix the one clock cell after it, leave everything else alone).
@@ -208,7 +211,7 @@ Two ways of writing, as designed above. About 8 s for the whole self-test per di
      **32 bytes** of the 4 MB file, header and track table untouched; decoding the patched HFE gives the same image akaiutil
      wrote, and `dir` lists `EDITED.S3`.
 2. **Fresh encode** (`fresh(flat_image)`: header, index mark, gaps and the 1/6 sector rotation as measured above).
-   - Decodes (with the prototype's own decoder) to the identical image, every CRC good. Same size and track layout as the
+   - Decodes (with our own decoder) to the identical image, every CRC good. Same size and track layout as the
      originals (4,056,064 bytes).
    - It is **not** byte-identical to the originals (about 0.9 M of 4 M bytes differ), as expected from the sync phase point
      above. That means this path is only checked against *my own* decoder.
@@ -222,7 +225,7 @@ Caveats found on the way:
   cell that follows. Both hold on these files. A track whose sector is damaged (bad CRC) is skipped by the decoder and so would be
   left as it was by `patch`: the product code must refuse to write back if the decode reported problems.
 - `side_cells` reads every 512-byte block including the filler; `track_len` is not a multiple of 512 (50,336 = 98 x 512 + 160).
-  Reading and writing must use `ceil(len / 512)` blocks. The prototype does.
+  Reading and writing must use `ceil(len / 512)` blocks. `hfe.py` does.
 
 ## Greaseweazle, what was found
 
@@ -231,27 +234,44 @@ Caveats found on the way:
 - An attempt to install it from GitHub into a throwaway virtualenv (to use its decoder as an independent check of the encoder)
   was **blocked by the permission system** (code from outside the project). It was not retried another way. So its licence, API
   and Akai disk definitions are still unchecked.
-- Given that the prototype's decode and both encode paths took a few hundred lines and worked first time against real files, the
-  recommendation is now: **write it ourselves** (Qt-free `hfe.py` as planned), and use Greaseweazle (or `hxcfe`) only as an
+- Given that the decode and both encode paths took a few hundred lines and worked first time against real files, **we wrote it
+  ourselves** (Qt-free `hfe.py`), and use Greaseweazle (or `hxcfe`) only as an
   external cross-check tool, run by hand. That check is the first thing to do next; see "Next steps".
+
+## Built so far (2026-10-29)
+
+- `src/akaiutil_gui/hfe.py` and `tests/test_hfe.py` (23 tests; the whole suite passes). Nothing in the app uses the module yet.
+- Decoding a disk takes about 0.2 s, patching the same, encoding a new file about 0.5 s (lookup tables; the prototype was ten
+  times slower), so none of it needs special handling in a worker thread beyond what opening already has.
+- Tests generate their own disks (random data encoded by `hfe.encode`), because the samples are copyrighted. One test runs
+  akaiutil against a decoded floppy and patches a real akaiutil edit (`reni`) back in. `test_real_hfe_files_*` runs on every
+  `.hfe` in `testing_images/` (git-ignored) or `$AKAIUTIL_TEST_IMAGES`, and skips without any: it decodes cleanly, patches
+  back to the identical file, and survives a changed sector. It was run on `Alpha_DX.HFE` and `Sitar.HFE` (copied there locally).
+- Refusals, each tested: not HFE, truncated, **v3** ("isn't supported yet"), not MFM, not 80 x 2, a damaged or missing sector
+  (names the track, side and sector; `strict=False` zero-fills and lists them), an image of the wrong size, a low-density
+  disk to `encode`.
+- A decoder lesson worth keeping: it reads only the *data* cells (odd positions); clock cells are ignored, so a flipped clock bit
+  is not an error. Tests that damage a file must flip a data bit (mask `0x02`, `0x08`, `0x20`, `0x80` of a stored byte).
 
 ## Next steps
 
 1. **Independent check of written files.** Convert a patched HFE and a freshly encoded HFE with software that isn't ours (the
    maintainer could run `gw convert` from a Greaseweazle checkout, or open both in the HxC Floppy Emulator software) and compare
-   with the flat image. Ideally also load one on a Gotek/HxC and a sampler.
-2. Run the self-test on **all 120** sample disks (a loop over the six zips, each file unpacked to its own folder).
-3. Get a **DD** HFE and a **v3** HFE. `SIDE_BYTES`, `SPT` and the gaps in the prototype are HD-only constants.
-4. Then turn the prototype into `src/akaiutil_gui/hfe.py` with real tests (`tests/`), following the "How it fits the app" section.
-   Speed is acceptable (about 2 s to decode a disk), and could be cut with lookup tables or numpy if it feels slow in the UI.
+   with the flat image. Ideally also load one on a Gotek/HxC and a sampler. Until then only this module has read what it wrote.
+2. Run the real-file test over **all 120** sample disks (unpack each zip into its own folder under `testing_images/`).
+3. Get a **DD** HFE and a **v3** HFE. The DD path (5 sectors) decodes in theory and has a synthetic test only; `encode` refuses DD;
+   v3 is refused. The gap and size constants in `hfe.py` are HD values measured on two disks.
+4. **The app side**, following "How it fits the app": open (decode to a working image in the app folder, display the original
+   name), the backup question about the original `.hfe`, write-back with `hfe.save` when editing ends or the app closes, an
+   explicit *Save as HFE...*, and a refusal message in the style of `importing.disk_image_problem`. `hfe.is_hfe` is the hook for
+   the open dialog and drop handling. Add a note to `akaiutil-notes.md` and the manual when it lands.
 
 ## State of play
 
 - The user who asked for this (a feature request, not the maintainer) has not sent their own files yet; the samples above are
   stand-ins found online. The maintainer knew nothing about HFE beforehand and wants **both reading and writing**.
-- **Reading and writing both work in plain Python on the two sample disks** (see "Encoder results"), with the caveat that only
-  my own decoder has read the written files.
-- Nothing in `src/` has changed for this. The edits so far are these notes, `hfe_prototype.py`, the roadmap entry and the README index.
+- The codec is done and tested on two real HD disks; the app does not use it yet (next steps 4). Not checked by anything but
+  this module: that other software and real hardware accept what it writes (next steps 1).
 
 ## Open questions for the user
 
