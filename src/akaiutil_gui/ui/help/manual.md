@@ -32,7 +32,7 @@ akaiutil-GUI allows you to open, view and edit Akai S900, S1000 and S3000 disk i
 
 ## Getting started
 
-1. **Open an image.** Choose **File > Open Disk Image…**, or drag the image file onto the window. Files that are plainly not disk images (a PDF, a picture, a text file, anything smaller than a floppy) are turned away with a message instead of being opened. If a file gets past that but akaiutil finds no Akai disk in it, it is closed again with a message too (a blank image waiting to be formatted is fine).
+1. **Open an image.** Choose **File > Open Disk Image…**, or drag the image file onto the window.
 2. Click around. **Every image opens read-only by default**. If you want to edit the image, the app will ask if you want to create a backup first (see [Editing disk images](#editing-disk-images)).
 
 ![The start screen](screenshots/start-screen.png "The start screen")
@@ -42,7 +42,7 @@ akaiutil-GUI allows you to open, view and edit Akai S900, S1000 and S3000 disk i
 ## The main window
 
 - **Disks** (left): every open disk, its partitions, and the volumes in them. The bar under the list shows how full the selected disk or partition is, split by volume.
-- **Search** (top right): filter the files in the selected volume, or search results. Click a column heading to sort the list on screen.
+- **Search** (top right): filter the files in the selected volume, or search results.
 - **Preview waveform**: appears when you select a sample.
 - **Details**: everything akaiutil knows about the selected disk, partition, volume or file. **Raw output** shows the unformatted version.
 
@@ -54,34 +54,31 @@ akaiutil-GUI allows you to open, view and edit Akai S900, S1000 and S3000 disk i
 
 ## Opening disk images
 
-| Do this | To |
-| --- | --- |
-| **File > Open Disk Image…** (Ctrl/Cmd+O) | Open one or more images |
-| **File > Add Disk Image…** (Ctrl/Cmd+Shift+O), or drop files on the window | Add images to the ones already open |
+| Do this                                                                                                                                   | To                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| **File > Open Disk Image…** (Ctrl/Cmd+O)                                                                                                  | Open one or more images             |
+| **File > Add Disk Image…** (Ctrl/Cmd+Shift+O), or drop files on the window                                                                | Add images to the ones already open |
 | The **eject button** at the right of a disk, **File > Close Disk Image** (Ctrl/Cmd+Shift+W), or right-click a disk > **Close Disk Image** | Close one image and keep the others |
-| **File > Close All Images** (Ctrl/Cmd+W) | Close everything |
-| Right-click a disk > **Reveal in Finder** (or Show in Explorer) | See the image file |
-
-Each disk row shows which file it came from. Hard-disk images show their partitions (A, B, C…) and each partition's volumes.
-Floppy images hold a single volume.
+| **File > Close All Images** (Ctrl/Cmd+W)                                                                                                  | Close everything                    |
+| Right-click a disk > **Reveal in Finder** (or Show in Explorer)                                                                           | See the image file                  |
 
 Opening or closing an image restarts akaiutil, which can take a moment with several large images.
 
 ### HFE images (Gotek and HxC emulators)
 
-An **`.hfe`** file is a floppy as a Gotek or HxC floppy emulator plays it. (A Gotek running FlashFloppy can also use ordinary `.img` files, if its settings say the machine is an Akai, so it may not need HFE at all.) akaiutil can't read that format, so the app opens it for you in a different way: it reads the sectors out of the file into a working copy, and akaiutil works on that. You open, browse and edit it like any other image, and the disk shows under the `.hfe` file's name.
+`.hfe` files are not natively supported by akaiutil, so akaiutil-GUI converts them to a format that akaiutil can understand. The editing experience should be reasonably seamless, however `.hfe` files might take a split second longer to load.
 
-- **Edits are written back into the `.hfe` file after each change,** just as they are for an ordinary image. Only the sectors that changed are touched, and the rest of the file stays exactly as it was. If the file can't be written (a read-only card, a full disk) the app says so, keeps your change in the working copy, and tries again after the next change or when you close the image.
+- **Edits are written back into the `.hfe` file after each change,** just as they are for an ordinary image. 
 - **The backup** that editing offers is a copy of the `.hfe` file, and **File > Revert to Backup…** puts it back.
-- **File > Save Disk as HFE…** saves the selected floppy as an `.hfe` file: an HFE image under a new name, or an ordinary floppy image (800 KB or 1.6 MB) as an HFE.
-- **Damaged files** (a few sectors that can't be read, usually errors from when the disk was copied) open **for viewing only**. The warning says which sectors, and which files they belong to. The damaged sectors show as blank, editing is off, and **Save Disk as HFE…** is refused, so the blanks never get written to a file.
-- **File > Save Repaired Copy…** tries to fix a damaged disk in a **new file**. The original is never changed. It puts right what it can, and the summary says how many sectors were fixed, how many couldn't be, and which files are still affected. A few fixes can't be double-checked, and those are marked "probably right".
-- Sectors that can't be fixed stay unreadable. The option **Also rewrite sectors that can't be fixed** makes them load without errors, but they may hold wrong data: a click in a sample, or a file that won't work. Leave it off if you're not sure.
-- Only the format Akai disks use is understood: HFE version 1, MFM, 80 tracks on two sides. A file in HFE version 3 is turned away with the reason.
+- **File > Save Disk as HFE…** saves the selected floppy as an `.hfe` file.
+- **Damaged files** (a few sectors that can't be read) open **for viewing only**. The warning says which sectors, and which files they belong to. The damaged sectors show as blank, editing is off, and **Save Disk as HFE…** is refused, so the blanks never get written to a file.
+- **File > Save Repaired Copy…** tries to fix a damaged disk in a **new file**. The original is never changed. It fixes what it can, and the summary says how many sectors were fixed, how many couldn't be, and which files are still affected.
+- Sectors that can't be fixed stay unreadable. The option **Also rewrite sectors that can't be fixed** makes them load without errors, but they may hold wrong data, potentially causing a click in a sample, or a file that won't load on Akai hardware. Leave it off if you're not sure.
+- Only HFE version 1 files are currently supported. HFE version 3 files are not currently supported.
 
 ### OS boot floppies (S2000 and relatives)
 
-**File > Create OS Boot Floppy…** turns an operating-system file into a floppy image the sampler can boot from: a **`.COD`** (Akai's OS download, named like `S200200.COD`) or the **`.C`** an S2000 saves with Save System. Save it as an `.img` (for a FlashFloppy Gotek) or an `.hfe` (for HxC). It needs no disk open and no akaiutil. The sampler and version come from the file's name or, for a `.C`, from inside it; a file it can't place is turned away. The layout is the one Akai's OSMaker writes, but it hasn't been tried in a sampler yet.
+**File > Create OS Boot Floppy…** turns an operating-system file into a floppy image the sampler can boot from: a **`.COD`** (Akai's OS download, named like `S200200.COD`) or the **`.C`** an S2000 saves with Save System. Save it as an `.img` (for a FlashFloppy Gotek) or an `.hfe` (for HxC).
 
 ---
 
@@ -90,7 +87,7 @@ An **`.hfe`** file is a floppy as a Gotek or HxC floppy emulator plays it. (A Go
 Select a disk, partition, volume or file. The **Details** pane describes the selection. For a sample that means its length, sample rate, root key, tuning, play mode, markers and loops; for a program, its keygroups, each with its key range, tuning, filter and
 the sample played in each velocity zone; for a volume, its number of files, load number and space used.
 
-The list of files shows each file's number (its slot in the volume, which is the order a sampler lists them in), name, type, size, start block, OS version and tags. A file's type is its extension, for example `.S3` for an S3000 sample, `.P3` for an S3000 program. The OS version is the one the sampler's own screen shows (OS 2.00, say). akaiutil prints S3000-series versions 15 higher (`17.00`), so you will see that number if you compare with its output; the volume's details show both.
+The list of files shows each file's number (its slot in the volume, which is the order a sampler lists them in), name, type, size, start block, OS version and tags. A file's type is its extension, for example `.S3` for an S3000 sample, `.P3` for an S3000 program.
 
 **Right-click a column heading** to choose which columns are shown or to reset them. Click a heading to sort by it.
 
@@ -114,7 +111,6 @@ Results are indexed. If you try to search before indexing is complete, only the 
 
 Click on a single sample and its waveform appears under the Details section. By default, the sample will play as soon as you click on it. Press **Space** to play and stop, or click anywhere on the waveform to play from that point.
 
-- Playback stops when a dialog opens over the window (Sample Settings, for one), so the preview doesn't carry on underneath it.
 - If the sample has loop points set, check **Loop Preview** to hear it. Uncheck it to hear the sample play once through to the end. **Loop Preview** is not currently supported for S900 samples.
 - The preview plays through your computer's default output. **Settings** lets you pick another device, change the buffer size, and choose whether samples play as soon as you click them.
 
@@ -124,13 +120,13 @@ The preview uses the same audio engine as [AKAISDS](https://github.com/martincur
 
 ## Taking files out
 
-Select files and use **File > Export…** (Ctrl/Cmd+E) to copy them out of the image exactly as Akai stores them, or **File > Export as WAV…** (Ctrl/Cmd+Shift+E) to convert samples to WAV files. A WAV exported this way saves the sample's root note and loop points in the output file, so a DAW or sample editor can see them too.
+Select files and use **File > Export…** (Ctrl/Cmd+E) to copy them out of the image in Akai format, or **File > Export as WAV…** (Ctrl/Cmd+Shift+E) to convert samples to WAV files. An exported WAV saves the sample's root note and loop points in the output file, so a DAW or sample editor can see them too.
 
 To export a whole volume, partition or disk, right-click it in the tree and choose **Export Samples as WAV…**. Each volume gets a folder named after it (e.g., `A - DRUMS`) inside the folder you pick. Program files and other non-sample files aren't included.
 
 If you export files from several volumes at once, each volume gets its own folder so same-named files can't overwrite each other. If a file already exists in the folder you're asked whether to replace it. **Settings** lets you set a default export folder.
 
-You can also **drag files out of the list** onto the desktop, a Finder or Explorer window, or your DAW. Samples are exported as WAV files; hold **Option** (Alt on Windows and Linux) when you start the drag to export them exactly as Akai format sample files.
+You can also **drag files out of the list** onto the desktop, a Finder or Explorer window, or your DAW. Samples are exported as WAV files. Hold **Option** (Alt on Windows and Linux) and then drag to export them in Akai format.
 
 ---
 
@@ -149,7 +145,7 @@ Everything in the next sections needs editing to be on, and asks to switch it on
 
 ![The backup question](screenshots/backup-question.png "The question asked when editing is switched on")
 
-The first time you switch editing on, the app asks whether to **Back Up and Edit**, or **Edit Without Backup** (**Show Details…** lists the images and their sizes). A backup is a full copy of each open image (on a Mac with APFS the copy is instant and takes no extra space). The backup is kept in the app's own data folder. The app asks once per image per session.
+The first time you switch editing on, the app asks whether to **Back Up and Edit**, or **Edit Without Backup** (**Show Details…** lists the images and their sizes). A backup is a full copy of each open image. The backup is kept in the app's own data folder. The app asks once per image per session.
 
 To go back, choose **File > Revert to Backup…**, pick one of the backups (newest first, with its date and size) and confirm. The image file is replaced by the backup. The 5 most recent backups of each image are kept; older ones are deleted automatically.
 
@@ -175,10 +171,9 @@ Right-clicking a volume, a disk or some files shows what you can do with it:
 
 What you can import:
 
-- **Audio:** WAV, AIFF, FLAC, OGG, MP3, CAF and W64 are all supported. M4A, AAC, WMA and similar aren't: convert them to WAV, AIFF or FLAC first. Anything that isn't 16-bit, or is above the maximum sample rate (40 kHz for an S900, 44.1 kHz for all other samplers), is converted first.
-- **Akai files:** `KICK.S3`, programs (`.P3`), effects and so on go in unchanged. A file made for a different sampler than the volume's (an S3000 sample in an S1000 volume, say) is marked as skipped until you tick **Add anyway**; see *Files for another sampler* below.
-- **Anything else with an Akai file type in its name**, such as an operating system image (`.C`, `.C3`). The app can't check these, so the dialog marks them as skipped until you tick **Add anyway**. They then go in exactly as they are, as the type the extension says. The choice isn't remembered. Choose **Operating system images** in the file picker's list of file types, or **All files**.
-- **Any other file**, such as a text file or a PDF. Tick **Add anyway** and it is stored as it is, with its whole name kept and `.X01` added after it (a sampler's file types are a single byte, and akaiutil takes it from the end of the name), so `Patch notes.txt` becomes `PATCH NO.TXT.x01`. The app can't tell what a sampler will make of a file like that.
+- **Audio:** WAV, AIFF, FLAC, OGG, MP3, CAF and W64 are all supported. Anything that isn't 16-bit, or is above the maximum sample rate (40 kHz for an S900, 44.1 kHz for all other samplers), is converted first.
+- **Akai files:** `KICK.S3`, programs (`.P3`), effects and so on go in unchanged. A file made for a different sampler than the volume's (an S3000 sample in an S1000 volume, say) is marked as skipped unless you tick **Add anyway**; see *Files for another sampler* below.
+- **Anything else with an Akai file type in its name**, such as an operating system image (`.C`, `.C3`). The app can't check these, so the dialog marks them as skipped until you tick **Add anyway**. Choose **Operating system images** in the file picker's list of file types, or **All files**.
 
 **Where to drop files.** Drop them on a volume in the list of disks and everything goes into that volume, through the dialog above. Dropped on the rest of the window, audio and Akai files go into the selected volume, a disk image is opened, and anything else is turned away with a message.
 
@@ -190,7 +185,7 @@ Choices in the dialog:
 - **Take the root note from a name ending in a note,** like `Piano_C3`.
 - **Trim silence** from the start and end (anything quieter than −60 dB unless it's part of a loop) and **Normalise** to −1 dB.
 
-Files are added in **alphabetical order**. A name that's already in the volume gets a number (`KICK 2`): **nothing is ever replaced**. Files that can't be imported (e.g., corrupted files) are listed afterwards.
+Files are added in **alphabetical order**. Files that can't be imported (e.g., corrupted files) are listed afterwards.
 
 ---
 
@@ -202,13 +197,6 @@ Files are added in **alphabetical order**. A name that's already in the volume g
 ### Files for another sampler
 
 Pasting or dropping a file that was made for a different sampler than the volume's (an S3000 sample in an S1000 or S900 volume, or an S900 sample in an S1000 volume) shows a question first, listing the files: **Add Anyway** copies them, **Skip** leaves them out and carries on with the rest, and Cancel stops. Skipped files are named in the message afterwards. Importing Akai files from your computer has the same choice, as the **Add anyway** tick box in the import dialog.
-
-Some people keep S1000 or S900 disk images for their S3000-series sampler and write `.S3` files to them, and that is what this is for. A few things to know:
-
-- The file's contents are copied untouched, but its OS version isn't kept. akaiutil gives it the volume's (an S3000 sample in an S1000 volume shows `4.40`; an S900 volume has no OS version at all).
-- The app can't tell whether your sampler will list the file. A sampler only knows the kinds of file its own generation made, so check on the sampler.
-- Tags aren't carried between volumes of different kinds, and only S3000 and CD3000 volumes have them.
-- A compressed S900 sample (`.S9C`) can't be added anyway outside an S900 volume: akaiutil writes a wrong OS version for it, and the file would come out wrong.
 
 ### Copying a whole volume
 
@@ -292,22 +280,22 @@ Open **Settings** (File > Settings…, or Ctrl/Cmd+,).
 
 On a Mac use Cmd where this says Ctrl.
 
-| Keys | Does |
-| --- | --- |
-| Ctrl+O | Open disk images |
-| Ctrl+Shift+O | Add disk images |
-| Ctrl+N | New disk image |
-| Ctrl+W / Ctrl+Shift+W | Close all images / close the selected disk |
-| Ctrl+E / Ctrl+Shift+E | Export / Export as WAV |
-| Ctrl+F, Esc | Search all files, clear the search |
-| Space | Play or stop the selected sample |
-| F2 | Rename the selected file or volume |
-| Delete | Delete the selected files or volume |
-| Ctrl+C / Ctrl+X / Ctrl+V | Copy / Cut / Paste files |
-| Ctrl+I | Import files into the selected volume |
-| Ctrl+J | Show or hide the akaiutil console |
-| Ctrl+, | Open Settings |
-| F1 (Cmd+? on a Mac) | This manual |
+| Keys                     | Does                                       |
+| ------------------------ | ------------------------------------------ |
+| Ctrl+O                   | Open disk images                           |
+| Ctrl+Shift+O             | Add disk images                            |
+| Ctrl+N                   | New disk image                             |
+| Ctrl+W / Ctrl+Shift+W    | Close all images / close the selected disk |
+| Ctrl+E / Ctrl+Shift+E    | Export / Export as WAV                     |
+| Ctrl+F, Esc              | Search all files, clear the search         |
+| Space                    | Play or stop the selected sample           |
+| F2                       | Rename the selected file or volume         |
+| Delete                   | Delete the selected files or volume        |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copy / Cut / Paste files                   |
+| Ctrl+I                   | Import files into the selected volume      |
+| Ctrl+J                   | Show or hide the akaiutil console          |
+| Ctrl+,                   | Open Settings                              |
+| F1 (Cmd+? on a Mac)      | This manual                                |
 
 ---
 
@@ -350,5 +338,5 @@ The log holds the app's version, your operating system, the images you opened an
 - S900 samples are previewed as one-shots, and get no loops on import.
 - Direct-to-disk recordings (takes) are listed as text only.
 - Adding or closing a disk image restarts akaiutil, so disk numbers can change and the search index is rebuilt.
-- An **HFE** floppy is opened as a working copy and written back after each edit (see [HFE images](#hfe-images-gotek-and-hxc-emulators)). Written files match what HxC's own software produces for blank disks, but have not been tried on a real sampler yet.
+- An **HFE** floppy is opened as a working copy and written back after each edit (see [HFE images](#hfe-images-gotek-and-hxc-emulators)).
 - The app is built on [akaiutil](https://sourceforge.net/projects/akaiutil/) by Klaus Michael Indlekofer (GPL v2 or later). **Help > About** shows the licence.

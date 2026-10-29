@@ -27,7 +27,7 @@ A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil
 - **Recent images** on the start screen.
 - **Export** files in Akai format, or convert samples to WAV.
 - **Editing**: rename and delete files and volumes, create volumes, import samples, format and create new empty disk images.
-- **Sample settings**: change an S1000/S3000 sample's root key, tuning, play mode, markers and loops, on a waveform with draggable markers, zoom and click-to-preview (same mechanism as [AKAISDS](https://github.com/martincurkovic/AKAISDS)).
+- **Sample settings**: change an S1000/S3000 sample's root key, tuning, play mode, markers and loops (same mechanism as [AKAISDS](https://github.com/martincurkovic/AKAISDS)).
 - **Settings**: light, dark or Macintosh System 6 theme, audio output device and buffer size.
 
 Looks like [AKAISDS](https://github.com/martincurkovic/AKAISDS) (shared light/dark theme), and a black-and-white Macintosh System 6 theme (**View > Theme**).
