@@ -28,10 +28,23 @@ A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil
 - **Export** files in Akai format, or convert samples to WAV. Right-click a volume, partition or disk to export all samples at once.
 - **Editing**: rename and delete files and volumes, create volumes, import samples, format a disk, and make new empty disk images.
 - **Sample settings**: change an S1000/S3000 sample's root key, tuning, play mode, markers and loops, on a waveform with draggable markers, zoom and click-to-preview (same mechanism as [AKAISDS](https://github.com/martincurkovic/AKAISDS)).
-- **Settings**: light/dark theme, audio output device and buffer size, a default export folder, and automatically check for updates.
+- **Settings**: light, dark or Macintosh System 6 theme, audio output device and buffer size, a default export folder, and automatically check for updates.
 - **A log file** of what the app did and any errors. See "Reporting a problem" in the user manual.
 
-Looks like [AKAISDS](https://github.com/martincurkovic/AKAISDS) (shared light/dark theme).
+Looks like [AKAISDS](https://github.com/martincurkovic/AKAISDS) (shared light/dark theme), and has a black-and-white Macintosh System 6 theme of its own (**View > Theme**).
+
+## Gallery
+
+<table>
+  <tr>
+    <td align="center"><img alt="The main window in the light theme" src="src/akaiutil_gui/ui/help/screenshots/main-window-light.png" width="430"><br><sub>Light</sub></td>
+    <td align="center"><img alt="The main window in the dark theme" src="src/akaiutil_gui/ui/help/screenshots/main-window-dark.png" width="430"><br><sub>Dark</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img alt="The main window in the Macintosh System 6 theme" src="src/akaiutil_gui/ui/help/screenshots/main-window-system6.png" width="430"><br><sub>Macintosh System 6</sub></td>
+    <td align="center"><img alt="The sample settings window in the Macintosh System 6 theme, with a waveform and a loop" src="src/akaiutil_gui/ui/help/screenshots/sample-settings-system6.png" width="250"><br><sub>Sample settings (System 6)</sub></td>
+  </tr>
+</table>
 
 ## Download & Installation
 

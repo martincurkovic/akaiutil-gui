@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Regenerate the screenshots in the user manual (src/akaiutil_gui/ui/help/screenshots/).
 
-    uv run python scripts/make_manual_screenshots.py
+    uv run python scripts/make_manual_screenshots.py            # every picture
+    uv run python scripts/make_manual_screenshots.py --gallery  # only the README's: the main window in each theme, and the sample settings in System 6
 
 Builds a small demo disk image of invented drum and bass sounds (none of anyone's real samples), runs the real window
 offscreen at a scale factor of 2 (so the PNGs are twice their on-screen size, which is what the manual dialog expects:
@@ -12,6 +13,7 @@ import os
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -49,7 +51,7 @@ def pump(app, cond=lambda: False, timeout=15.0):
 
 def sound(kind: str, rate=44100) -> np.ndarray:
     """A made-up sample, so the waveform on screen looks like something."""
-    rng = np.random.default_rng(abs(hash(kind)) % 2**32)
+    rng = np.random.default_rng(zlib.crc32(kind.encode()))  # (the same sounds every run, so pictures made at different times agree)
     spec = {
         "kick": (0.45, lambda t: np.sin(2 * np.pi * (140 * np.exp(-t * 18) + 45) * t) * np.exp(-t * 7)),
         "snare": (0.35, lambda t: (0.6 * rng.standard_normal(t.size) + np.sin(2 * np.pi * 190 * t)) * np.exp(-t * 16)),
@@ -90,6 +92,27 @@ def save(widget, name: str) -> None:
     print("saved", name)
 
 
+def sample_settings_picture(app, window, work: Path, volume, name: str) -> None:
+    """The Sample Settings dialog for SNARE (with a loop switched on), saved as `name`."""
+    from akaiutil_gui.audio.sample import load_wav
+
+    engine = window._engine
+    snare = next(f for f in engine.list_files(volume) if f.name == "SNARE.S3")
+    current = engine.read_sample_settings(volume, snare)
+    wav = engine.export_sample_wav(volume, snare, work)
+    audio = load_wav(wav, snare.name, None).samples
+    dialog = edit_dialogs.SampleSettingsDialog(window, snare.name, current, audio)
+    on, start_box, end_box, _time, hold = dialog.loop_rows[0]
+    on.setChecked(True)
+    start_box.setValue(int(current.frames * 0.25))
+    end_box.setValue(int(current.frames * 0.6))
+    dialog._select_loop(0)
+    dialog.show()
+    pump(app, timeout=0.4)
+    save(dialog, name)
+    dialog.close()
+
+
 def extra_pictures(app, window, work: Path, volume) -> None:
     """The start screen with some recent images, the Sample Settings dialog (with a loop switched on) and the backup question."""
     from akaiutil_gui.audio.sample import load_wav
@@ -110,21 +133,7 @@ def extra_pictures(app, window, work: Path, volume) -> None:
     save(start, "start-screen.png")
     start.close()
 
-    engine = window._engine
-    snare = next(f for f in engine.list_files(volume) if f.name == "SNARE.S3")
-    current = engine.read_sample_settings(volume, snare)
-    wav = engine.export_sample_wav(volume, snare, work)
-    audio = load_wav(wav, snare.name, None).samples
-    dialog = edit_dialogs.SampleSettingsDialog(window, snare.name, current, audio)
-    on, start_box, end_box, _time, hold = dialog.loop_rows[0]
-    on.setChecked(True)
-    start_box.setValue(int(current.frames * 0.25))
-    end_box.setValue(int(current.frames * 0.6))
-    dialog._select_loop(0)
-    dialog.show()
-    pump(app, timeout=0.4)
-    save(dialog, "sample-settings.png")
-    dialog.close()
+    sample_settings_picture(app, window, work, volume, "sample-settings.png")
 
     question = edit_dialogs.ThreeWayDialog(
         window, "Allow editing?", "Editing changes the disk image files themselves.",
@@ -137,7 +146,8 @@ def extra_pictures(app, window, work: Path, volume) -> None:
     question.close()
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
+    gallery_only = "--gallery" in argv
     binary = find_akaiutil()
     if binary is None:
         print("akaiutil isn't built: run scripts/get_akaiutil.py first")
@@ -153,7 +163,7 @@ def main() -> int:
 
     from akaiutil_gui.ui.main_window import MainWindow
 
-    for scheme in ("dark", "light"):
+    for scheme in ("dark", "light", "system6"):
         theme.apply_to_app(app, scheme)
         window = MainWindow()
         window.resize(*SIZE)
@@ -167,7 +177,9 @@ def main() -> int:
         pump(app, timeout=1.0)
         window.preview.play_button.setEnabled(True)  # (audio is off for this script, which greys Play; the picture shows it as it normally is)
         save(window, f"main-window-{scheme}.png")
-        if scheme == "dark":
+        if scheme == "system6":
+            sample_settings_picture(app, window, work, next(v for v in window.tree.volumes_in(0, "A") if v.name == "DRUMS"), "sample-settings-system6.png")
+        if scheme == "dark" and not gallery_only:
             window.search.setText("hat")
             pump(app, lambda: window._in_results and window.table.rowCount() == 2)
             save(window, "search.png")
@@ -203,4 +215,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
