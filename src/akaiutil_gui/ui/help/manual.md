@@ -284,7 +284,7 @@ Open **Settings** (File > Settings…, or Ctrl/Cmd+,).
 - **Backups:** how long to keep the backups made when editing is switched on (14 days by default; **Never** keeps all backups until you delete them yourself). At most the newest 5 backups of each image are kept.
 - **Troubleshooting:** **Log every command sent to akaiutil** (makes the log bigger, but shows exactly what the app asked akaiutil to do). Turn it on before repeating a problem you want to report. **Show Log File** opens the folder where logs are stored.
 - **akaiutil:** which akaiutil to use (**Locate…**, or **Use Default** for the one that came with the app).
-- **Updates:** check when the app starts (at most once a day). **Help > Check for Updates…** checks right now.
+- **Updates:** check when the app starts (at most once a day). **Help > Check for Updates…** checks right now. When you are several versions behind, the window shows the release notes of every version you missed, newest first.
 
 ---
 

@@ -14,9 +14,14 @@ from akaiutil_gui.ui import update_helper
 from akaiutil_gui.ui.update_dialog import UpdateAvailableDialog
 
 
-def release(tag="v1.2.0", name="Big update", body="## Notes\n\n- faster", url="https://github.com/o/r/releases/tag/v1.2.0"):
-    payload = {"tag_name": tag, "name": name, "body": body, "html_url": url}
-    return json.dumps({k: v for k, v in payload.items() if v is not None}).encode()
+def release(tag="v1.2.0", name="Big update", body="## Notes\n\n- faster", url="https://github.com/o/r/releases/tag/v1.2.0", **flags):
+    payload = {"tag_name": tag, "name": name, "body": body, "html_url": url, **flags}
+    return {k: v for k, v in payload.items() if v is not None}
+
+
+def listing(*releases):
+    """What GitHub's /releases answers: a JSON list of releases, newest first."""
+    return json.dumps(list(releases)).encode()
 
 
 class Fake:
@@ -40,42 +45,82 @@ def test_only_clean_version_numbers_parse(text, expected):
 
 
 def test_a_newer_release_is_reported_with_its_details():
-    fake = Fake(release())
+    fake = Fake(listing(release()))
     info = updates.check_for_update("1.1.0", repo="owner/repo", urlopen=fake)
     assert (info.version, info.tag, info.name, info.notes) == ("1.2.0", "v1.2.0", "Big update", "## Notes\n\n- faster")
     assert info.html_url == "https://github.com/o/r/releases/tag/v1.2.0"
     request, timeout = fake.requests[0]
-    assert request.full_url == "https://api.github.com/repos/owner/repo/releases/latest"
+    assert request.full_url == "https://api.github.com/repos/owner/repo/releases?per_page=30"
     assert request.get_header("User-agent") == "akaiutil-gui/1.1.0"  # GitHub's API rejects requests without one
     assert timeout == updates.REQUEST_TIMEOUT <= 5, "a check must never hang the app"
 
 
 @pytest.mark.parametrize("current", ["1.2.0", "1.3.0", "2.0.0"])
 def test_the_same_or_an_older_release_is_not_an_update(current):
-    assert updates.check_for_update(current, repo="o/r", urlopen=Fake(release("v1.2.0"))) is None
+    assert updates.check_for_update(current, repo="o/r", urlopen=Fake(listing(release("v1.2.0")))) is None
 
 
 def test_versions_compare_numerically_not_as_text():
-    assert updates.check_for_update("1.9.0", repo="o/r", urlopen=Fake(release("v1.10.0"))).version == "1.10.0"
+    assert updates.check_for_update("1.9.0", repo="o/r", urlopen=Fake(listing(release("v1.10.0")))).version == "1.10.0"
 
 
 def test_a_dev_build_never_asks_the_network():
-    fake = Fake(release())
+    fake = Fake(listing(release()))
     assert updates.check_for_update("0.0.0-dev", repo="o/r", urlopen=fake) is None and fake.requests == []
     assert updates.is_dev_build("0.0.0-dev") and not updates.is_dev_build("1.0.0")
 
 
 def test_without_a_repository_it_says_so_instead_of_guessing():
     with pytest.raises(updates.UpdatesNotConfigured, match="no GitHub repository"):
-        updates.check_for_update("1.0.0", repo="", urlopen=Fake(release()))
+        updates.check_for_update("1.0.0", repo="", urlopen=Fake(listing(release())))
 
 
 def test_a_release_with_odd_data_is_handled():
-    bare = Fake(json.dumps({"tag_name": "v2.0.0"}).encode())  # no name, body or url
+    bare = Fake(listing({"tag_name": "v2.0.0"}))  # no name, body or url
     info = updates.check_for_update("1.0.0", repo="o/r", urlopen=bare)
     assert (info.name, info.notes, info.html_url) == ("v2.0.0", "", "https://github.com/o/r/releases")
-    assert updates.check_for_update("1.0.0", repo="o/r", urlopen=Fake(release(tag="nightly"))) is None  # not a version
-    assert updates.check_for_update("1.0.0", repo="o/r", urlopen=Fake(b'{"body": null}')) is None
+    assert updates.check_for_update("1.0.0", repo="o/r", urlopen=Fake(listing(release(tag="nightly")))) is None  # not a version
+    assert updates.check_for_update("1.0.0", repo="o/r", urlopen=Fake(listing({"body": None}))) is None
+
+
+def test_every_release_newer_than_the_installed_one_has_its_notes_shown_newest_first():
+    fake = Fake(listing(
+        release("v0.3.0", "Version 0.3.0", "- third", "https://x/0.3.0"),
+        release("v0.2.0", "Version 0.2.0", "- second", "https://x/0.2.0"),
+        release("v0.1.0", "Version 0.1.0", "- first"),
+    ))
+    info = updates.check_for_update("0.1.0", repo="o/r", urlopen=fake)
+    assert (info.version, info.html_url) == ("0.3.0", "https://x/0.3.0")  # (the update is the newest)
+    assert info.notes == "# Version 0.3.0\n\n- third\n\n---\n\n# Version 0.2.0\n\n- second"  # (nothing from 0.1.0 or older)
+
+
+def test_one_newer_release_keeps_its_notes_exactly_as_written():
+    info = updates.check_for_update("0.2.0", repo="o/r", urlopen=Fake(listing(release("v0.3.0", body="## Notes\n\n- x"), release("v0.2.0"))))
+    assert info.notes == "## Notes\n\n- x"
+
+
+def test_releases_are_ordered_by_version_not_by_the_order_github_lists_them():
+    info = updates.check_for_update("1.0.0", repo="o/r", urlopen=Fake(listing(
+        release("v1.1.1", "Patch", "- patch"), release("v1.2.0", "Minor", "- minor"), release("v1.10.0", "Ten", "- ten"))))
+    assert info.version == "1.10.0" and info.notes.index("# Ten") < info.notes.index("# Minor") < info.notes.index("# Patch")
+
+
+def test_drafts_prereleases_and_odd_tags_are_left_out():
+    info = updates.check_for_update("1.0.0", repo="o/r", urlopen=Fake(listing(
+        release("v3.0.0", "Beta", "- beta", prerelease=True), release("v2.5.0", "Draft", "- draft", draft=True),
+        release("nightly", "Nightly", "- n"), release("v1.1.0", "Real", "- real"))))
+    assert (info.version, info.notes) == ("1.1.0", "- real")
+    assert updates.check_for_update("1.0.0", repo="o/r", urlopen=Fake(listing(release("v2.0.0", prerelease=True)))) is None
+
+
+def test_a_release_with_no_description_still_gets_its_heading():
+    info = updates.check_for_update("1.0.0", repo="o/r", urlopen=Fake(listing(release("v1.2.0", "Two", None), release("v1.1.0", "One", "- one"))))
+    assert info.notes == "# Two\n\n---\n\n# One\n\n- one"
+
+
+def test_an_error_object_instead_of_a_list_is_a_failure_not_an_update():
+    with pytest.raises(ValueError, match="list of releases"):
+        updates.check_for_update("1.0.0", repo="o/r", urlopen=Fake(b'{"message": "API rate limit exceeded"}'))
 
 
 def test_network_and_parse_failures_are_raised_for_the_caller_to_decide():
