@@ -38,7 +38,7 @@ You can also drag and drop image files onto the window.
 
 1. Clone the repository
 2. Run the relevant script for your platform (located in the `scripts` folder). Note that running a PowerShell script on Windows for the first time will trigger a warning but it can be mitigated by running `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` before running the build script. On Linux or macOS you _may_ need to run `chmod +x build_xxx.sh` on the relevant script for your platform
-3. The final build lands in the `src` directory (`akaiutil-GUI.app` on macOS, `akaiutil-GUI.dist` on Linux and Windows)
+3. The final build lands in the `src` directory (`akaiutil-GUI.app` on macOS, `akaiutil-GUI.dist` on Linux and Windows). On macOS the script also writes `akaiutil-GUI-macos-{arm,intel}.dmg` in the repository root: a window with the app, an Applications shortcut and a background picture (`assets/dmg/`, laid out by `scripts/dmg_settings.py`)
 
 Each script: syncs the environment, fetches akaiutil into `build/bin/`, writes the version from the nearest git tag into `src/akaiutil_gui/_version.py`, generates `src/pysidedeploy.spec` (not tracked), and runs `pyside6-deploy`. The built app contains the stylesheet template, icons, `THIRD_PARTY_NOTICES.md`, `LICENSE`, and akaiutil (in a `bin/` folder next to the app's executable, where the app looks for it first).
 

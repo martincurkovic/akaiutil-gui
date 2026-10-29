@@ -30,19 +30,13 @@ jobs:
       - name: Build
         run: |
           chmod +x scripts/build_macos.sh
-          ./scripts/build_macos.sh
+          ./scripts/build_macos.sh  # also builds $APP_NAME-macos-{arm,intel}.dmg at the repo root
       - name: Smoke-test the built app
         run: |
           BIN=$(find "src/$APP_NAME.app/Contents/MacOS" -maxdepth 1 -type f -perm -u+x -name 'main*' | head -1)
           echo "Running $BIN"
           QT_QPA_PLATFORM=offscreen AKAIUTIL_GUI_NO_AUDIO=1 "$BIN" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
           cat smoke.txt
-      - name: Build DMG
-        run: |
-          mkdir -p dmg-staging
-          cp -r "src/$APP_NAME.app" dmg-staging/
-          ln -s /Applications dmg-staging/Applications
-          hdiutil create -volname "$APP_NAME" -srcfolder dmg-staging -ov -format UDZO "$APP_NAME-macos-arm.dmg"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-macos-arm
@@ -64,19 +58,13 @@ jobs:
       - name: Build
         run: |
           chmod +x scripts/build_macos.sh
-          ./scripts/build_macos.sh
+          ./scripts/build_macos.sh  # also builds $APP_NAME-macos-{arm,intel}.dmg at the repo root
       - name: Smoke-test the built app
         run: |
           BIN=$(find "src/$APP_NAME.app/Contents/MacOS" -maxdepth 1 -type f -perm -u+x -name 'main*' | head -1)
           echo "Running $BIN"
           QT_QPA_PLATFORM=offscreen AKAIUTIL_GUI_NO_AUDIO=1 "$BIN" --smoke-test=smoke.txt || { cat smoke.txt; exit 1; }
           cat smoke.txt
-      - name: Build DMG
-        run: |
-          mkdir -p dmg-staging
-          cp -r "src/$APP_NAME.app" dmg-staging/
-          ln -s /Applications dmg-staging/Applications
-          hdiutil create -volname "$APP_NAME" -srcfolder dmg-staging -ov -format UDZO "$APP_NAME-macos-intel.dmg"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-macos-intel
