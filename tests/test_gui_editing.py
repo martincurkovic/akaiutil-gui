@@ -948,7 +948,8 @@ def test_the_backup_question_has_its_buttons_in_this_order_and_the_last_is_the_d
     buttons = sorted((b for b in d.findChildren(__import__("PySide6.QtWidgets", fromlist=["QPushButton"]).QPushButton)), key=lambda b: b.mapTo(d, b.rect().topLeft()).x())
     assert [b.text() for b in buttons] == ["Show Details…", "Cancel", "Edit Without Backup", "Back Up and Edit"]
     assert buttons[-1].isDefault() and not any(b.isDefault() for b in buttons[:-1])
-    assert d.width() == d.WIDTH and d.WIDTH < 600  # (narrow: the text wraps)
+    # narrow, so the text wraps, but never narrower than the buttons need (a wider font, as on Linux, makes the dialog a little wider than WIDTH)
+    assert d.WIDTH <= d.width() < 600 and all(b.width() >= b.sizeHint().width() for b in buttons)
     d.deleteLater()
 
 
