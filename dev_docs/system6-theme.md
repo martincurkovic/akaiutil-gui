@@ -20,9 +20,10 @@ offscreen screenshots on macOS; not looked at on Windows or Linux.
 
 ## Done in the second pass (2026-10-29)
 
-- **Volume colours** are hatching in the usage bar and the tree swatches (`volume_patterns`: Qt brush styles, black on white;
-  `volume_colors.fill_volume` / `pattern_brush`), 8 patterns, the 9th volume starts over. The loop markers on the sample waveform
-  still use the 8 greys (`volume_color_*`).
+- **Volume colours** are eight greys in the usage bar and the tree swatches (`volume_shades`, dark and light taking turns so neighbours
+  differ; `volume_colors.volume_shade` / `fill_volume`), the 9th volume starts over. A first version used hatch patterns; the owner
+  preferred plain greys (2026-10-29). A selected row's swatch is inverted, like the row, so a black one doesn't vanish on it. The loop
+  markers on the sample waveform use the darker `volume_color_*` greys.
 - **Tree icons** (disk, floppy, folder) are painted in black and white (`ui/mono_icons.py`, palette key `mono_icons`); a selected row
   keeps its icon as it is.
 - **Selected rows** show white on black (tree, file table, lists, tabs).
@@ -36,6 +37,7 @@ offscreen screenshots on macOS; not looked at on Windows or Linux.
 - **Marker waveform** looked at with a real waveform: readable; loop markers use dark greys, told apart by their numbers.
 - **Scroll bars** have a full outline, boxed arrows and a dithered track: the track's outline is drawn into its image (`scroll_track_v` / `_h`, made in `theme._write_checker`) and each arrow box's outline into its icon (`icons/s6_scroll_*.svg`), because a QSS border on either was drawn over or clipped by Qt. **Spin boxes** keep their outline: the up/down buttons sit inside it (`subcontrol-origin: padding`; the shared stylesheet puts them over the border).
 - **The main window's waveform** shows the loop as the sample editor does (a light grey wash, dashed edges; palette keys `loop_color`, `loop_shade_alpha`, `loop_dashed`), not in the warning colour.
+- **The disk usage bar** fills each partition in black for how full it is (`usage_mono`), instead of the warning / critical colours the other themes use, with a white hairline after each divider; the tooltips and the orange text under the bar still say when a partition is nearly full. **Selected tree rows** draw their expand arrows and the eject button in the inverted colour (`text_selected`), so they show on the black row.
 - **Anti-aliasing is off** in the painted widgets (`theme.antialiasing()`, palette key `hard_edges`).
 - **Dialogs** (About, Settings, Rename, New Volume, Sample Settings, Copy Volume / Partition, Format, Import, Repair, the three-way
   question) were rendered offscreen: nothing clipped there. Dark and light still render pixel for pixel as before.

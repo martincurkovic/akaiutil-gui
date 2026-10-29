@@ -70,7 +70,7 @@ def test_system6_selected_rows_have_white_text_on_black():
     assert "selection-color: #ffffff" in qss[qss.rindex("QTreeView, QTableView") :].split("}")[0]
 
 
-def test_system6_tells_volumes_apart_by_hatching_and_the_others_by_colour(qt_app, delete_widgets):
+def test_system6_tells_volumes_apart_by_shades_of_grey_and_the_others_by_colour(qt_app, delete_widgets):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
 
@@ -86,10 +86,11 @@ def test_system6_tells_volumes_apart_by_hatching_and_the_others_by_colour(qt_app
 
     try:
         theme.set_theme_preference(settings.THEME_DARK)
-        assert volume_colors.pattern_brush(0) is None
+        assert volume_colors.volume_shade(0) is None
         theme.set_theme_preference(settings.THEME_SYSTEM6)
-        styles = [volume_colors.pattern_brush(i).style() for i in range(8)]
-        assert len(set(styles)) == 8 and volume_colors.pattern_brush(8).style() == styles[0]  # (the 9th volume starts over)
+        shades = [volume_colors.volume_shade(i).name() for i in range(8)]
+        assert len(set(shades)) == 8 and volume_colors.volume_shade(8).name() == shades[0]  # (the 9th volume starts over)
+        assert all(s[1:3] == s[3:5] == s[5:7] for s in shades)  # (greys)
         assert all(painted(i) != painted(j) for i in range(8) for j in range(i))
         assert volume_colors.swatch_icon(1).pixmap(16, 16).size().width() == 16
     finally:
@@ -248,5 +249,63 @@ def test_system6_inline_code_uses_the_themes_font_and_size_and_the_others_keep_t
         assert mine and all(f.fontFamilies()[0] == "ChiKareGo2" and f.font().pixelSize() == 13 and not f.fontFixedPitch() for f in mine)
         theirs = code_formats(settings.THEME_DARK)
         assert theirs and all(f.fontFixedPitch() for f in theirs)
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_system6_swatch_of_a_selected_row_is_inverted_so_a_black_one_still_shows(qt_app, delete_widgets):
+    from PySide6.QtGui import QIcon
+
+    from akaiutil_gui.ui import volume_colors
+
+    try:
+        theme.set_theme_preference(settings.THEME_SYSTEM6)
+        icon = volume_colors.swatch_icon(0)  # (the black volume)
+        normal = icon.pixmap(16, 16, QIcon.Mode.Normal).toImage().pixelColor(8, 8)
+        selected = icon.pixmap(16, 16, QIcon.Mode.Selected).toImage().pixelColor(8, 8)
+        assert normal.name() == "#000000" and selected.name() == "#ffffff"
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_system6_usage_bar_fills_partitions_in_black_not_in_warning_colours(qt_app, delete_widgets):
+    from akaiutil_gui.ui.usage_bar import Span, UsageBar
+
+    def colours(preference):
+        theme.set_theme_preference(preference)
+        bar = UsageBar()
+        bar.resize(200, 16)
+        bar.set_spans([Span(1, "partition", used=0.97, divider_after=True), Span(1, "partition", used=0.5)])
+        bar.show()
+        qt_app.processEvents()
+        image = bar.grab().toImage()
+        return {image.pixelColor(x, 8).name() for x in range(image.width())}
+
+    try:
+        assert colours(settings.THEME_SYSTEM6) <= {"#000000", "#ffffff"}
+        assert colours(settings.THEME_DARK) - {"#000000", "#ffffff"}  # (still coloured)
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_system6_selected_tree_row_draws_its_arrows_in_the_inverted_colour(qt_app, delete_widgets):
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QTreeWidgetItem
+
+    from akaiutil_gui.ui.disk_tree import DiskTree
+
+    try:
+        theme.apply_to_app(qt_app, settings.THEME_SYSTEM6)
+        tree = DiskTree()
+        parent = QTreeWidgetItem(["disk"])
+        parent.addChild(QTreeWidgetItem(["child"]))
+        tree.addTopLevelItem(parent)
+        tree.resize(260, 80)
+        tree.show()
+        parent.setSelected(True)
+        qt_app.processEvents()
+        image = tree.viewport().grab().toImage()
+        cell = [image.pixelColor(x, y).name() for x in range(0, 24) for y in range(0, 20)]
+        assert "#ffffff" in cell and "#000000" in cell  # (a white arrow on the black selected row)
     finally:
         theme.set_theme_preference(settings.THEME_DARK)

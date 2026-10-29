@@ -602,7 +602,8 @@ QTreeView::item:selected, QTableView::item:selected {
     color: ${text_bright};
 }
 
-QTreeView::item:hover:!selected, QTableView::item:hover:!selected {
+/* (the file list, a QTableView, has no hover highlight: rows light up only when selected) */
+QTreeView::item:hover:!selected {
     background-color: ${bg_button_hover};
 }
 

@@ -167,6 +167,7 @@ class UsageBar(QWidget):
         painter = QPainter(self)
         palette = theme.current_palette()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, not palette.get("hard_edges"))
+        mono = bool(palette.get("usage_mono"))  # System 6: no warning / critical colours on the partitions, just how full each is
         track = self._track_rect()
         track_path = QPainterPath()
         track_path.addRoundedRect(track, CORNER_RADIUS, CORNER_RADIUS)
@@ -180,7 +181,10 @@ class UsageBar(QWidget):
             if span.kind == "partition":
                 if span.used * rect.width() >= 1.0:  # under a pixel of use isn't drawn
                     fill = QRectF(rect.left(), rect.top(), rect.width() * span.used, rect.height())
-                    painter.fillRect(fill, level_color(span.used))
+                    if mono:  # (black for what is used, and a white hairline between it and the divider before it)
+                        painter.fillRect(fill.adjusted(1, 0, 0, 0), QColor(palette["text"]))
+                    else:
+                        painter.fillRect(fill, level_color(span.used))
             elif span.kind == "volume":
                 fill_volume(painter, rect, span.volume)
             elif span.kind == "system":
@@ -188,7 +192,7 @@ class UsageBar(QWidget):
             elif span.kind == "outside":
                 painter.fillRect(rect, QBrush(QColor(palette["border_hover"]), Qt.BrushStyle.BDiagPattern))
             # "free" is left as the empty track
-        painter.setPen(QPen(QColor(palette["bg_panel"]), 1))
+        painter.setPen(QPen(QColor(palette["text" if mono else "bg_panel"]), 1))
         for span, rect in zip(self._spans, self.span_rects()):
             if span.divider_after and rect.right() < track.right() - 0.5:
                 painter.drawLine(QPointF(rect.right(), track.top()), QPointF(rect.right(), track.bottom()))

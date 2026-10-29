@@ -75,9 +75,12 @@ class _DiskDelegate(QStyledItemDelegate):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(plate)
             painter.drawEllipse(QRectF(box).adjusted(-1, -1, 1, 1))
-        glyph = QColor(colors["text_bright" if hot else "text"])
-        if not hot:
-            glyph.setAlpha(150)
+        if bool(option.state & QStyle.StateFlag.State_Selected) and "text_selected" in colors:  # (System 6: a selected row is inverted)
+            glyph = QColor(colors["text_selected"])
+        else:
+            glyph = QColor(colors["text_bright" if hot else "text"])
+            if not hot:
+                glyph.setAlpha(150)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(glyph)
         x, y = box.x(), box.y()
@@ -259,7 +262,9 @@ class DiskTree(QTreeWidget):
             if self.isExpanded(index)
             else [QPointF(4, 2), QPointF(8, 6), QPointF(4, 10)]  # right: collapsed
         )
-        pen = QPen(QColor(theme.current_palette()["text"]), 1.6)
+        colors = theme.current_palette()
+        selected = self.selectionModel() is not None and self.selectionModel().isSelected(index)
+        pen = QPen(QColor(colors["text_selected"] if selected and "text_selected" in colors else colors["text"]), 1.6)  # (System 6 inverts a selected row)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.save()

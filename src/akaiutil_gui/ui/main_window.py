@@ -301,6 +301,9 @@ class MainWindow(QMainWindow):
         header.addWidget(self.files_title, 1)
         header.addWidget(self.search)
         header.addWidget(self.search_kind)
+        # a line edit is shorter than the combo box beside it in some themes: give it the combo's height, again whenever the theme changes
+        theme.notifier.changed.connect(lambda: QTimer.singleShot(0, self._match_search_height))
+        QTimer.singleShot(0, self._match_search_height)
         tv.addLayout(header)
         # The right-hand header row is as tall as its tallest widget (the search box and the filter); give the
         # left title the same height (the text stays vertically centred) so the tree and the file table start at
@@ -2297,6 +2300,9 @@ class MainWindow(QMainWindow):
         if self._engine is None or self._busy():
             return
         self._ensure_editing(lambda: self._do_sample_settings(vol, f))
+
+    def _match_search_height(self) -> None:
+        self.search.setFixedHeight(self.search_kind.sizeHint().height())
 
     def _on_focus_window(self, _window) -> None:
         """A dialog has just opened over the window: whatever the preview is playing stops (the dialog may play its own sound, or be

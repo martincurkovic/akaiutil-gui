@@ -1421,3 +1421,28 @@ def test_the_radio_button_strips_in_the_sort_dialog_have_rounded_ends_in_both_th
         css = theme.render_stylesheet(palette)
         rule = css[css.index("QRadioButton {") :].split("}")[0]
         assert "border-radius: 11px" in rule and palette["bg"] in rule
+
+
+def test_the_search_box_is_as_tall_as_the_type_menu_beside_it_in_every_theme(qt_app, window):
+    from akaiutil_gui import settings
+    from akaiutil_gui.ui import theme
+
+    try:
+        for preference in (settings.THEME_DARK, settings.THEME_LIGHT, settings.THEME_SYSTEM6):
+            theme.set_theme_preference(preference)
+            window.search.setEnabled(True)
+            window.search_kind.setEnabled(True)
+            window.resize(1100, 700)
+            pump(qt_app, lambda: False, timeout=0.3)  # (the match is made once the new style has been applied)
+            assert window.search.height() == window.search_kind.sizeHint().height(), preference  # (the combo's own height; the empty window stretches it)
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_file_list_rows_have_no_hover_highlight_but_the_tree_keeps_its_own():
+    from akaiutil_gui.ui import theme
+
+    for palette in (theme.DARK_PALETTE, theme.LIGHT_PALETTE, theme.SYSTEM6_PALETTE):
+        qss = theme.render_stylesheet(palette)
+        assert "QTableView::item:hover" not in qss
+        assert "QTreeView::item:hover:!selected" in qss

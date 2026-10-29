@@ -157,12 +157,14 @@ SYSTEM6_PALETTE = {
     "volume_color_7": "#181818",
     "volume_color_8": "#484848",
     # --- only here ---
-    # what tells the volumes apart in the usage bar and tree swatches, since there is no colour: Qt brush styles, black on white
-    "volume_patterns": ("SolidPattern", "Dense4Pattern", "HorPattern", "VerPattern", "BDiagPattern", "Dense7Pattern", "FDiagPattern", "CrossPattern"),
+    # what tells the volumes apart in the usage bar and tree swatches, since there is no colour: eight greys, dark and light taking turns so
+    # that neighbours differ (the first is the volume_color_1 black)
+    "volume_shades": ("#000000", "#c6c6c6", "#454545", "#e4e4e4", "#808080", "#222222", "#a3a3a3", "#626262"),
     "hard_edges": True,  # painted widgets are drawn without anti-aliasing
     "loop_color": "#000000",  # the main window's waveform shows the loop as the sample editor does (not in the warning colour)
     "loop_shade_alpha": 38,
     "loop_dashed": True,
+    "usage_mono": True,  # the disk usage bar fills partitions in black, not in the warning / critical colours
     "mono_icons": True,  # the tree's folder and disk icons are drawn in black and white (ui/mono_icons.py)
     "text_pressed": "#ffffff",
     "text_selected": "#ffffff",
