@@ -339,4 +339,4 @@ The log holds the app's version, your operating system, the images you opened an
 - Direct-to-disk recordings (takes) are listed as text only.
 - Adding or closing a disk image restarts akaiutil, so disk numbers can change and the search index is rebuilt.
 - An **HFE** floppy is opened as a working copy and written back after each edit (see [HFE images](#hfe-images-gotek-and-hxc-emulators)).
-- The app is built on [akaiutil](https://sourceforge.net/projects/akaiutil/) by Klaus Michael Indlekofer (GPL v2 or later). **Help > About** shows the licence.
+- The app is built on [akaiutil](https://sourceforge.net/projects/akaiutil/) by Klaus Michael Indlekofer (GPL v2 or later). **Help > About** shows the licence, and **Help > Third-party Notices…** lists the other licences and credits.

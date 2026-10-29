@@ -157,12 +157,37 @@ def test_a_missing_manual_says_so_instead_of_crashing(qt_app, monkeypatch, tmp_p
 
 def test_the_help_menu_opens_one_reused_manual_window(qt_app, window):
     help_menu = next(a.menu() for a in window.menuBar().actions() if a.text().replace("&", "") == "Help")
-    assert [a.text().replace("&", "") for a in help_menu.actions() if not a.isSeparator()] == ["User Manual…", "About akaiutil-GUI…", "Show Log File", "Check for Updates…"]
+    assert [a.text().replace("&", "") for a in help_menu.actions() if not a.isSeparator()] == ["User Manual…", "About akaiutil-GUI…", "Third-party Notices…", "Show Log File", "Check for Updates…"]
     window.act_manual.trigger()
     first = window._manual_dialog
     assert first.isVisible() and first.windowTitle() == "User Manual"
     window.act_manual.trigger()
     assert window._manual_dialog is first
+
+
+def test_help_third_party_notices_opens_the_notices_viewer(qt_app, window, monkeypatch):
+    opened = []
+
+    class Stub:
+        def __init__(self, parent):
+            opened.append(parent)
+
+        def exec(self):
+            opened.append("exec")
+
+    monkeypatch.setattr("akaiutil_gui.ui.main_window.NoticesDialog", Stub)
+    window.act_notices.trigger()
+    assert opened == [window, "exec"]
+    assert window.act_notices.text().replace("&", "") == "Third-party Notices…"
+
+
+def test_the_real_notices_viewer_shows_the_bundled_notices(qt_app):
+    from akaiutil_gui.ui.notices_dialog import NoticesDialog
+
+    dialog = NoticesDialog()
+    assert dialog.windowTitle() == "Third-party notices"
+    assert "ChiKareGo2" in dialog.view.toPlainText()
+    dialog.close()
 
 
 # -------------------------------------------------------------------------------- about

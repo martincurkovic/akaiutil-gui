@@ -68,6 +68,7 @@ from .ascii_logo import LOGO
 from .details_view import DetailsView, monospace_family
 from .disk_tree import DiskTree
 from .about_dialog import AboutDialog
+from .notices_dialog import NoticesDialog
 from .manual_dialog import show_manual_dialog
 from .preview_panel import PreviewPanel
 from .settings_dialog import SettingsDialog
@@ -645,6 +646,8 @@ class MainWindow(QMainWindow):
         about = self._action("&About akaiutil-GUI…", self._about)
         about.setMenuRole(QAction.MenuRole.AboutRole)  # macOS moves it to the app menu
         help_menu.addAction(about)
+        self.act_notices = self._action("Third-party &Notices…", lambda: NoticesDialog(self).exec())  # (also behind the About window's Licences button)
+        help_menu.addAction(self.act_notices)
         help_menu.addSeparator()
         self.act_show_log = self._action("Show &Log File", lambda: reveal.show_log_file())
         help_menu.addAction(self.act_show_log)
