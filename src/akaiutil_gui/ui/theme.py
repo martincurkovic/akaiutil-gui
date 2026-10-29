@@ -160,6 +160,9 @@ SYSTEM6_PALETTE = {
     # what tells the volumes apart in the usage bar and tree swatches, since there is no colour: Qt brush styles, black on white
     "volume_patterns": ("SolidPattern", "Dense4Pattern", "HorPattern", "VerPattern", "BDiagPattern", "Dense7Pattern", "FDiagPattern", "CrossPattern"),
     "hard_edges": True,  # painted widgets are drawn without anti-aliasing
+    "loop_color": "#000000",  # the main window's waveform shows the loop as the sample editor does (not in the warning colour)
+    "loop_shade_alpha": 38,
+    "loop_dashed": True,
     "mono_icons": True,  # the tree's folder and disk icons are drawn in black and white (ui/mono_icons.py)
     "text_pressed": "#ffffff",
     "text_selected": "#ffffff",
@@ -229,14 +232,20 @@ def _write_colored_chevron(direction, color, filename):
     return path.replace(os.sep, "/")
 
 
-def _write_checker(filename):
-    """A 2 x 2 black/white checker (a 50% dither) as a PNG beside the generated icons, for the System 6 scroll bar track. Returns its path."""
+def _write_checker(filename, orientation=None):
+    """A black/white checker (a 50% dither) as a PNG beside the generated icons, for System 6. Returns its path.
+
+    Plain, it is 2 x 2 (the progress bar). With an orientation it is a scroll bar track's tile, 16 px across the bar and 2 along it, with
+    the bar's black outline as its first and last column (row): a border on the bar itself would clip the arrow boxes' own sides."""
     from PySide6.QtGui import QColor, QImage
 
-    image = QImage(2, 2, QImage.Format.Format_RGB32)
-    for x in range(2):
-        for y in range(2):
-            image.setPixelColor(x, y, QColor("#000000" if (x + y) % 2 == 0 else "#ffffff"))
+    width, height = (2, 2) if orientation is None else ((16, 2) if orientation == "vertical" else (2, 16))
+    across = height if orientation == "horizontal" else width
+    image = QImage(width, height, QImage.Format.Format_RGB32)
+    for x in range(width):
+        for y in range(height):
+            edge = orientation is not None and (x if orientation == "vertical" else y) in (0, across - 1)
+            image.setPixelColor(x, y, QColor("#000000" if edge or (x + y) % 2 == 0 else "#ffffff"))
     os.makedirs(_GENERATED_ICONS_DIR, exist_ok=True)
     path = os.path.join(_GENERATED_ICONS_DIR, filename)
     image.save(path)
@@ -285,6 +294,8 @@ def render_stylesheet(palette):
     values["s6_icon_dir"] = _ICONS_DIR.replace(os.sep, "/")
     if palette.get("scroll_track_pattern"):
         values["scroll_track"] = f"url({_write_checker('scroll_track_checker.png')})"
+        values["scroll_track_v"] = f"url({_write_checker('scroll_track_v.png', 'vertical')})"
+        values["scroll_track_h"] = f"url({_write_checker('scroll_track_h.png', 'horizontal')})"
     with open(_TEMPLATE_PATH, "r") as f:
         source = f.read()
     if palette.get("square_corners"):

@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QColor, QDesktopServices, QTextCharFormat, QTextCursor, QTextFormat
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout
 
 from akaiutil_gui import __version__, settings
@@ -51,11 +51,38 @@ def _recolor_links(document, color: QColor, underline: bool = False) -> None:
         block = block.next()
 
 
-def recolor_theme_links(document) -> None:
-    """In a theme that names its link colour (System 6: Qt draws links blue whatever the palette says), write that colour into the links."""
+def restyle_code_runs(document) -> None:
+    """In a theme with a font of its own (System 6), give inline code the same font and size as the text around it: Markdown marks a code
+    span "monospace" at the document's own point size, which is the system's fixed font and bigger than the theme's text."""
+    palette = theme.current_palette()
+    family, size = palette.get("font_family"), palette.get("font_size_dense")
+    if not family or not size:
+        return
+    fmt = QTextCharFormat()
+    fmt.setFontFamilies([name.strip().strip('"') for name in family.split(",")])
+    fmt.setFontFixedPitch(False)
+    fmt.setProperty(QTextFormat.Property.FontPixelSize, int(size.removesuffix("px")))
+    cursor = QTextCursor(document)
+    block = document.begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            if fragment.isValid() and fragment.charFormat().fontFixedPitch():
+                cursor.setPosition(fragment.position())
+                cursor.setPosition(fragment.position() + fragment.length(), QTextCursor.MoveMode.KeepAnchor)
+                cursor.mergeCharFormat(fmt)
+            it += 1
+        block = block.next()
+
+
+def apply_theme_to_markdown(document) -> None:
+    """What a theme needs done to a Markdown document once it is loaded: its link colour (System 6: Qt draws links blue whatever the
+    palette says, and a black link is told from the text by its underline) and its font for inline code."""
     link = theme.current_palette().get("link")
     if link:
-        _recolor_links(document, QColor(link), underline=True)  # (a black link is told from the text by its underline)
+        _recolor_links(document, QColor(link), underline=True)
+    restyle_code_runs(document)
 
 
 class UpdateAvailableDialog(QDialog):
@@ -93,6 +120,7 @@ class UpdateAvailableDialog(QDialog):
             self.notes_view.anchorClicked.connect(self._open_notes_link)
             self.notes_view.setMarkdown(update_info.notes)
             _recolor_links(self.notes_view.document(), QColor(theme.current_palette()["accent"]))
+            restyle_code_runs(self.notes_view.document())
             self.notes_view.setMinimumHeight(180)
             layout.addWidget(self.notes_view, stretch=1)
 

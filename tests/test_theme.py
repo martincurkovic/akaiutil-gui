@@ -192,3 +192,61 @@ def test_system6_links_in_the_notices_are_dark_and_underlined(qt_app, delete_wid
         assert links and set(links) == {("#101010", True)}
     finally:
         theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_system6_buttons_have_a_minimum_height_not_a_fixed_one():
+    qss = theme.render_stylesheet(theme.SYSTEM6_PALETTE)
+    rule = qss[qss.rindex("QPushButton {") :].split("}")[0]
+    assert "min-height" in rule and "max-height" not in rule  # (a fixed height cut the descenders off the g in "Image")
+
+
+def test_system6_main_window_waveform_shows_its_loop_as_the_editor_does(qt_app, delete_widgets):
+    import types
+
+    import numpy as np
+
+    from akaiutil_gui.ui.waveform_preview import PreviewWaveform
+
+    def loop_pixel(preference):
+        theme.set_theme_preference(preference)
+        wave = PreviewWaveform()
+        wave.resize(300, 80)
+        wave.set_audio(np.zeros(3000, dtype=np.int16))  # (silence: the wash is all there is to see)
+        wave.set_loop(types.SimpleNamespace(start=1000, end=2900))
+        wave.show()
+        qt_app.processEvents()
+        return wave.grab().toImage().pixelColor(150, 20)
+
+    try:
+        grey = loop_pixel(settings.THEME_SYSTEM6)
+        assert grey.red() == grey.green() == grey.blue() and 150 < grey.red() < 250  # (a light grey wash)
+        warm = loop_pixel(settings.THEME_DARK)
+        assert warm.red() > warm.blue()  # (the warning colour, as before)
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_system6_inline_code_uses_the_themes_font_and_size_and_the_others_keep_theirs(qt_app, delete_widgets):
+    from akaiutil_gui.ui.notices_dialog import NoticesDialog
+
+    def code_formats(preference):
+        theme.apply_to_app(qt_app, preference)
+        dialog = NoticesDialog()
+        found, block = [], dialog.view.document().begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                fmt = it.fragment().charFormat()
+                if it.fragment().isValid() and "LICENSE" in it.fragment().text() and it.fragment().text().strip() == "LICENSE":
+                    found.append(fmt)
+                it += 1
+            block = block.next()
+        return found
+
+    try:
+        mine = code_formats(settings.THEME_SYSTEM6)
+        assert mine and all(f.fontFamilies()[0] == "ChiKareGo2" and f.font().pixelSize() == 13 and not f.fontFixedPitch() for f in mine)
+        theirs = code_formats(settings.THEME_DARK)
+        assert theirs and all(f.fontFixedPitch() for f in theirs)
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)

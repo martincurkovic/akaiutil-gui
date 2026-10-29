@@ -26,7 +26,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextBrowser, QTextEdit, QVBoxLayout, QWidget
 
 from .about_dialog import link_palette
-from .update_dialog import recolor_theme_links
+from .update_dialog import apply_theme_to_markdown
 
 HELP_DIR = Path(__file__).parent / "help"
 MANUAL_PATH = HELP_DIR / "manual.md"
@@ -70,7 +70,7 @@ class ManualDialog(QDialog):
         try:
             self.viewer.setMarkdown(MANUAL_PATH.read_text(encoding="utf-8"))
             self.loaded = True
-            recolor_theme_links(self.viewer.document())
+            apply_theme_to_markdown(self.viewer.document())
             self._style_blockquotes()
             self._fit_images(self._target_width())
             self._add_heading_anchors()

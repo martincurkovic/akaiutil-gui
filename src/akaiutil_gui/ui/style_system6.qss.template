@@ -16,11 +16,11 @@ QTextBrowser {
     font-size: ${font_size_dense};
 }
 
-/* the font's ellipsis (...) is taller than its line, so a button whose text ends in one came out taller than the rest: every button gets the same content height */
+/* the font's ellipsis (...) is taller than its line, so a button whose text ends in one came out taller than the rest: every button is at least that tall
+   (a fixed height would cut the descenders off: the g in "Image") */
 QPushButton {
     border-radius: 6px;
-    min-height: 15px;
-    max-height: 15px;
+    min-height: 20px;
 }
 
 /* ---------- Selection is inverted video: the row turns black, so its text has to turn white ---------- */
@@ -162,7 +162,18 @@ QComboBox::down-arrow:disabled {
     image: url(${s6_icon_dir}/s6_arrow_down_grey.svg);
 }
 
-QSpinBox::up-button, QDoubleSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::down-button {
+/* inside the box's own outline (the shared stylesheet puts them over it, which hid the outline's right, top and bottom) */
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 16px;
+    border-left: 1px solid ${border};
+    background: ${bg_input};
+}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: padding;
+    subcontrol-position: bottom right;
     width: 16px;
     border-left: 1px solid ${border};
     background: ${bg_input};
@@ -180,11 +191,14 @@ QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
     height: 12px;
 }
 
-/* ---------- Scroll bars: 16 px, an arrow box at each end, a dithered track, a white thumb ---------- */
+/* ---------- Scroll bars: 16 px, outlined on both sides, a dithered track, an arrow box at each end, a white thumb ---------- */
+/* the track's outline is in its image (scroll_track_v / _h) and each arrow box's outline in its icon (s6_scroll_*.svg): a QSS border on
+   either was drawn over or clipped */
 QScrollBar:vertical {
     width: 16px;
     margin: 16px 0px 16px 0px;
-    border-left: 1px solid ${border};
+    background: ${scroll_track_v};
+    border: none;
 }
 
 QScrollBar::handle:vertical {
@@ -197,32 +211,41 @@ QScrollBar::handle:vertical:hover {
     background: ${scroll_handle};
 }
 
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 16px;
     width: 16px;
-    background: ${bg};
-    border: 1px solid ${border};
+    background: transparent;
+    border: none;
     subcontrol-origin: margin;
 }
 
 QScrollBar::add-line:vertical {
     subcontrol-position: bottom;
-    image: url(${s6_icon_dir}/s6_arrow_down.svg);
+    image: url(${s6_icon_dir}/s6_scroll_down.svg);
 }
 
 QScrollBar::sub-line:vertical {
     subcontrol-position: top;
-    image: url(${s6_icon_dir}/s6_arrow_up.svg);
+    image: url(${s6_icon_dir}/s6_scroll_up.svg);
 }
 
-QScrollBar::add-line:vertical:pressed, QScrollBar::sub-line:vertical:pressed {
-    background: ${bg_button_pressed};
+QScrollBar::add-line:vertical:pressed {
+    image: url(${s6_icon_dir}/s6_scroll_down_pressed.svg);
+}
+
+QScrollBar::sub-line:vertical:pressed {
+    image: url(${s6_icon_dir}/s6_scroll_up_pressed.svg);
 }
 
 QScrollBar:horizontal {
     height: 16px;
     margin: 0px 16px 0px 16px;
-    border-top: 1px solid ${border};
+    background: ${scroll_track_h};
+    border: none;
 }
 
 QScrollBar::handle:horizontal {
@@ -235,26 +258,34 @@ QScrollBar::handle:horizontal:hover {
     background: ${scroll_handle};
 }
 
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: transparent;
+}
+
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-    width: 16px;
     height: 16px;
-    background: ${bg};
-    border: 1px solid ${border};
+    width: 16px;
+    background: transparent;
+    border: none;
     subcontrol-origin: margin;
 }
 
 QScrollBar::add-line:horizontal {
     subcontrol-position: right;
-    image: url(${s6_icon_dir}/s6_arrow_right.svg);
+    image: url(${s6_icon_dir}/s6_scroll_right.svg);
 }
 
 QScrollBar::sub-line:horizontal {
     subcontrol-position: left;
-    image: url(${s6_icon_dir}/s6_arrow_left.svg);
+    image: url(${s6_icon_dir}/s6_scroll_left.svg);
 }
 
-QScrollBar::add-line:horizontal:pressed, QScrollBar::sub-line:horizontal:pressed {
-    background: ${bg_button_pressed};
+QScrollBar::add-line:horizontal:pressed {
+    image: url(${s6_icon_dir}/s6_scroll_right_pressed.svg);
+}
+
+QScrollBar::sub-line:horizontal:pressed {
+    image: url(${s6_icon_dir}/s6_scroll_left_pressed.svg);
 }
 
 /* ---------- Progress bar: a dithered bar (no text on it: it would not read on the dither) ---------- */

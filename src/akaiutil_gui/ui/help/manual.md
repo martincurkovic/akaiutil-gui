@@ -114,6 +114,7 @@ Results are indexed. If you try to search before indexing is complete, only the 
 
 Click on a single sample and its waveform appears under the Details section. By default, the sample will play as soon as you click on it. Press **Space** to play and stop, or click anywhere on the waveform to play from that point.
 
+- Playback stops when a dialog opens over the window (Sample Settings, for one), so the preview doesn't carry on underneath it.
 - If the sample has loop points set, check **Loop Preview** to hear it. Uncheck it to hear the sample play once through to the end. **Loop Preview** is not currently supported for S900 samples.
 - The preview plays through your computer's default output. **Settings** lets you pick another device, change the buffer size, and choose whether samples play as soon as you click them.
 

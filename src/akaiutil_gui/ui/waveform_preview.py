@@ -146,12 +146,15 @@ class PreviewWaveform(QWidget):
         painter.fillRect(QRectF(x_end, box.top() + 1, max(0.0, box.right() - x_end), height - 2), dim)
 
         if self._loop is not None:
-            loop_color = QColor(p["warning"])
+            loop_color = QColor(p.get("loop_color", p["warning"]))  # (System 6 draws the loop as the sample editor does: a light grey wash, dashed edges)
             shade = QColor(loop_color)
-            shade.setAlpha(70)
+            shade.setAlpha(p.get("loop_shade_alpha", 70))
             x0, x1 = left + x_for_frame(self._loop.start, width, n), left + x_for_frame(min(self._loop.end, n - 1), width, n)
             painter.fillRect(QRectF(x0, box.top() + 1, max(1.0, x1 - x0), height - 2), shade)
-            painter.setPen(QPen(loop_color, 1))
+            pen = QPen(loop_color, 1)
+            if p.get("loop_dashed"):
+                pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
             for x in (x0, x1):
                 painter.drawLine(int(x), int(box.top() + 1), int(x), int(box.bottom() - 1))
 

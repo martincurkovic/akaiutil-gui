@@ -11,10 +11,11 @@ from collections import OrderedDict
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QAction, QActionGroup, QFontDatabase, QFontMetrics, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QFontDatabase, QFontMetrics, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
@@ -310,6 +311,7 @@ class MainWindow(QMainWindow):
         tv.addWidget(self.table)
         self.preview = PreviewPanel()
         self.preview.hide()  # appears when a single sample is selected (below the details, which shrink to make room)
+        QGuiApplication.instance().focusWindowChanged.connect(self._on_focus_window)
         # Space plays/stops, like in a DAW or Finder's Quick Look
         space = QShortcut(QKeySequence(Qt.Key.Key_Space), self.table)
         space.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -2296,7 +2298,15 @@ class MainWindow(QMainWindow):
             return
         self._ensure_editing(lambda: self._do_sample_settings(vol, f))
 
+    def _on_focus_window(self, _window) -> None:
+        """A dialog has just opened over the window: whatever the preview is playing stops (the dialog may play its own sound, or be
+        about the very sample that is playing)."""
+        active = QApplication.activeWindow()
+        if isinstance(active, QDialog) and active.isModal():
+            self.preview.stop()
+
     def _ask_sample_settings(self, f: FileEntry, current, audio=None):
+        self.preview.stop()  # (the dialog has its own player; the focus change below would stop this one too, but not on every platform)
         dialog = edit_dialogs.SampleSettingsDialog(self, f.name, current, audio)
         return dialog.result_settings if dialog.exec() == dialog.DialogCode.Accepted else None
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QTextBrowser, QVBoxLayout, QWidget
 
-from .update_dialog import recolor_theme_links
+from .update_dialog import apply_theme_to_markdown
 
 NOTICES_PATH = Path(__file__).parent / "help" / "THIRD_PARTY_NOTICES.md"
 
@@ -28,7 +28,7 @@ class NoticesDialog(QDialog):
 
         self.view.setPalette(link_palette(self.view))
         self.view.setMarkdown(notices_text())
-        recolor_theme_links(self.view.document())
+        apply_theme_to_markdown(self.view.document())
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
