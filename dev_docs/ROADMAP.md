@@ -19,6 +19,10 @@ None of this could be checked by the test runs, which use a fake audio device, o
 - [ ] **HFE files this app wrote** (an edited or newly saved `.hfe`): load on a Gotek/HxC feeding a real sampler, and decode with
       Greaseweazle or the HxC software. Only the app's own reader has read them so far. Details in [hfe-plan.md](hfe-plan.md).
 
+- [ ] **OS boot floppies** (File > Create OS Boot Floppy…, from a `.COD` or a saved `.C`): boot an S2000 from one, as an image on a Gotek
+      or as HFE. Written to match what OSMaker's code writes, never compared with a disk OSMaker made. Also unknown: whether a
+      `.COD` loads as it is or the sampler wants the `.C` form, and whether the model tag, label or file name matter. See [os-floppy.md](os-floppy.md).
+
 ## Next
 
 0. **HFE floppy images** are wired in (open, edit with write-back after each change, File > Save Disk as HFE…). What's left is checking

@@ -6,6 +6,7 @@ Notes for whoever works on akaiutil-GUI next (usually future me).
 - [ROADMAP.md](ROADMAP.md): what's next, what hasn't been verified by hand, and the known limits.
 - [program-editor-plan.md](program-editor-plan.md): plan for editing programs and keygroups in disk images, and sharing code with AKAISDS.
 - [hfe-plan.md](hfe-plan.md): plan and findings for opening and saving `.hfe` floppy images by converting to and from a flat image (built: `hfe.py` is the codec, `hfe_work.py` the working copies; what's unchecked is listed there).
+- [os-floppy.md](os-floppy.md): what OSMaker writes for an OS boot floppy (read from its code), for making one from a `.COD`; not built yet.
 - [akaiutil-notes.md](akaiutil-notes.md): how akaiutil actually behaves, as found by trying it (not all of it is documented), and what the GUI does about each.
 
 User-facing docs live in the top-level [README.md](../README.md) and [BUILDING.md](../BUILDING.md).

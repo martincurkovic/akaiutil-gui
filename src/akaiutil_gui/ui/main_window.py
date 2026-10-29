@@ -40,6 +40,7 @@ from akaiutil_gui import (
     hfe,
     hfe_work,
     importing,
+    os_floppy,
     search,
     settings,
     sorting,
@@ -521,6 +522,7 @@ class MainWindow(QMainWindow):
         self.act_revert = self._action("Revert to &Backup…", self._revert)
         self.act_save_hfe = self._action("Save Disk as &HFE…", self._save_as_hfe)
         self.act_repair = self._action("Save Repaired &Copy…", self._save_repaired)
+        self.act_os_floppy = self._action("Create &OS Boot Floppy…", self._create_os_floppy)
         self.act_export = self._action(
             "&Export…", lambda: self._export(False), QKeySequence("Ctrl+E")
         )
@@ -545,6 +547,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_revert)
         file_menu.addAction(self.act_save_hfe)
         file_menu.addAction(self.act_repair)
+        file_menu.addSeparator()
+        file_menu.addAction(self.act_os_floppy)
         file_menu.addSeparator()
         # Ctrl+, everywhere (Qt maps Ctrl to Cmd on a Mac): the standard Preferences key is only defined on macOS and some Linux desktops
         settings_action = self._action("&Settings…", self._open_settings, QKeySequence("Ctrl+,"))
@@ -2633,6 +2637,39 @@ class MainWindow(QMainWindow):
             lambda: self._hfe.save_as(source, path),
             lambda _none: self.statusBar().showMessage(f"Saved {Path(path).name}.", 8000),
             lambda message: (self.statusBar().clearMessage(), QMessageBox.critical(self, "Couldn't save the HFE file", message)),
+        )
+
+    def _create_os_floppy(self) -> None:
+        """File > Create OS Boot Floppy: an S2000-family OS file (.COD, or the .C the sampler saves) as a floppy image or HFE file."""
+        start = settings.get_last_dir("os_file") or str(Path.home())
+        source, _ = QFileDialog.getOpenFileName(self, "Choose the OS file", start, "OS files (*.cod *.c);;All files (*)")
+        if not source:
+            return
+        settings.set_last_dir("os_file", str(Path(source).parent))
+        try:
+            data, info = os_floppy.read(source)
+            image = os_floppy.build(data, info)
+        except os_floppy.OsFloppyError as e:
+            QMessageBox.warning(self, "Not an OS file", str(e))
+            return
+        start = settings.get_last_dir("os_floppy") or str(Path(source).parent)
+        path, chosen = QFileDialog.getSaveFileName(
+            self, f"Save the {info.description} boot floppy", str(Path(start) / f"{info.model} OS {info.major}.{info.minor:02d}.img"),
+            "Floppy images (*.img);;HFE images (*.hfe)",
+        )
+        if not path:
+            return
+        if not Path(path).suffix:
+            path += ".hfe" if "hfe" in chosen else ".img"
+        if any(Path(path).resolve() == Path(p).resolve() for p in self._images):
+            QMessageBox.warning(self, "That image is open", f"{Path(path).name} is open in the window. Close it first if you want to replace it.")
+            return
+        settings.set_last_dir("os_floppy", str(Path(path).parent))
+        self.statusBar().showMessage(f"Saving {Path(path).name}…")
+        self._run(
+            lambda: os_floppy.save(path, image),
+            lambda _none: self.statusBar().showMessage(f"Saved {Path(path).name}: {info.description} boot floppy.", 8000),
+            lambda message: (self.statusBar().clearMessage(), QMessageBox.critical(self, "Couldn't save the floppy", message)),
         )
 
     def _ask_save_path(self, suggestion: str) -> str | None:

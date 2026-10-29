@@ -79,6 +79,10 @@ An **`.hfe`** file is a floppy as a Gotek or HxC floppy emulator plays it. (A Go
 - Sectors that can't be fixed stay unreadable. The option **Also rewrite sectors that can't be fixed** makes them load without errors, but they may hold wrong data: a click in a sample, or a file that won't work. Leave it off if you're not sure.
 - Only the format Akai disks use is understood: HFE version 1, MFM, 80 tracks on two sides. A file in HFE version 3 is turned away with the reason.
 
+### OS boot floppies (S2000 and relatives)
+
+**File > Create OS Boot Floppy…** turns an operating-system file into a floppy image the sampler can boot from: a **`.COD`** (Akai's OS download, named like `S200200.COD`) or the **`.C`** an S2000 saves with Save System. Save it as an `.img` (for a FlashFloppy Gotek) or an `.hfe` (for HxC). It needs no disk open and no akaiutil. The sampler and version come from the file's name or, for a `.C`, from inside it; a file it can't place is turned away. The layout is the one Akai's OSMaker writes, but it hasn't been tried in a sampler yet.
+
 ---
 
 ## Looking around
