@@ -5,7 +5,8 @@ from PySide6.QtCore import QSettings
 THEME_SYSTEM = "system"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
-THEME_VALUES = (THEME_SYSTEM, THEME_LIGHT, THEME_DARK)
+THEME_SYSTEM6 = "system6"
+THEME_VALUES = (THEME_SYSTEM, THEME_LIGHT, THEME_DARK, THEME_SYSTEM6)
 
 
 def _qs() -> QSettings:

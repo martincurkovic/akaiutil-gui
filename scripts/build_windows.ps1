@@ -64,7 +64,7 @@ if (-not (Test-Path "pysidedeploy.spec")) {
 
 # Data the app reads at run time, paths relative to src\ (where this runs), as SRC=DEST inside the app:
 #   the stylesheet template, icons and notices, the licence, and the akaiutil exe (found next to the app's exe)
-$DataArgs = "--include-data-dir=akaiutil_gui/ui/icons=akaiutil_gui/ui/icons --include-data-files=akaiutil_gui/ui/style.qss.template=akaiutil_gui/ui/style.qss.template --include-data-dir=akaiutil_gui/ui/help=akaiutil_gui/ui/help --include-data-files=../LICENSE=LICENSE --include-data-files=../build/bin/akaiutil.exe=bin/akaiutil.exe"
+$DataArgs = "--include-data-dir=akaiutil_gui/ui/icons=akaiutil_gui/ui/icons --include-data-files=akaiutil_gui/ui/style.qss.template=akaiutil_gui/ui/style.qss.template --include-data-files=akaiutil_gui/ui/style_system6.qss.template=akaiutil_gui/ui/style_system6.qss.template --include-data-dir=akaiutil_gui/ui/fonts=akaiutil_gui/ui/fonts --include-data-dir=akaiutil_gui/ui/help=akaiutil_gui/ui/help --include-data-files=../LICENSE=LICENSE --include-data-files=../build/bin/akaiutil.exe=bin/akaiutil.exe"
 
 # extra_args is regenerated on EVERY run (not just first-time setup),
 # specifically so the version stays current even on an existing spec

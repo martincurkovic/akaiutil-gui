@@ -44,6 +44,13 @@ same version. Source code: <https://code.qt.io/> and <https://pypi.org/project/P
 - **NumPy** does the waveform and sample arithmetic. BSD 3-Clause licence, with the licences of the libraries bundled in its
   wheels listed in the package's own `LICENSE.txt`.
 
+## ChiKareGo2 (the Macintosh System 6 theme's font)
+
+The "Macintosh System 6" theme uses **ChiKareGo2** by Giles Booth, a recreation of the Chicago bitmap font, licensed under
+Creative Commons Attribution (CC BY 4.0), <https://creativecommons.org/licenses/by/4.0/>. It was obtained from
+<https://github.com/sakofchit/system.css> and converted to TrueType. The theme is a homage and is not affiliated with Apple;
+Apple's own fonts and artwork are not included.
+
 ## Python
 
 The app is written in Python and ships with a Python runtime, which is

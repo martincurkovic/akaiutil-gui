@@ -17,6 +17,7 @@ two separate .qss files that can quietly drift apart over time.
 
 import logging
 import os
+import re
 import sys
 from string import Template
 
@@ -115,6 +116,60 @@ LIGHT_PALETTE = {
 }
 
 
+# A Macintosh System 6 look: black, white and a few greys, square corners, a bitmap-style font, inverted video for selection and a
+# dithered scroll bar track. The warning / critical colours stay (they carry meaning). Keys after "volume_color_8" are only in this
+# palette: the stylesheet part that uses them (style_system6.qss.template) is added for this theme alone. `dev_docs/system6-theme.md`.
+SYSTEM6_PALETTE = {
+    "bg": "#ffffff",
+    "bg_panel": "#ffffff",
+    "bg_dialog": "#ffffff",
+    "bg_statusbar": "#ffffff",
+    "bg_input": "#ffffff",
+    "bg_button": "#ffffff",
+    "bg_button_hover": "#ffffff",
+    "bg_button_pressed": "#000000",
+    "bg_disabled": "#ffffff",
+    "bg_selected": "#000000",
+    "text": "#000000",
+    "text_bright": "#000000",
+    "text_disabled": "#808080",
+    "text_statusbar": "#000000",
+    "border": "#000000",
+    "border_hover": "#000000",
+    "border_disabled": "#a0a0a0",
+    "border_list": "#000000",
+    "border_item": "#c8c8c8",
+    "border_checkbox": "#000000",
+    "border_progress": "#000000",
+    "accent": "#000000",
+    "text_on_accent": "#ffffff",
+    "warning": "#d65a00",
+    "critical": "#dd0907",
+    "bg_zebra": "#f0f0f0",
+    # eight greys in place of the categorical colours (a stand-in: see the roadmap for hatching)
+    "volume_color_1": "#000000",
+    "volume_color_2": "#9a9a9a",
+    "volume_color_3": "#4a4a4a",
+    "volume_color_4": "#c4c4c4",
+    "volume_color_5": "#262626",
+    "volume_color_6": "#7a7a7a",
+    "volume_color_7": "#e0e0e0",
+    "volume_color_8": "#626262",
+    # --- only here ---
+    "text_pressed": "#ffffff",
+    "text_selected": "#ffffff",
+    "text_tab_selected": "#ffffff",
+    "scroll_track": "#ffffff",
+    "scroll_handle": "#ffffff",
+    "scroll_handle_border": "1px solid #000000",
+    "font_family": '"ChiKareGo2", "Chicago", "Geneva", "Monaco", monospace',
+    "font_size": "16px",
+    "square_corners": True,  # every border-radius in the shared stylesheet becomes 0
+    "scroll_track_pattern": True,  # a 50% black/white checker under the scroll bar handles
+    "extra_template": True,  # append ui/style_system6.qss.template
+}
+
+
 def _user_data_dir():
     # returns per-user location OUTSIDE the app bundle for runtime generated files
     # writing inside the app bundle is fragile and seems to cause problems on macOS specifically
@@ -131,6 +186,8 @@ def _user_data_dir():
 
 
 _TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "style.qss.template")
+_EXTRA_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "style_system6.qss.template")
+_FONTS_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 _ICONS_DIR = os.path.join(os.path.dirname(__file__), "icons")
 _GENERATED_ICONS_DIR = os.path.join(_user_data_dir(), "generated_icons")
 
@@ -164,6 +221,38 @@ def _write_colored_chevron(direction, color, filename):
     return path.replace(os.sep, "/")
 
 
+def _write_checker(filename):
+    """A 2 x 2 black/white checker (a 50% dither) as a PNG beside the generated icons, for the System 6 scroll bar track. Returns its path."""
+    from PySide6.QtGui import QColor, QImage
+
+    image = QImage(2, 2, QImage.Format.Format_RGB32)
+    for x in range(2):
+        for y in range(2):
+            image.setPixelColor(x, y, QColor("#000000" if (x + y) % 2 == 0 else "#ffffff"))
+    os.makedirs(_GENERATED_ICONS_DIR, exist_ok=True)
+    path = os.path.join(_GENERATED_ICONS_DIR, filename)
+    image.save(path)
+    return path.replace(os.sep, "/")
+
+
+_loaded_fonts = False
+
+
+def _load_bundled_fonts():
+    """Register the font files in ui/fonts/ with Qt, once (the System 6 theme's bitmap-style font). A missing file is fine: the
+    stylesheet's font list falls back to Geneva / Monaco / any monospace."""
+    global _loaded_fonts
+    if _loaded_fonts:
+        return
+    _loaded_fonts = True
+    from PySide6.QtGui import QFontDatabase
+
+    if os.path.isdir(_FONTS_DIR):
+        for name in sorted(os.listdir(_FONTS_DIR)):
+            if name.lower().endswith((".ttf", ".otf")):
+                QFontDatabase.addApplicationFont(os.path.join(_FONTS_DIR, name))
+
+
 def render_stylesheet(palette):
     """Render the QSS template with the given palette dict.
 
@@ -185,8 +274,17 @@ def render_stylesheet(palette):
         "up", palette["text"], f"up_arrow_{text_hex}.svg"
     )
 
+    values["s6_icon_dir"] = _ICONS_DIR.replace(os.sep, "/")
+    if palette.get("scroll_track_pattern"):
+        values["scroll_track"] = f"url({_write_checker('scroll_track_checker.png')})"
     with open(_TEMPLATE_PATH, "r") as f:
-        template = Template(f.read())
+        source = f.read()
+    if palette.get("square_corners"):
+        source = re.sub(r"border-radius:\s*\d+px", "border-radius: 0px", source)
+    if palette.get("extra_template"):  # (after the shared rules, so a rule here wins over one of equal specificity there)
+        with open(_EXTRA_TEMPLATE_PATH, "r") as f:
+            source += "\n" + f.read()
+    template = Template(source)
     try:
         return template.substitute(**values)
     except KeyError as e:
@@ -200,12 +298,14 @@ _active_palette = None  # set by _render_for_current_scheme() - see current_pale
 _app = None  # the QApplication apply_to_app() was given
 _preference = settings.THEME_SYSTEM
 _connected_app = None  # whose colorSchemeChanged apply_to_app() already hooked
+_qt_palette_overridden = False  # whether _apply_qt_palette() replaced Qt's own application palette
 
 #: (label, value) in the order the Settings > Appearance combo shows them
 CHOICES = [
     ("System", settings.THEME_SYSTEM),
     ("Light", settings.THEME_LIGHT),
     ("Dark", settings.THEME_DARK),
+    ("Macintosh System 6", settings.THEME_SYSTEM6),
 ]
 
 
@@ -225,6 +325,13 @@ def _palette_for_scheme(scheme):
     return LIGHT_PALETTE if scheme == Qt.ColorScheme.Light else DARK_PALETTE
 
 
+def _palette_for_preference():
+    """The palette for the theme choice in effect: System 6 is a pinned choice that ignores the OS scheme."""
+    if _preference == settings.THEME_SYSTEM6:
+        return SYSTEM6_PALETTE
+    return _palette_for_scheme(_effective_scheme())
+
+
 def _effective_scheme():
     """The color scheme the app is actually showing right now.
 
@@ -237,7 +344,7 @@ def _effective_scheme():
     """
     from PySide6.QtGui import QGuiApplication
 
-    if _preference == settings.THEME_LIGHT:
+    if _preference in (settings.THEME_LIGHT, settings.THEME_SYSTEM6):  # (System 6 is white: native chrome should be light too)
         return Qt.ColorScheme.Light
     if _preference == settings.THEME_DARK:
         return Qt.ColorScheme.Dark
@@ -245,12 +352,12 @@ def _effective_scheme():
 
 
 def current_preference():
-    """The theme choice in effect: "system", "light" or "dark"."""
+    """The theme choice in effect: "system", "light", "dark" or "system6"."""
     return _preference
 
 
 def current_palette():
-    """Returns whichever palette (DARK_PALETTE/LIGHT_PALETTE) the app is
+    """Returns whichever palette (DARK_PALETTE/LIGHT_PALETTE/SYSTEM6_PALETTE) the app is
     ACTUALLY styled with right now, for custom-painted widgets (QPainter,
     not QSS) that need a themed color - e.g. a future waveform preview - so
     they can never disagree with the stylesheet.
@@ -268,7 +375,35 @@ def current_palette():
         return _active_palette
     # apply_to_app() hasn't run (e.g. a widget previewed standalone without
     # going through it) - fall back to asking directly
-    return _palette_for_scheme(_effective_scheme())
+    return _palette_for_preference()
+
+
+def _apply_qt_palette(palette):
+    """Qt's own widgets that the stylesheet doesn't draw (a slider's filled groove, a menu's highlight) take their colours from the
+    application QPalette. System 6 sets a black and white one; any other theme gets Qt's own back, but only if System 6 had replaced it."""
+    global _qt_palette_overridden
+    if _app is None:
+        return
+    from PySide6.QtGui import QColor, QPalette
+
+    if palette is SYSTEM6_PALETTE:
+        qt_palette = QPalette(_app.style().standardPalette())
+        for role, key in (
+            (QPalette.ColorRole.Highlight, "accent"),
+            (QPalette.ColorRole.HighlightedText, "text_on_accent"),
+            (QPalette.ColorRole.Window, "bg"),
+            (QPalette.ColorRole.Base, "bg_input"),
+            (QPalette.ColorRole.Button, "bg_button"),
+            (QPalette.ColorRole.WindowText, "text"),
+            (QPalette.ColorRole.Text, "text"),
+            (QPalette.ColorRole.ButtonText, "text"),
+        ):
+            qt_palette.setColor(role, QColor(palette[key]))
+        _app.setPalette(qt_palette)
+        _qt_palette_overridden = True
+    elif _qt_palette_overridden:
+        _app.setPalette(_app.style().standardPalette())
+        _qt_palette_overridden = False
 
 
 def _render_for_current_scheme():
@@ -277,10 +412,11 @@ def _render_for_current_scheme():
     # colorSchemeChanged for a scheme we already show, or choosing "Dark"
     # while the OS is already dark, does no redundant app-wide restyle
     global _active_palette
-    palette = _palette_for_scheme(_effective_scheme())
+    palette = _palette_for_preference()
     if palette is _active_palette:
         return
     _active_palette = palette
+    _apply_qt_palette(palette)
     try:
         _app.setStyleSheet(render_stylesheet(palette))
     except (OSError, KeyError) as e:
@@ -315,9 +451,9 @@ def set_theme_preference(preference):
             hints.unsetColorScheme()
         else:
             hints.setColorScheme(
-                Qt.ColorScheme.Light
-                if _preference == settings.THEME_LIGHT
-                else Qt.ColorScheme.Dark
+                Qt.ColorScheme.Dark
+                if _preference == settings.THEME_DARK
+                else Qt.ColorScheme.Light
             )
     if _app is not None:
         _render_for_current_scheme()
@@ -334,6 +470,7 @@ def apply_to_app(app, preference=None):
 
     global _app, _connected_app
     _app = app
+    _load_bundled_fonts()
     app.setStyle("Fusion")
     if preference is None:
         preference = settings.get_theme()

@@ -45,7 +45,7 @@ fi
 
 # Data the app reads at run time, paths relative to src/ (where this runs), as SRC=DEST inside the app:
 #   the stylesheet template, icons and notices, the licence, and the akaiutil binary (found next to the executable)
-DATA_ARGS="--include-data-dir=akaiutil_gui/ui/icons=akaiutil_gui/ui/icons --include-data-files=akaiutil_gui/ui/style.qss.template=akaiutil_gui/ui/style.qss.template --include-data-dir=akaiutil_gui/ui/help=akaiutil_gui/ui/help --include-data-files=../LICENSE=LICENSE --include-data-files=../build/bin/akaiutil=bin/akaiutil"
+DATA_ARGS="--include-data-dir=akaiutil_gui/ui/icons=akaiutil_gui/ui/icons --include-data-files=akaiutil_gui/ui/style.qss.template=akaiutil_gui/ui/style.qss.template --include-data-files=akaiutil_gui/ui/style_system6.qss.template=akaiutil_gui/ui/style_system6.qss.template --include-data-dir=akaiutil_gui/ui/fonts=akaiutil_gui/ui/fonts --include-data-dir=akaiutil_gui/ui/help=akaiutil_gui/ui/help --include-data-files=../LICENSE=LICENSE --include-data-files=../build/bin/akaiutil=bin/akaiutil"
 
 # re-generate extra_args on EVERY run, that way version number can update correctly
 sed -i '' "s|^extra_args = .*|extra_args = --quiet --noinclude-qt-translations --assume-yes-for-downloads --macos-app-name=$APP_NAME --macos-app-version=$VERSION $DATA_ARGS|" pysidedeploy.spec

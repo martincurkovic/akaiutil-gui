@@ -46,7 +46,7 @@ akaiutil-GUI allows you to open, view and edit Akai S900, S1000 and S3000 disk i
 - **Preview waveform**: appears when you select a sample.
 - **Details**: everything akaiutil knows about the selected disk, partition, volume or file. **Raw output** shows the unformatted version.
 
-**View > Theme** switches between System, Light and Dark. **View > Console** shows the conversation with akaiutil, which can be useful for troubleshooting.
+**View > Theme** switches between System, Light, Dark and Macintosh System 6 (black and white, with a bitmap-style font). **View > Console** shows the conversation with akaiutil, which can be useful for troubleshooting.
 
 ![The light theme](screenshots/main-window-light.png "The light theme")
 
@@ -276,7 +276,7 @@ Open **Settings** (File > Settings…, or Ctrl/Cmd+,).
 
 ![The settings dialog](screenshots/settings.png "The settings dialog")
 
-- **Appearance:** System, Light or Dark.
+- **Appearance:** System, Light, Dark or Macintosh System 6.
 - **Audio Preview:** output device, buffer size, whether samples play when selected, and whether samples with loops play as a loop.
 - **Export:** a default folder, and whether to ask each time.
 - **Editing:** sort a volume after importing or pasting.
