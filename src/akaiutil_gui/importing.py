@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import soundfile
 
-from . import akai_header, akai_names
+from . import akai_header, akai_names, hfe
 from .audio import markers as audio_markers
 from .audio import resample, wavfile
 from .engine.models import ImportJob
@@ -185,6 +185,8 @@ def disk_image_problem(path: str | Path) -> str | None:
         return str(e)
     if size == 0:
         return "the file is empty"
+    if head[:8] in (hfe.SIGNATURE_V1, hfe.SIGNATURE_V3):  # (an HFE is decoded before akaiutil sees it; see hfe_work.py)
+        return hfe.problem(path)
     for magic, what in _NOT_DISK_MAGIC:
         if head.startswith(magic):
             return f"it's {what}, not a disk image"

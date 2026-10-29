@@ -54,6 +54,12 @@ def backup_sandbox(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def hfe_sandbox(tmp_path_factory, monkeypatch):
+    """The working copies of HFE images go to a temp folder, never to the real app data folder."""
+    monkeypatch.setenv("AKAIUTIL_GUI_HFE_DIR", str(tmp_path_factory.mktemp("hfe-work")))
+
+
+@pytest.fixture(autouse=True)
 def log_sandbox(tmp_path_factory, monkeypatch):
     """Anything that looks for the log folder finds a temp one, never the real app data folder."""
     monkeypatch.setenv("AKAIUTIL_GUI_LOG_DIR", str(tmp_path_factory.mktemp("logs")))

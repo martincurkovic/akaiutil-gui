@@ -14,6 +14,7 @@ from typing import Any
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 
 from akaiutil_gui.backup import BackupError
+from akaiutil_gui.hfe import HfeError
 from akaiutil_gui.engine.session import EngineError
 
 log = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ class _Task(QRunnable):
         try:
             result = self._fn()
         except Exception as e:  # reported to the UI, never allowed to kill the pool thread
-            if isinstance(e, (EngineError, BackupError)):  # (a reason written for the user: no traceback needed)
+            if isinstance(e, (EngineError, BackupError, HfeError)):  # (a reason written for the user: no traceback needed)
                 log.warning("task failed: %s", e)
             else:
                 log.error("task failed with an unexpected %s:\n%s", e.__class__.__name__, traceback.format_exc())

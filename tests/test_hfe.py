@@ -170,31 +170,58 @@ def test_is_hfe_looks_at_the_start_of_the_file(tmp_path, hfe_bytes):
     assert hfe.is_hfe(v3)
 
 
-def test_save_patches_the_file_in_place_and_leaves_nothing_behind(tmp_path, image, hfe_bytes):
+def test_update_patches_the_file_in_place_and_leaves_nothing_behind(tmp_path, image, hfe_bytes):
     path = tmp_path / "disk.hfe"
     path.write_bytes(hfe_bytes)
     changed = bytearray(image)
     changed[100 * SECTOR : 101 * SECTOR] = bytes(SECTOR)
-    hfe.save(path, bytes(changed))
+    hfe.update(path, bytes(changed))
     assert hfe.read(path).image == bytes(changed)
     assert path.read_bytes()[:1024] == hfe_bytes[:1024]
     assert sorted(p.name for p in tmp_path.iterdir()) == ["disk.hfe"]
 
 
-def test_save_makes_a_new_file_when_there_is_none(tmp_path, image):
+def test_save_without_a_template_makes_a_new_file(tmp_path, image):
     path = tmp_path / "new.hfe"
     hfe.save(path, image)
     assert hfe.read(path).image == image
 
 
-def test_save_to_a_damaged_file_changes_nothing(tmp_path, image, hfe_bytes):
+def test_update_of_a_damaged_file_changes_nothing(tmp_path, image, hfe_bytes):
     broken = bytearray(hfe_bytes)
     broken[_sector_position(hfe_bytes, 0, 0, 1) + 50] ^= 0x02
     path = tmp_path / "bad.hfe"
     path.write_bytes(bytes(broken))
     with pytest.raises(hfe.HfeError):
-        hfe.save(path, image)
+        hfe.update(path, image)
     assert path.read_bytes() == bytes(broken) and [p.name for p in tmp_path.iterdir()] == ["bad.hfe"]
+
+
+def test_problem_judges_a_file_by_its_header(tmp_path, hfe_bytes):
+    ok, v3, forty, text = tmp_path / "ok.hfe", tmp_path / "v3.hfe", tmp_path / "forty.hfe", tmp_path / "t.hfe"
+    ok.write_bytes(hfe_bytes[:2048])  # (the header and track list are enough)
+    v3.write_bytes(b"HXCHFEV3" + bytes(2000))
+    forty.write_bytes(hfe_bytes[:9] + bytes([40]) + hfe_bytes[10:2048])
+    text.write_bytes(b"hello" * 500)
+    assert hfe.problem(ok) is None and "v3" in hfe.problem(v3) and "40 tracks" in hfe.problem(forty)
+    assert hfe.problem(text) == "Not an HFE file." and hfe.problem(tmp_path / "missing.hfe")
+
+
+def test_the_open_dialog_check_lets_a_good_hfe_through_and_names_what_is_wrong_with_the_rest(tmp_path, hfe_bytes):
+    from akaiutil_gui import importing
+
+    good, v3 = tmp_path / "good.hfe", tmp_path / "v3.hfe"
+    good.write_bytes(hfe_bytes)
+    v3.write_bytes(b"HXCHFEV3" + bytes(2_000_000))
+    assert importing.disk_image_problem(good) is None
+    assert "v3" in importing.disk_image_problem(v3)
+
+
+def test_save_with_a_template_keeps_its_layout_for_a_different_disk(tmp_path, image, hfe_bytes):
+    other = random.Random(9).randbytes(HD_BYTES)
+    path = tmp_path / "copy.hfe"
+    hfe.save(path, other, template=hfe_bytes)
+    assert hfe.read(path).image == other and path.read_bytes()[:1024] == hfe_bytes[:1024]
 
 
 def test_read_says_what_is_wrong_with_a_missing_file(tmp_path):

@@ -130,7 +130,8 @@ class _Track:
     blocks: int  # 512-byte blocks it takes
 
 
-def _tracks(data: bytes) -> list[_Track]:
+def _check_header(data: bytes) -> int:
+    """Refuse a file that can't be an Akai floppy by its header alone; returns where the track table is (in 512-byte blocks)."""
     if data[:8] == SIGNATURE_V3:
         raise HfeError("This is an HFE v3 file, which isn't supported yet.")
     if data[:8] != SIGNATURE_V1:
@@ -142,8 +143,27 @@ def _tracks(data: bytes) -> list[_Track]:
         raise HfeError("This HFE file isn't MFM-encoded, so it isn't an Akai disk.")
     if (cylinders, sides) != (CYLINDERS, SIDES):
         raise HfeError(f"This HFE file has {cylinders} tracks on {sides} side(s); an Akai disk has {CYLINDERS} on {SIDES}.")
+    return table
+
+
+def problem(path: str | os.PathLike) -> str | None:
+    """Why this HFE file can't be an Akai floppy, judged from its header alone (None: it might be; decoding settles it)."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(1024)
+    except OSError as e:
+        return e.strerror or str(e)
+    try:
+        _check_header(head)
+    except HfeError as e:
+        return str(e)
+    return None
+
+
+def _tracks(data: bytes) -> list[_Track]:
+    table = _check_header(data)
     tracks = []
-    for t in range(cylinders):
+    for t in range(CYLINDERS):
         if table * 512 + 4 * t + 4 > len(data):
             raise HfeError("The HFE file is cut short (its track list is incomplete).")
         offset, length = struct.unpack_from("<HH", data, table * 512 + 4 * t)
@@ -309,14 +329,16 @@ def encode(image: bytes) -> bytes:
 
 
 # ------------------------------------------------------------------------------------------------------------------ save
-def save(path: str | os.PathLike, image: bytes) -> None:
-    """Write `image` into the HFE file at `path`: patched into what is there, or a new file if there is none. The result is
-    decoded again and compared before it replaces anything, so a failure leaves the file as it was."""
+def make(image: bytes, template: bytes | None = None) -> bytes:
+    """The bytes of an HFE file holding `image`: the `template` file patched with it, or a new file without one."""
+    return patch(template, image) if template is not None else encode(image)
+
+
+def save(path: str | os.PathLike, image: bytes, template: bytes | None = None) -> None:
+    """Write `image` as an HFE file at `path` (made as `make` does). The result is decoded again and compared before it replaces
+    anything, so a failure leaves the file as it was; the file is written beside the target and moved into place."""
     path = Path(path)
-    try:
-        result = patch(path.read_bytes(), image) if path.exists() else encode(image)
-    except OSError as e:
-        raise HfeError(f"Couldn't read {path.name}: {e.strerror or e}.") from e
+    result = make(image, template)
     if decode(result).image != image:
         raise HfeError(f"Writing {path.name} didn't come out right, so it was left as it was.")
     try:
@@ -332,3 +354,12 @@ def save(path: str | os.PathLike, image: bytes) -> None:
             raise
     except OSError as e:
         raise HfeError(f"Couldn't write {path.name}: {e.strerror or e}.") from e
+
+
+def update(path: str | os.PathLike, image: bytes) -> None:
+    """Put `image` into the HFE file that is at `path`, changing only the sectors that differ."""
+    try:
+        template = Path(path).read_bytes()
+    except OSError as e:
+        raise HfeError(f"Couldn't read {Path(path).name}: {e.strerror or e}.") from e
+    save(path, image, template)

@@ -17,6 +17,22 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   has none, unless its start is all zeros (an empty image waiting for `format…`). `importing.disk_image_problem` is only the quick first
   look, so that the obvious cases (a PDF, a text file, an MP4) get a reason without starting akaiutil.
 
+## HFE images (not akaiutil: the GUI's own layer, see `hfe-plan.md`)
+- akaiutil can't read `.hfe` (a Gotek/HxC track-level container), so `hfe.py` decodes it to a flat image and `hfe_work.Workspace` keeps
+  that as a **working copy** in the app's `hfe-work` folder; akaiutil is given the working copy, and `MainWindow._disk_files` maps
+  it back to the HFE so the tree, title and backups name the `.hfe`. `_images` holds the HFE paths throughout.
+- **Write-back is per edit, not on close:** `_run_edit` calls `Workspace.sync()` after every edit (akaiutil has flushed the working copy by
+  then). `sync` patches only the changed sectors into the HFE, decodes the result and compares it before moving it into place.
+  A failure doesn't fail the edit: it is reported afterwards (`_report_hfe_failures`), the working copy is kept, and it is retried
+  after the next edit and when images are closed (`_hfe_written`, which asks before discarding what can't be written).
+- The backup question is asked about the `.hfe` itself, and Revert replaces it: the next open sees the file changed (size and time)
+  and decodes afresh. A working copy is reused only while the HFE is untouched since the last decode or write-back.
+- A header problem (v3, not MFM, wrong geometry) is caught by `importing.disk_image_problem` -> `hfe.problem` before akaiutil starts;
+  a damaged sector shows up when the file is decoded, which for a newly *added* image happens before akaiutil is restarted, so the
+  disks already open stay open.
+- `File > Save Disk as HFE…` is for floppies; an HFE source keeps its own track layout (patched copy), a flat one is encoded afresh
+  (HD only).
+
 ## Names
 - akaiutil only takes a file name that ends in a type: `.` and a letter (+ `1`, `3` or `9`), `.S9C`, `.CD`, `.S+`, or `.X` and two hex
   digits (the type byte itself; `.X00` and `.XFF` are refused). So a `.txt` can't be written under its own name. The GUI stores any

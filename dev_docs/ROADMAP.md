@@ -16,12 +16,13 @@ None of this could be checked by the test runs, which use a fake audio device, o
       for this say it works, but nothing here has confirmed it.
 - [ ] **Other files stored as `<name>.X01`** (a text file or PDF added anyway). Nothing says what a sampler shows for a file of
       that type, or whether another hex type (or a name the sampler hides) would suit better; change `importing.RAW_TYPE` if so.
+- [ ] **HFE files this app wrote** (an edited or newly saved `.hfe`): load on a Gotek/HxC feeding a real sampler, and decode with
+      Greaseweazle or the HxC software. Only the app's own reader has read them so far. Details in [hfe-plan.md](hfe-plan.md).
 
 ## Next
 
-0. **Open and save `.hfe` floppy images.** akaiutil can't read them, so the GUI converts to a flat working image on open and back on
-   save (read and write both wanted). The codec is written and tested on real HD disks (`hfe.py`); what's left is wiring it into
-   the open/edit/save flow, and checking its output with other software and a sampler. See [hfe-plan.md](hfe-plan.md).
+0. **HFE floppy images** are wired in (open, edit with write-back after each change, File > Save Disk as HFE…). What's left is checking
+   the written files with other software and a real sampler/Gotek, trying it by hand, and DD and v3 files. See [hfe-plan.md](hfe-plan.md).
 1. **Open an SD card / physical drive directly.** akaiutil can open raw devices. Needs OS permissions per platform and safety
    rails against picking the wrong disk; start read-only, add editing later.
 2. **Multis.** akaiutil only prints "S3000 multi" for one, so showing its parts means reading the file's bytes ourselves, which

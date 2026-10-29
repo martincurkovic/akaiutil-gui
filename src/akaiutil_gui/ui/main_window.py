@@ -36,6 +36,8 @@ from PySide6.QtCore import QSettings, QThreadPool
 from akaiutil_gui import (
     akai_names,
     describe,
+    hfe,
+    hfe_work,
     importing,
     search,
     settings,
@@ -217,6 +219,8 @@ class MainWindow(QMainWindow):
             int, int
         ] = {}  # bumped when a disk is changed: a load that started earlier is out of date
         self._writable = False  # akaiutil is running read/write (Edit > Allow Editing)
+        self._hfe = hfe_work.Workspace()  # flat working copies of the open HFE images: akaiutil only reads flat ones
+        self._hfe_failures: list[tuple[str, str]] = []  # write-backs that failed during an edit, to tell the user once it is done
         self._backup_handled: set[str] = set()  # images (resolved paths) already backed up, or made new, or declined, this session
         self._clip: tuple[str, list[tuple[Volume, FileEntry]]] | None = (
             None  # Copy / Cut: ("copy" | "cut", files)
@@ -509,9 +513,10 @@ class MainWindow(QMainWindow):
             "Close &Disk Image", self._close_selected_disk, QKeySequence("Ctrl+Shift+W")
         )
         self.act_close = self._action(
-            "Close All &Images", self.close_images, QKeySequence("Ctrl+W")
+            "Close All &Images", self._close_asked, QKeySequence("Ctrl+W")
         )
         self.act_revert = self._action("Revert to &Backup…", self._revert)
+        self.act_save_hfe = self._action("Save Disk as &HFE…", self._save_as_hfe)
         self.act_export = self._action(
             "&Export…", lambda: self._export(False), QKeySequence("Ctrl+E")
         )
@@ -534,6 +539,7 @@ class MainWindow(QMainWindow):
         file_menu.addActions([self.act_export, self.act_export_wav])
         file_menu.addSeparator()
         file_menu.addAction(self.act_revert)
+        file_menu.addAction(self.act_save_hfe)
         file_menu.addSeparator()
         # Ctrl+, everywhere (Qt maps Ctrl to Cmd on a Mac): the standard Preferences key is only defined on macOS and some Linux desktops
         settings_action = self._action("&Settings…", self._open_settings, QKeySequence("Ctrl+,"))
@@ -651,6 +657,8 @@ class MainWindow(QMainWindow):
         self.act_close.setEnabled(has_images)
         self.act_add.setEnabled(True)
         self.act_revert.setEnabled(has_images and self._writing == 0)
+        disk = self._selected_disk() if has_images else None
+        self.act_save_hfe.setEnabled(disk is not None and disk.type.startswith("FL") and self._writing == 0 and self._pending == 0)
         self.act_close_disk.setEnabled(
             has_images and self._selected_disk() is not None and self._writing == 0
         )
@@ -708,13 +716,19 @@ class MainWindow(QMainWindow):
             unbacked = [Path(p).name for p in self._images if str(Path(p).resolve()) not in self._backup_handled]
             if unbacked:  # (a new image joins while editing is on: it gets its backup question when editing is switched on again)
                 writable, note = False, f"Editing is off: switch it on to be asked about a backup of {', '.join(unbacked)}."
-        engine = self._engine
+        engine, images = self._engine, list(self._images)
         self.statusBar().showMessage("Opening…")
         self._run(
-            lambda: engine.open(self._images, writable=writable),
+            lambda: engine.open(self._engine_paths(images), writable=writable),
             lambda banner: self._opened(engine, banner, note),
             self._open_failed,
         )
+
+    def _engine_paths(self, images: list[str]) -> list[str]:
+        """What akaiutil is given for these images (worker thread): the files themselves, but a decoded working copy for an HFE."""
+        paths = [self._hfe.engine_path(p) for p in images]
+        self._hfe.release(keep=images)
+        return paths
 
     def _opened(self, engine: AkaiEngine, banner: str, note: str = "") -> None:
         if engine is not self._engine:
@@ -739,8 +753,8 @@ class MainWindow(QMainWindow):
         if note:
             message = f"{note}  ·  {message}"
         self.statusBar().showMessage(message)
-        self._disk_files = {
-            int(n): path for n, path in re.findall(r'^disk(\d+): "(.*)"$', banner, re.M)
+        self._disk_files = {  # (an HFE's working copy is shown as the HFE file)
+            int(n): self._hfe.source_for(path) for n, path in re.findall(r'^disk(\d+): "(.*)"$', banner, re.M)
         }
         if not self._disk_files:  # (akaiutil numbers them in the order they were given)
             self._disk_files = {
@@ -765,7 +779,7 @@ class MainWindow(QMainWindow):
             for d in disks
             if d.partitions == 0
             and d.index in self._disk_files
-            and not importing.is_blank_image(self._disk_files[d.index])
+            and not importing.is_blank_image(self._hfe.working_path(self._disk_files[d.index]))
         }
         if not_akai:
             n = len(not_akai)
@@ -818,7 +832,7 @@ class MainWindow(QMainWindow):
         everything = [*self._images, *new]
         need = [str(Path(p).resolve()) for p in new if str(Path(p).resolve()) not in self._backup_handled] if self._writable else []
         if not need:
-            self._reopen(everything)
+            self._reopen_with(everything, new)
             return
         # editing is on, so the new image can be changed straight away: ask about its backup now, as when editing was switched on
         answer = edit_dialogs.confirm(
@@ -835,9 +849,25 @@ class MainWindow(QMainWindow):
             return
         if answer is edit_dialogs.OTHER:
             self._backup_handled.update(need)
-            self._reopen(everything)
+            self._reopen_with(everything, new)
         else:
-            self._backup_images(need, lambda: self._reopen(everything))
+            self._backup_images(need, lambda: self._reopen_with(everything, new))
+
+    def _reopen_with(self, everything: list[str], new: list[str]) -> None:
+        """_reopen, once any HFE among the `new` images has been decoded: a damaged one is turned away with the reason, and the
+        images already open stay open."""
+        if not any(hfe.is_hfe(p) for p in new):
+            self._reopen(everything)
+            return
+        self.statusBar().showMessage("Reading the HFE image…")
+        self._run(
+            lambda: [self._hfe.engine_path(p) for p in new],
+            lambda _paths: self._reopen(everything),
+            lambda message: (
+                self.statusBar().clearMessage(),
+                self._warn("Couldn't open the HFE image", message),
+            ),
+        )
 
     def _reopen(self, paths: list[str], disk_map=None) -> None:
         """Restart on another set of images, keeping the editing mode and the selection (`disk_map` says what number the
@@ -869,7 +899,7 @@ class MainWindow(QMainWindow):
 
     def close_disk(self, disk: Disk) -> None:
         """Close one image and keep the others open. The disks after it get new numbers, since akaiutil numbers them in order."""
-        if self._engine is None or self._busy():
+        if self._engine is None or self._busy() or not self._hfe_written():
             return
         path = self._disk_files.get(disk.index)
         if path is not None:
@@ -897,10 +927,38 @@ class MainWindow(QMainWindow):
         self.close_images()
         QMessageBox.critical(self, "Couldn't open disk image", message)
 
+    def _hfe_written(self) -> bool:
+        """Whether every open HFE image has its edits in the file (they go back after each edit, so this is nearly always so). If
+        one can't be written, say why and ask whether to go on and lose the edits."""
+        failures = self._hfe.sync() if self._hfe.pending() else []
+        if not failures:
+            return True
+        answer = QMessageBox.warning(
+            self,
+            "Edits not saved",
+            "These HFE files couldn't be written, so their latest edits aren't in them:\n\n"
+            + "\n".join(f"{Path(path).name}: {reason}" for path, reason in failures)
+            + "\n\nClose anyway and lose those edits?",
+            QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return answer == QMessageBox.StandardButton.Discard
+
+    def _close_asked(self) -> None:
+        if self._hfe_written():
+            self.close_images()
+
     def close_images(self) -> None:
         engine, self._engine = self._engine, None
+        closed = list(self._images)
         if engine is not None:
-            run_async(engine.close)  # can take a moment; keep the GUI responsive
+            def shut() -> None:
+                engine.close()
+                self._hfe.drop(closed)  # (once akaiutil has let go of the working copies)
+
+            run_async(shut)  # can take a moment; keep the GUI responsive
+        else:
+            self._hfe.drop(closed)
         self._images = []
         self._disk_files = {}
         self._writable = False
@@ -1864,15 +1922,33 @@ class MainWindow(QMainWindow):
         self._writing += 1
         self._update_actions()
 
+        def work():
+            try:
+                return fn()
+            finally:  # (akaiutil has written the working copy of an HFE image by now; the HFE file follows)
+                self._hfe_failures += self._hfe.sync()
+
         def finish(handler):
             def wrapped(result):
                 self._writing -= 1
                 self._update_actions()
                 handler(result)
+                self._report_hfe_failures()
 
             return wrapped
 
-        self._run(fn, finish(on_done), finish(on_error))
+        self._run(work, finish(on_done), finish(on_error))
+
+    def _report_hfe_failures(self) -> None:
+        failures, self._hfe_failures = self._hfe_failures, []
+        if failures:
+            self._warn(
+                "Couldn't write the HFE file",
+                "The change is made, but it couldn't be written into the HFE file: "
+                + "; ".join(f"{Path(path).name} ({reason})" for path, reason in dict(failures).items())
+                + ". It is kept in a working copy and written again after the next change or when you close the image, "
+                "or use File > Save Disk as HFE… to save it somewhere else.",
+            )
 
     def _selected_volume(self) -> Volume | None:
         obj = self.tree.current_object()
@@ -2385,6 +2461,33 @@ class MainWindow(QMainWindow):
         if dialog.exec() != dialog.DialogCode.Accepted:
             return None
         return dialog.format, dialog.size_mb, dialog.partition_mb
+
+    def _ask_hfe_path(self, suggestion: str) -> str | None:
+        path, _ = QFileDialog.getSaveFileName(self, "Save disk as HFE", suggestion, "HFE images (*.hfe);;All files (*)")
+        return path or None
+
+    def _save_as_hfe(self) -> None:
+        """File > Save Disk as HFE: the selected floppy as an HFE file (for a Gotek or HxC emulator)."""
+        disk = self._selected_disk()
+        source = self._disk_files.get(disk.index) if disk is not None else None
+        if disk is None or source is None or self._busy():
+            return
+        start = settings.get_last_dir("save_hfe") or str(Path(source).parent)
+        path = self._ask_hfe_path(str(Path(start) / f"{Path(source).stem}.hfe"))
+        if path is None:
+            return
+        if not Path(path).suffix:
+            path += ".hfe"
+        if any(Path(path).resolve() == Path(p).resolve() for p in self._images):
+            QMessageBox.warning(self, "That image is open", f"{Path(path).name} is open in the window. Close it first if you want to replace it.")
+            return
+        settings.set_last_dir("save_hfe", str(Path(path).parent))
+        self.statusBar().showMessage(f"Saving {Path(path).name}…")
+        self._run(
+            lambda: self._hfe.save_as(source, path),
+            lambda _none: self.statusBar().showMessage(f"Saved {Path(path).name}.", 8000),
+            lambda message: (self.statusBar().clearMessage(), QMessageBox.critical(self, "Couldn't save the HFE file", message)),
+        )
 
     def _ask_save_path(self, suggestion: str) -> str | None:
         path, _ = QFileDialog.getSaveFileName(
@@ -3050,6 +3153,9 @@ class MainWindow(QMainWindow):
         return images
 
     def closeEvent(self, event) -> None:
+        if not self._hfe_written():
+            event.ignore()
+            return
         QSettings().setValue("window/geometry", self.saveGeometry())
         for name, splitter in self._splitters().items():
             QSettings().setValue(f"window/{name}", splitter.saveState())
@@ -3061,5 +3167,6 @@ class MainWindow(QMainWindow):
             shutil.rmtree(self._drag_dir, ignore_errors=True)
         if self._engine is not None:
             self._engine.close()
+        self._hfe.release()
         QThreadPool.globalInstance().waitForDone(3000)
         super().closeEvent(event)

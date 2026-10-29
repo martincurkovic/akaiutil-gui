@@ -240,7 +240,7 @@ Caveats found on the way:
 
 ## Built so far (2026-10-29)
 
-- `src/akaiutil_gui/hfe.py` and `tests/test_hfe.py` (23 tests; the whole suite passes). Nothing in the app uses the module yet.
+- `src/akaiutil_gui/hfe.py` and `tests/test_hfe.py` (23 tests; the whole suite passes). (See "Wired into the app" below for the app side.)
 - Decoding a disk takes about 0.2 s, patching the same, encoding a new file about 0.5 s (lookup tables; the prototype was ten
   times slower), so none of it needs special handling in a worker thread beyond what opening already has.
 - Tests generate their own disks (random data encoded by `hfe.encode`), because the samples are copyrighted. One test runs
@@ -253,6 +253,26 @@ Caveats found on the way:
 - A decoder lesson worth keeping: it reads only the *data* cells (odd positions); clock cells are ignored, so a flipped clock bit
   is not an error. Tests that damage a file must flip a data bit (mask `0x02`, `0x08`, `0x20`, `0x80` of a stored byte).
 
+## Wired into the app (2026-10-29)
+
+Done: `src/akaiutil_gui/hfe_work.py` (Qt-free `Workspace`), the changes in `ui/main_window.py` (open, add, close, `_run_edit`,
+File > Save Disk as HFE…), `hfe.problem` in `importing.disk_image_problem`, `HfeError` as a user-facing reason in `ui/tasks.py`, the
+manual's "HFE images" section, and tests: `test_hfe_work.py` (Qt-free) and `test_gui_hfe.py` (offscreen, real akaiutil).
+
+How it differs from the first sketch in "How it fits the app":
+- **Write-back happens after every edit, not when the image is closed.** akaiutil already writes an `.img` after every command, so
+  an HFE that waited for close would lose edits on a crash or force-quit that an `.img` wouldn't. Closing (and quitting) only retries
+  a write-back that failed, and asks before discarding one that still can't be written.
+- The window keeps `_images` as the HFE paths; only the call to `engine.open` sees the working copies (`_engine_paths`), and the
+  banner's paths are mapped back (`_disk_files`).
+- Adding an HFE decodes it on a worker first (`_reopen_with`), so a damaged one is refused without restarting akaiutil and closing
+  the images that are open. Opening one that fails closes everything, as any open failure does.
+- Save as HFE is enabled for floppies only (`disk.type` starts with `FL`).
+
+Not covered, deliberately: a working copy left behind by a crash between an edit and its write-back is not recovered on the next
+start (the HFE is decoded afresh; the old copy stays in the `hfe-work` folder until someone clears it). The window is the
+size of one edit, so it is small, and `Workspace` logs it. Add a recovery prompt if it ever happens in practice.
+
 ## Next steps
 
 1. **Independent check of written files.** Convert a patched HFE and a freshly encoded HFE with software that isn't ours (the
@@ -261,17 +281,16 @@ Caveats found on the way:
 2. Run the real-file test over **all 120** sample disks (unpack each zip into its own folder under `testing_images/`).
 3. Get a **DD** HFE and a **v3** HFE. The DD path (5 sectors) decodes in theory and has a synthetic test only; `encode` refuses DD;
    v3 is refused. The gap and size constants in `hfe.py` are HD values measured on two disks.
-4. **The app side**, following "How it fits the app": open (decode to a working image in the app folder, display the original
-   name), the backup question about the original `.hfe`, write-back with `hfe.save` when editing ends or the app closes, an
-   explicit *Save as HFE...*, and a refusal message in the style of `importing.disk_image_problem`. `hfe.is_hfe` is the hook for
-   the open dialog and drop handling. Add a note to `akaiutil-notes.md` and the manual when it lands.
+4. Try it by hand in the real window with a real `.hfe` (nobody has yet; the GUI tests are offscreen): open, edit, check the file,
+   close, reopen, Revert, Save as HFE.
+5. Clean up `hfe-work` leftovers at start-up, if they turn out to matter.
 
 ## State of play
 
 - The user who asked for this (a feature request, not the maintainer) has not sent their own files yet; the samples above are
   stand-ins found online. The maintainer knew nothing about HFE beforehand and wants **both reading and writing**.
-- The codec is done and tested on two real HD disks; the app does not use it yet (next steps 4). Not checked by anything but
-  this module: that other software and real hardware accept what it writes (next steps 1).
+- The codec and the app wiring are done and tested (offscreen) on two real HD disks and generated ones. Not checked by anything but
+  this module: that other software and real hardware accept what it writes (next steps 1); nobody has used it by hand yet (4).
 
 ## Open questions for the user
 

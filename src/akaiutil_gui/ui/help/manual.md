@@ -67,6 +67,15 @@ Floppy images hold a single volume.
 
 Opening or closing an image restarts akaiutil, which can take a moment with several large images.
 
+### HFE images (Gotek and HxC emulators)
+
+An **`.hfe`** file is a floppy as a Gotek or HxC floppy emulator plays it. akaiutil can't read that format, so the app opens it for you in a different way: it reads the sectors out of the file into a working copy, and akaiutil works on that. You open, browse and edit it like any other image, and the disk shows under the `.hfe` file's name.
+
+- **Edits are written back into the `.hfe` file after each change,** just as they are for an ordinary image. Only the sectors that changed are touched, and the rest of the file stays exactly as it was. If the file can't be written (a read-only card, a full disk) the app says so, keeps your change in the working copy, and tries again after the next change or when you close the image.
+- **The backup** that editing offers is a copy of the `.hfe` file, and **File > Revert to Backup…** puts it back.
+- **File > Save Disk as HFE…** saves the selected floppy as an `.hfe` file: an HFE image under a new name, or an ordinary floppy image as an HFE. It works for high-density (1.6 MB) floppy images; a low-density one can be saved as HFE only from another HFE file.
+- Only the format Akai disks use is understood: HFE version 1, MFM, 80 tracks on two sides. A file in HFE version 3, or one with damaged sectors, is turned away with the reason instead of being opened half-read.
+
 ---
 
 ## Looking around
@@ -329,4 +338,5 @@ The log holds the app's version, your operating system, the images you opened an
 - S900 samples are previewed as one-shots, and get no loops on import.
 - Direct-to-disk recordings (takes) are listed as text only.
 - Adding or closing a disk image restarts akaiutil, so disk numbers can change and the search index is rebuilt.
+- An **HFE** floppy is opened as a working copy and written back after each edit (see [HFE images](#hfe-images-gotek-and-hxc-emulators)). Written files have been checked against this app's own reader and real disks, but not yet on a real sampler.
 - The app is built on [akaiutil](https://sourceforge.net/projects/akaiutil/) by Klaus Michael Indlekofer (GPL v2 or later). **Help > About** shows the licence.
