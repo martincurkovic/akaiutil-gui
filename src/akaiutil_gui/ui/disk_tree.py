@@ -13,6 +13,7 @@ from akaiutil_gui.formatting import panel_os_version
 from . import theme
 from .file_drag import INTERNAL_MIME
 from .tasks import run_async
+from . import mono_icons
 from .volume_colors import swatch_icon
 
 _ROLE_OBJ = Qt.ItemDataRole.UserRole
@@ -67,7 +68,7 @@ class _DiskDelegate(QStyledItemDelegate):
         hot = self._tree.eject_hot == index.row()
         box = eject_rect(option.rect)
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, theme.antialiasing())
         if hot:  # a soft round plate under the glyph, as on a hovered toolbar button
             plate = QColor(colors["text"])
             plate.setAlpha(36)
@@ -262,7 +263,7 @@ class DiskTree(QTreeWidget):
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, theme.antialiasing())
         painter.setPen(pen)
         painter.translate(cell.center().x() + 0.5 - size / 2, cell.center().y() + 0.5 - size / 2)
         painter.drawPolyline(points)
@@ -453,6 +454,11 @@ class DiskTree(QTreeWidget):
 
     # ------------------------------------------------------------- building
     def _icon(self, which: QStyle.StandardPixmap):
+        if theme.current_palette().get("mono_icons"):  # (System 6: the style's icons are coloured)
+            dpr = self.devicePixelRatioF()
+            if which == QStyle.StandardPixmap.SP_DirIcon:
+                return mono_icons.folder(dpr)
+            return mono_icons.floppy(dpr) if which == QStyle.StandardPixmap.SP_DriveFDIcon else mono_icons.drive(dpr)
         return self.style().standardIcon(which)
 
     def _add_disks(self, gen: int, disks: list[Disk]) -> None:
@@ -566,6 +572,10 @@ class DiskTree(QTreeWidget):
             obj = item.data(0, _ROLE_OBJ)
             if isinstance(obj, Volume):
                 item.setIcon(0, swatch_icon(self._position(obj), dpr))
+            elif isinstance(obj, Partition):
+                item.setIcon(0, self._icon(QStyle.StandardPixmap.SP_DirIcon))
+            elif isinstance(obj, Disk):
+                item.setIcon(0, self._icon(QStyle.StandardPixmap.SP_DriveFDIcon if obj.type.startswith("FL") else QStyle.StandardPixmap.SP_DriveHDIcon))
             stack.extend(item.child(i) for i in range(item.childCount()))
 
     def _on_current(self, current: QTreeWidgetItem | None, _previous) -> None:

@@ -68,3 +68,80 @@ def test_system6_selected_rows_have_white_text_on_black():
     rule = qss[qss.rindex("QTreeView::item:selected") :].split("}")[0]  # (the last one: System 6's own, after the shared rule)
     assert "background-color: #000000" in rule and "color: #ffffff" in rule
     assert "selection-color: #ffffff" in qss[qss.rindex("QTreeView, QTableView") :].split("}")[0]
+
+
+def test_system6_tells_volumes_apart_by_hatching_and_the_others_by_colour(qt_app, delete_widgets):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from akaiutil_gui.ui import volume_colors
+
+    def painted(position):
+        image = QImage(20, 8, QImage.Format.Format_RGB32)
+        image.fill(0xFFFFFF)
+        painter = QPainter(image)
+        volume_colors.fill_volume(painter, QRectF(0, 0, 20, 8), position)
+        painter.end()
+        return image
+
+    try:
+        theme.set_theme_preference(settings.THEME_DARK)
+        assert volume_colors.pattern_brush(0) is None
+        theme.set_theme_preference(settings.THEME_SYSTEM6)
+        styles = [volume_colors.pattern_brush(i).style() for i in range(8)]
+        assert len(set(styles)) == 8 and volume_colors.pattern_brush(8).style() == styles[0]  # (the 9th volume starts over)
+        assert all(painted(i) != painted(j) for i in range(8) for j in range(i))
+        assert volume_colors.swatch_icon(1).pixmap(16, 16).size().width() == 16
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_system6_tree_icons_are_black_and_white(qt_app, delete_widgets):
+    from akaiutil_gui.ui import mono_icons
+
+    try:
+        theme.set_theme_preference(settings.THEME_SYSTEM6)
+        for make in (mono_icons.folder, mono_icons.floppy, mono_icons.drive):
+            image = make().pixmap(16, 16).toImage()
+            colours = {image.pixelColor(x, y).name() for x in range(16) for y in range(16) if image.pixelColor(x, y).alpha()}
+            assert colours == {"#000000", "#ffffff"}
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_the_details_pane_waits_for_more_room_before_using_two_columns_in_system6(qt_app, delete_widgets):
+    from akaiutil_gui.ui.details_view import DetailsView
+
+    view = DetailsView()
+    view.resize(1000, 400)
+    view.show()
+    try:
+        theme.set_theme_preference(settings.THEME_DARK)
+        view._theme_changed()
+        assert view.columns == 2  # (1000 px is wide enough for the usual 900)
+        theme.set_theme_preference(settings.THEME_SYSTEM6)
+        view._theme_changed()
+        assert view.columns == 1
+        view.resize(1200, 400)
+        qt_app.processEvents()
+        assert view.columns == 2
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_system6_question_dialog_buttons_are_all_the_same_height_and_not_squeezed(qt_app, delete_widgets):
+    from PySide6.QtWidgets import QPushButton
+
+    from akaiutil_gui.ui import edit_dialogs
+
+    try:
+        theme.set_theme_preference(settings.THEME_SYSTEM6)
+        dialog = edit_dialogs.ThreeWayDialog(None, "Allow editing?", "Editing changes the disk image files themselves.", "There is no undo.",
+                                             "Back Up and Edit", "Edit Without Backup", ["disk0.img"])
+        dialog.show()
+        qt_app.processEvents()
+        buttons = dialog.findChildren(QPushButton)
+        assert len(buttons) == 4 and len({b.height() for b in buttons}) == 1  # ("Show Details…" used to be taller: the ellipsis outgrows the line)
+        assert all(b.width() >= b.sizeHint().width() for b in buttons)
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)

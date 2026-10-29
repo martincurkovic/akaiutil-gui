@@ -112,7 +112,7 @@ class PreviewWaveform(QWidget):
     def paintEvent(self, _event) -> None:
         p = theme.current_palette()
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, theme.antialiasing())
         box = self._inner()
         painter.setBrush(QColor(p["bg_input"]))
         painter.setPen(QPen(QColor(p["border_progress"])))

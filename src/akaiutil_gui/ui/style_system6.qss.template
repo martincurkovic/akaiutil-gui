@@ -12,8 +12,15 @@ QWidget {
     font-size: ${font_size};
 }
 
+QTextBrowser {
+    font-size: ${font_size_dense};
+}
+
+/* the font's ellipsis (...) is taller than its line, so a button whose text ends in one came out taller than the rest: every button gets the same content height */
 QPushButton {
     border-radius: 6px;
+    min-height: 15px;
+    max-height: 15px;
 }
 
 /* ---------- Selection is inverted video: the row turns black, so its text has to turn white ---------- */

@@ -14,7 +14,7 @@ from akaiutil_gui.engine.models import DiskUsage
 from akaiutil_gui.formatting import human_size, percent
 
 from . import theme
-from .volume_colors import volume_color
+from .volume_colors import fill_volume
 
 # same thresholds AKAISDS uses for its sampler-memory bar
 WARNING_AT = 0.70
@@ -165,8 +165,8 @@ class UsageBar(QWidget):
     # --------------------------------------------------------------- painting
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         palette = theme.current_palette()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, not palette.get("hard_edges"))
         track = self._track_rect()
         track_path = QPainterPath()
         track_path.addRoundedRect(track, CORNER_RADIUS, CORNER_RADIUS)
@@ -182,7 +182,7 @@ class UsageBar(QWidget):
                     fill = QRectF(rect.left(), rect.top(), rect.width() * span.used, rect.height())
                     painter.fillRect(fill, level_color(span.used))
             elif span.kind == "volume":
-                painter.fillRect(rect, volume_color(span.volume))
+                fill_volume(painter, rect, span.volume)
             elif span.kind == "system":
                 painter.fillRect(rect, QColor(palette["text_disabled"]))
             elif span.kind == "outside":

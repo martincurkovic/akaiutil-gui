@@ -292,7 +292,7 @@ class MarkerWaveform(QWidget):
     def paintEvent(self, _event) -> None:
         p = theme.current_palette()
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, theme.antialiasing())
         box = self._inner()
         painter.setBrush(QColor(p["bg_input"]))
         painter.setPen(QPen(QColor(p["border_progress"])))
@@ -339,7 +339,7 @@ class MarkerWaveform(QWidget):
                     painter.fillRect(QRectF(left, 1, right - left, height - 2), shade)
 
         active = {n for n in (self._hover, self._dragging) if n}
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, theme.antialiasing())
         # the sample's markers first, then the loops', so a loop's handle is never hidden behind a boundary's
         for name in self._order():
             frame = self._markers[name]

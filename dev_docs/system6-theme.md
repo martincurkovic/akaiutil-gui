@@ -1,6 +1,6 @@
 # Macintosh System 6 theme
 
-Status 2026-10-29: **a basic working version** (View > Theme / Settings > Appearance > "Macintosh System 6"). Ported from JV Studio's
+Status 2026-10-29: **a working version, second pass done** (View > Theme / Settings > Appearance > "Macintosh System 6"). Ported from JV Studio's
 System 6 skin (`~/Development/jv-studio`, its `dev_docs/system6-theme.md` has the long story and what QSS cannot do). Seen only in
 offscreen screenshots on macOS; not looked at on Windows or Linux.
 
@@ -18,16 +18,28 @@ offscreen screenshots on macOS; not looked at on Windows or Linux.
 - Selected rows (tree, file table, lists) are inverted video: white text on black (fixed 2026-10-29 after the first version left the text black).
 - Tests: `tests/test_theme.py`.
 
+## Done in the second pass (2026-10-29)
+
+- **Volume colours** are hatching in the usage bar and the tree swatches (`volume_patterns`: Qt brush styles, black on white;
+  `volume_colors.fill_volume` / `pattern_brush`), 8 patterns, the 9th volume starts over. The loop markers on the sample waveform
+  still use the 8 greys (`volume_color_*`).
+- **Tree icons** (disk, floppy, folder) are painted in black and white (`ui/mono_icons.py`, palette key `mono_icons`); a selected row
+  keeps its icon as it is.
+- **Selected rows** show white on black (tree, file table, lists, tabs).
+- **Details pane** uses a 13 px font (`font_size_dense`) and waits for 1100 px before it goes to two columns
+  (`details_two_columns_min_width`): at 16 px the zone table's headers broke mid-word ("Veloc ity").
+- **Buttons** all have the same height (the font's `…` is taller than its line, so "Show Details…" came out taller), and the Allow-editing style dialog (`ThreeWayDialog`) is as wide as its buttons need ("Edit Without Backup" was squeezed and clipped). Its warning icon is drawn in black and white (`mono_icons.warning_pixmap`); `QMessageBox`es still show the style's coloured icons.
+- **Anti-aliasing is off** in the painted widgets (`theme.antialiasing()`, palette key `hard_edges`).
+- **Dialogs** (About, Settings, Rename, New Volume, Sample Settings, Copy Volume / Partition, Format, Import, Repair, the three-way
+  question) were rendered offscreen: nothing clipped there. Dark and light still render pixel for pixel as before.
+
 ## To do, roughly in order
 
-- [ ] **Volume colours.** The 8 categorical volume colours are 8 greys for now, which is hard to tell apart in the disk usage bar and
-  the tree swatches. Hatch or dither patterns (painted in `usage_bar.py` and `volume_colors.py`) would do it properly.
-- [ ] **Swatches on a selected row.** A selected tree row turns black, so a black or very dark volume swatch disappears on it.
-- [ ] **Look at every window and dialog**: file table, details, import / copy / format dialogs, sample settings and its waveform,
-  console dock, search results. Only the main window with a disk open has been looked at.
-- [ ] **Coloured icons.** The partition and disk icons in the tree keep their colours (blue folders); black-and-white versions needed.
-- [ ] **Painted widgets in 1-bit:** `waveform_preview`, `marker_waveform`, `usage_bar`, `splitter` without anti-aliasing.
-- [ ] **Dense lists in a bitmap font:** check the file table and tree stay readable and don't clip at 16 px; maybe 13-14 px there.
+- [ ] **QMessageBox icons** (information, warning, question) are still the coloured ones.
+- [ ] **Real screens.** Everything above was looked at offscreen on a Mac at one scale. The owner reported some cut-off labels and
+  button text in a couple of dialogs on a real screen: find which, and fix (the font is wider than the 13 px the layouts were made
+  for; fixed-size dialogs are the likely ones).
+- [ ] **Sample waveform and marker waveform** (Sample Settings dialog) with a real sample: colours, selected-marker look, 1-bit lines.
 - [ ] **Tooltips, progress bar, tab bar, menus** are styled but haven't been seen on a real screen (macOS keeps its native menu bar).
 - [ ] **Screenshots / README:** none yet.
 - [ ] **Windows and Linux:** check the font loads and the in-window menu bar looks right.

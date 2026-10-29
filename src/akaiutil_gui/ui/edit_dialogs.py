@@ -35,6 +35,7 @@ from akaiutil_gui.audio.preview import PreviewPlayer
 from akaiutil_gui.audio.sample import PlaybackPlan
 from akaiutil_gui.engine.models import Loop
 from akaiutil_gui.audio.markers import note_name
+from . import mono_icons, theme
 from .marker_waveform import END, START, MarkerWaveform, loop_in, loop_out
 from .volume_colors import volume_color
 from akaiutil_gui.engine import formats
@@ -1026,7 +1027,10 @@ class ThreeWayDialog(QDialog):
         self._result: bool | str = False
 
         icon = QLabel()
-        icon.setPixmap(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning).pixmap(48, 48))
+        if theme.current_palette().get("mono_icons"):  # (System 6: the style's warning icon is coloured)
+            icon.setPixmap(mono_icons.warning_pixmap(48, self.devicePixelRatioF()))
+        else:
+            icon.setPixmap(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning).pixmap(48, 48))
         icon.setAlignment(Qt.AlignmentFlag.AlignTop)
         heading = QLabel(text)
         heading.setWordWrap(True)
@@ -1073,6 +1077,11 @@ class ThreeWayDialog(QDialog):
         layout.addLayout(top)
         layout.addWidget(self.details)
         layout.addLayout(buttons)
+        # the width is fixed so the wording wraps the same everywhere, but never less than the buttons need (a theme with a wider font
+        # would otherwise squeeze them: "Edit Without Backup" lost its first and last letters)
+        margins = layout.contentsMargins()
+        needed = buttons.sizeHint().width() + margins.left() + margins.right()
+        self.setFixedWidth(max(self.WIDTH, needed))
         self.go_button.setFocus()
         self._fit_height()
 

@@ -112,15 +112,23 @@ class DetailsView(QTextBrowser):
         self._details: Details | None = None
         self._raw_mode = False
         self._columns = 1
-        theme.notifier.changed.connect(self._render)  # the colours are baked into the HTML
+        theme.notifier.changed.connect(self._theme_changed)  # the colours are baked into the HTML
 
     @property
     def columns(self) -> int:
         return self._columns
 
+    def _wanted_columns(self) -> int:
+        wide = theme.current_palette().get("details_two_columns_min_width", TWO_COLUMNS_MIN_WIDTH)  # (a theme with a wider font asks for more room)
+        return 2 if self.viewport().width() >= wide else 1
+
+    def _theme_changed(self) -> None:
+        self._columns = self._wanted_columns()
+        self._render()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        columns = 2 if self.viewport().width() >= TWO_COLUMNS_MIN_WIDTH else 1
+        columns = self._wanted_columns()
         if columns != self._columns:  # a wide pane shows two columns of details, a narrow one a single column
             self._columns = columns
             scroll = self.verticalScrollBar().value()

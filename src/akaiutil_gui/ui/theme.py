@@ -156,6 +156,10 @@ SYSTEM6_PALETTE = {
     "volume_color_7": "#e0e0e0",
     "volume_color_8": "#626262",
     # --- only here ---
+    # what tells the volumes apart in the usage bar and tree swatches, since there is no colour: Qt brush styles, black on white
+    "volume_patterns": ("SolidPattern", "Dense4Pattern", "HorPattern", "VerPattern", "BDiagPattern", "Dense7Pattern", "FDiagPattern", "CrossPattern"),
+    "hard_edges": True,  # painted widgets are drawn without anti-aliasing
+    "mono_icons": True,  # the tree's folder and disk icons are drawn in black and white (ui/mono_icons.py)
     "text_pressed": "#ffffff",
     "text_selected": "#ffffff",
     "text_tab_selected": "#ffffff",
@@ -164,6 +168,8 @@ SYSTEM6_PALETTE = {
     "scroll_handle_border": "1px solid #000000",
     "font_family": '"ChiKareGo2", "Chicago", "Geneva", "Monaco", monospace',
     "font_size": "16px",
+    "font_size_dense": "13px",  # the details pane's tables, which have a lot of columns
+    "details_two_columns_min_width": 1100,  # the details pane shows two columns from this width (900 otherwise): the font is wider
     "square_corners": True,  # every border-radius in the shared stylesheet becomes 0
     "scroll_track_pattern": True,  # a 50% black/white checker under the scroll bar handles
     "extra_template": True,  # append ui/style_system6.qss.template
@@ -349,6 +355,11 @@ def _effective_scheme():
     if _preference == settings.THEME_DARK:
         return Qt.ColorScheme.Dark
     return QGuiApplication.styleHints().colorScheme()
+
+
+def antialiasing() -> bool:
+    """Whether painted widgets should be anti-aliased (not in System 6, whose look is hard-edged)."""
+    return not current_palette().get("hard_edges")
 
 
 def current_preference():
