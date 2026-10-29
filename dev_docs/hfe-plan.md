@@ -156,7 +156,7 @@ damaged (tracks and sectors named), HFE v3 not supported yet.
 The maintainer downloaded six zips of Acrobatics' "AKAI S3000XL HFE Programs" (Vol 1-6) from the web into
 `~/Downloads/Akai HFE Images/`, 20 `.HFE` disks each. They are a commercial sound library, so **they are not in the repo and
 should not be added**. Two (`Alpha_DX.HFE`, `Sitar.HFE` from Vol 1) were unpacked into a scratch folder and checked with
-`dev_docs/hfe_decode_prototype.py` (throwaway Python, not product code: naive string-based MFM decode, about 2 s per disk).
+`dev_docs/hfe_prototype.py` (throwaway Python, not product code: naive string-based MFM decode and encode; `python3 -I hfe_prototype.py selftest <file.hfe>` re-runs every check below).
 
 What the samples settled (all **HD, HFE v1**, so nothing here covers DD or v3):
 
@@ -177,23 +177,81 @@ What the samples settled (all **HD, HFE v1**, so nothing here covers DD or v3):
   "What the flat image has to look like" describes akaiutil's formatter, not necessarily real disks. Decoding doesn't care (it
   places sectors by number). For *writing*, patching an existing HFE in place keeps whatever the disk had, which is another reason
   to prefer that over a fresh encode; a fresh encode should copy this 1/6 pattern (HD) unless a real sampler says otherwise.
-- Gap sizes and exact cell timing were **not** examined.
+- **Gaps (track 0, side 0, measured):** 80 x `4E`, 12 x `00`, `C2 C2 C2 FC` (index mark), 50 x `4E`; per sector 12 x `00`, `A1 A1 A1 FE`,
+  C H R N, CRC, **22** x `4E`, 12 x `00`, `A1 A1 A1 FB`, 1024 data, CRC, **139** x `4E`; the rest of the side filled with `4E`.
+  Standard IBM MFM apart from the longer gap 3. (akaiutil's formatter uses a gap3 *parameter* of `0x74`; that isn't a byte count to
+  compare with the 139 here.)
+- **Not every sync is on a byte boundary.** The index and ID syncs sit on the 16-cell grid, but the data-field syncs sit 6 cells
+  off it (cell offset 0 and 6 mod 16 both occur): those fields were rewritten with a different bit phase, as a real drive does.
+  A decoder must search for sync patterns in the cell stream, not step in bytes. It also means a fresh encode can never be
+  byte-identical to these files, however right it is.
+- Unused tail of the last 512-byte block of each track holds an alternating `49 2A` pattern (an MFM filler), 352 bytes per track.
+- Exact cell timing (cell-length jitter) is not in a v1 file, so there was nothing to examine.
 - The two disks differ in content as expected (`cmp` differs from byte 1571).
 
 Still open: a **DD (800K)** HFE, a **v3** file, anything written by a tool other than the one that made these (the disks look
 like S3000XL-made images converted for Gotek; who made the HFEs is not stated), and the other 238 disks (a batch decode would
 be a good first test: every one should give 10 good sectors on all 160 tracks).
 
+## Encoder results (2026-10-29, `hfe_prototype.py`, on `Alpha_DX.HFE` and `Sitar.HFE`)
+
+Two ways of writing, as designed above. About 8 s for the whole self-test per disk, in naive Python.
+
+1. **Patch in place** (`patch(file, flat_image)`: find each sector's data field in the cell stream, re-encode its 1024 bytes + CRC,
+   fix the one clock cell after it, leave everything else alone).
+   - With the *unchanged* decoded image the output is **byte-identical to the original file**, on both disks. That is the strongest
+     check there is that the MFM clock rule, the CRC (CRC-16/CCITT seeded with the `A1 A1 A1 FB` sync bytes; `binascii.crc_hqx`
+     does it) and the bit order are right, because they reproduce what a different program wrote.
+   - Three changed sectors (first, middle, last) decode back to exactly the new image, with no bad or missing sectors, and only
+     those three differ from the original.
+   - A real edit: `reni 4 EDITED.S3` in akaiutil on the decoded image changed 2 sectors; patching them into the HFE changed
+     **32 bytes** of the 4 MB file, header and track table untouched; decoding the patched HFE gives the same image akaiutil
+     wrote, and `dir` lists `EDITED.S3`.
+2. **Fresh encode** (`fresh(flat_image)`: header, index mark, gaps and the 1/6 sector rotation as measured above).
+   - Decodes (with the prototype's own decoder) to the identical image, every CRC good. Same size and track layout as the
+     originals (4,056,064 bytes).
+   - It is **not** byte-identical to the originals (about 0.9 M of 4 M bytes differ), as expected from the sync phase point
+     above. That means this path is only checked against *my own* decoder.
+
+**Not checked, and it matters:** that anything other than my decoder reads these files. Greaseweazle's decoder was the plan for
+that, but see the next section. Also unchecked: a sampler or Gotek loading a written file, DD, v3, any disk that is not one of
+these two.
+
+Caveats found on the way:
+- `patch` assumes each data field starts after a `FB` mark (previous data bit 1) and fixes the clock cell after the CRC from the
+  cell that follows. Both hold on these files. A track whose sector is damaged (bad CRC) is skipped by the decoder and so would be
+  left as it was by `patch`: the product code must refuse to write back if the decode reported problems.
+- `side_cells` reads every 512-byte block including the filler; `track_len` is not a multiple of 512 (50,336 = 98 x 512 + 160).
+  Reading and writing must use `ceil(len / 512)` blocks. The prototype does.
+
+## Greaseweazle, what was found
+
+- **Not on PyPI** (`uv pip install greaseweazle` finds no such package); it is installed from GitHub. So it cannot be a normal
+  `pyproject.toml` dependency, which makes vendoring a few modules, or not using it, the options.
+- An attempt to install it from GitHub into a throwaway virtualenv (to use its decoder as an independent check of the encoder)
+  was **blocked by the permission system** (code from outside the project). It was not retried another way. So its licence, API
+  and Akai disk definitions are still unchecked.
+- Given that the prototype's decode and both encode paths took a few hundred lines and worked first time against real files, the
+  recommendation is now: **write it ourselves** (Qt-free `hfe.py` as planned), and use Greaseweazle (or `hxcfe`) only as an
+  external cross-check tool, run by hand. That check is the first thing to do next; see "Next steps".
+
+## Next steps
+
+1. **Independent check of written files.** Convert a patched HFE and a freshly encoded HFE with software that isn't ours (the
+   maintainer could run `gw convert` from a Greaseweazle checkout, or open both in the HxC Floppy Emulator software) and compare
+   with the flat image. Ideally also load one on a Gotek/HxC and a sampler.
+2. Run the self-test on **all 120** sample disks (a loop over the six zips, each file unpacked to its own folder).
+3. Get a **DD** HFE and a **v3** HFE. `SIDE_BYTES`, `SPT` and the gaps in the prototype are HD-only constants.
+4. Then turn the prototype into `src/akaiutil_gui/hfe.py` with real tests (`tests/`), following the "How it fits the app" section.
+   Speed is acceptable (about 2 s to decode a disk), and could be cut with lookup tables or numpy if it feels slow in the UI.
+
 ## State of play
 
 - The user who asked for this (a feature request, not the maintainer) has not sent their own files yet; the samples above are
   stand-ins found online. The maintainer knew nothing about HFE beforehand and wants **both reading and writing**.
-- Read is shown to be feasible in plain Python. **Write has not been tried.** The first thing to do for it is the check that
-  matters most: encode a decoded image back to HFE (and patch-in-place), then compare against the original file's bitstream and
-  confirm the decoder, and ideally Greaseweazle or HxC, accept it.
-- The Greaseweazle question in "Library research" is still open. Given how quickly the decode worked from the spec, the pure
-  Python route looks less costly than first thought; the encoder (CRCs, MFM clock bits, gaps) is the part that needs care.
-- Nothing in `src/` has changed for this. The edits so far are these notes, the prototype, the roadmap entry and the README index.
+- **Reading and writing both work in plain Python on the two sample disks** (see "Encoder results"), with the caveat that only
+  my own decoder has read the written files.
+- Nothing in `src/` has changed for this. The edits so far are these notes, `hfe_prototype.py`, the roadmap entry and the README index.
 
 ## Open questions for the user
 

@@ -20,9 +20,8 @@ None of this could be checked by the test runs, which use a fake audio device, o
 ## Next
 
 0. **Open and save `.hfe` floppy images.** akaiutil can't read them, so the GUI converts to a flat working image on open and back on
-   save (read and write both wanted). Planned, not started, waiting on sample files from the user: see
-   [hfe-plan.md](hfe-plan.md) (format facts, library options such as Greaseweazle, reader/writer design, app flow, tests,
-   what's unverified).
+   save (read and write both wanted). A throwaway prototype (`hfe_prototype.py`) already reads and writes real HD samples; the app
+   code isn't started. See [hfe-plan.md](hfe-plan.md) (findings, encoder results, next steps, what's unverified).
 1. **Open an SD card / physical drive directly.** akaiutil can open raw devices. Needs OS permissions per platform and safety
    rails against picking the wrong disk; start read-only, add editing later.
 2. **Multis.** akaiutil only prints "S3000 multi" for one, so showing its parts means reading the file's bytes ourselves, which
