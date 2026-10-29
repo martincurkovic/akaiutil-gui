@@ -20,6 +20,7 @@ data fields that do not sit on the byte grid of the rest of the track.
 """
 
 import binascii
+from collections.abc import Callable
 import os
 import struct
 import tempfile
@@ -52,6 +53,7 @@ class _Layout:
     mode: int  # the header's interface mode
     first_sectors: tuple[int, ...]  # the first sector on a track, by track number (repeating)
     gap4a: int = 80  # filler bytes before the index mark
+    order: Callable[[int], tuple[int, ...]] | None = None  # track number -> the sectors in the order they sit on it, if not simply in turn
 
 
 # High density, as the sampler's own disks have it (the Acrobatics S3000XL set; see hfe-plan.md): standard IBM MFM at 500 kbit/s,
@@ -60,6 +62,13 @@ _HD = _Layout(sectors=HD_SECTORS, side_bytes=25168, gap3=139, bitrate=500, mode=
 # Low density, as HxC's own Akai S900 disks have it (the SD HxC "QuickInstall" pack and a library of ~1000 S900 disks; see
 # hfe-plan.md): sectors in order on every track, a short gap 3. Reproduced byte for byte from those files by the tests.
 _DD = _Layout(sectors=DD_SECTORS, side_bytes=12500, gap3=86, bitrate=250, mode=12, first_sectors=(1,), gap4a=230)
+# The S900 operating-system disk in the SD HxC pack: another generator, with the sectors interleaved 3, 1, 4, 2, 5 on the first five
+# tracks (the ones holding data) and 1, 4, 2, 5, 3 on the rest, and a gap 3 of 117. Only used by the tests: it reproduces that one
+# file, which is the one file seen with real data in a layout from a writer other than this module.
+_DD_OS = _Layout(
+    sectors=DD_SECTORS, side_bytes=12504, gap3=117, bitrate=250, mode=7, first_sectors=(1,),
+    order=lambda t: (3, 1, 4, 2, 5) if t < 5 else (1, 4, 2, 5, 3),
+)
 # High density as HxC lays it out for the S950 (the rotation is akaiutil's own formula, offset 6 and skew 4, and gap 3 is 0x74).
 # Only used by the tests, to check the encoder against those files; `encode` writes the sampler's layout above.
 _HD_HXC = _Layout(sectors=HD_SECTORS, side_bytes=25008, gap3=116, bitrate=500, mode=13, first_sectors=(7, 3, 9, 5, 1), gap4a=230)
@@ -446,7 +455,7 @@ def _new_side(image: bytes, t: int, side: int, layout: _Layout) -> str:
     run.add(b"\xfc" + b"\x4e" * _GAP1)
     first = layout.first_sectors[t % len(layout.first_sectors)]
     for i in range(layout.sectors):
-        r = (first - 1 + i) % layout.sectors + 1
+        r = layout.order(t)[i] if layout.order else (first - 1 + i) % layout.sectors + 1
         header = bytes([t, side, r, 3])
         run.add(b"\x00" * 12)
         run.sync(_SYNC_A1)

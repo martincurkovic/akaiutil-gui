@@ -69,7 +69,7 @@ Opening or closing an image restarts akaiutil, which can take a moment with seve
 
 ### HFE images (Gotek and HxC emulators)
 
-An **`.hfe`** file is a floppy as a Gotek or HxC floppy emulator plays it. akaiutil can't read that format, so the app opens it for you in a different way: it reads the sectors out of the file into a working copy, and akaiutil works on that. You open, browse and edit it like any other image, and the disk shows under the `.hfe` file's name.
+An **`.hfe`** file is a floppy as a Gotek or HxC floppy emulator plays it. (A Gotek running FlashFloppy can also use ordinary `.img` files, if its settings say the machine is an Akai, so it may not need HFE at all.) akaiutil can't read that format, so the app opens it for you in a different way: it reads the sectors out of the file into a working copy, and akaiutil works on that. You open, browse and edit it like any other image, and the disk shows under the `.hfe` file's name.
 
 - **Edits are written back into the `.hfe` file after each change,** just as they are for an ordinary image. Only the sectors that changed are touched, and the rest of the file stays exactly as it was. If the file can't be written (a read-only card, a full disk) the app says so, keeps your change in the working copy, and tries again after the next change or when you close the image.
 - **The backup** that editing offers is a copy of the `.hfe` file, and **File > Revert to Backup…** puts it back.

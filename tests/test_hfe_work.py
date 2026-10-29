@@ -173,3 +173,27 @@ def test_a_damaged_disk_is_never_written_back_or_saved_as_another_hfe(work, dama
 def test_a_good_disk_is_not_listed_as_damaged(work, hfe_file):
     work.engine_path(hfe_file)
     assert work.damaged() == {}
+
+
+# -------------------------------------------------------------------------------------------------------------- cleaning up
+def test_old_leftover_working_copies_are_deleted_and_current_ones_are_not(work, hfe_file, tmp_path):
+    import time
+
+    in_use = Path(work.engine_path(hfe_file))
+    left = work.root / "OLD-12345678"
+    left.mkdir(parents=True)
+    (left / "OLD.img").write_bytes(bytes(1000))
+    recent = work.root / "NEW-87654321"
+    recent.mkdir()
+    (recent / "NEW.img").write_bytes(bytes(1000))
+    other = work.root / "NOTES-00000000"
+    other.mkdir()
+    (other / "notes.txt").write_text("not ours to delete")
+    long_ago = time.time() - 30 * 86400
+    os.utime(left / "OLD.img", (long_ago, long_ago))
+    os.utime(in_use, (long_ago, long_ago))  # (old, but open right now)
+
+    removed = work.cleanup(14)
+    assert removed == [left / "OLD.img"] and not left.exists()
+    assert in_use.exists() and (recent / "NEW.img").exists() and (other / "notes.txt").exists()
+    assert work.cleanup(0) == []  # (0 days: never)

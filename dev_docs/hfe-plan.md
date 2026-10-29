@@ -377,11 +377,16 @@ hardware, but a file *this app* wrote has still not been played in a real sample
    of 1600 can't be opened at all. A possible feature: open such a disk **read-only** with the bad sectors zero-filled and a
    warning (`decode(strict=False)` already does the decoding); editing would stay off, since `patch` refuses a damaged original.
    **Done** (see "Damaged disks and repair" below).
-3. ~~Get a DD HFE~~ done (above). Still wanted: a **v3** HFE (v3 is refused), and a non-blank DD disk from the same generator as the
-   blank ones, to check the clock rule on varied data against HxC's writer too.
-4. Try it by hand in the real window with a real `.hfe` (nobody has yet; the GUI tests are offscreen): open, edit, check the file,
-   close, reopen, Revert, Save as HFE.
-5. Clean up `hfe-work` leftovers at start-up, if they turn out to matter.
+3. ~~Get a DD HFE~~ done. ~~Check the clock rule on varied data against HxC's writer~~ done: of the 1,031 DD files only 2 hold data (the
+   S900 OS disk, twice), from a third generator (80 filler bytes, gap 3 of 117, sectors interleaved 3-1-4-2-5 on tracks 0-4 and
+   1-4-2-5-3 after, header mode 7, 25,008-byte tracks); `hfe._DD_OS` reproduces it **byte for byte, 47 sectors of real data included**.
+   Still wanted: a **v3** HFE (v3 is refused).
+4. ~~Try it by hand in the real window.~~ The maintainer did, with real HFE files, and reports it works well (2026-10-29). Not yet
+   done by hand: Revert, Save as HFE, Save Repaired Copy.
+5. ~~Clean up `hfe-work` leftovers at start-up.~~ Done: `Workspace.cleanup(14)` runs with the backup cleanup a few seconds after
+   start; it only deletes `.img` files in folders directly under `hfe-work`, none in use, older than 14 days.
+6. **The HFE header's write-allowed byte** is ignored (every sample has 0xFF). If a file says write-protected the app could keep it
+   read-only; not done because nothing seen uses it.
 
 ## State of play
 
@@ -396,8 +401,10 @@ hardware, but a file *this app* wrote has still not been played in a real sample
   write-back must preserve more of the header.
 - Is it enough that *Save* writes back into the same `.hfe` on closing/leaving edit mode, or is an explicit "Save" per session
   better? (The plan above does both.)
-- If the sampler is fed by a Gotek running FlashFloppy: as far as I remember, that firmware can read Akai `.img` files directly
-  with an Akai host setting, which would make HFE unnecessary there. **(verify before spending the time)**.
+- *(Answered 2026-10-29, from the FlashFloppy wiki "Host Platforms" and HxC forum threads)* FlashFloppy reads plain `.img` files for
+  Akai hosts if FF.CFG says `host = akai` (with `interface = shugart`, or `akai-s950` for an S950 and S2800/S3000 (the latter with
+  `pin34 = dens`); `pin02 = nc` for an S1000/S1100). So a Gotek on FlashFloppy doesn't need HFE; HFE matters for HxC firmware and for
+  the SD HxC emulators (the QuickInstall packs are for those). The manual says so in one line.
 
 ## Out of scope
 

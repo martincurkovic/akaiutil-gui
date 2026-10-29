@@ -19,12 +19,14 @@ import os
 import re
 import shutil
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import hfe, paths
 
 log = logging.getLogger(__name__)
+KEEP_DAYS = 14  # how long a working copy that was never cleared away is kept
 
 
 def default_root() -> Path:
@@ -169,6 +171,30 @@ class Workspace:
         hfe.save_repair(dest, original, repaired)
         log.info("saved a repaired copy of %s as %s: %s", source, dest, [(f.track, f.side, f.sector, f.result, f.how) for f in repaired.fixes])
         return repaired
+
+    def cleanup(self, max_age_days: int = KEEP_DAYS, now: float | None = None) -> list[Path]:
+        """Delete working copies left behind long ago (a crash, or edits that never could be written back and that nobody came back
+        for). Only flat images directly inside a folder directly inside the working folder, none of the ones in use now. Returns
+        what was deleted."""
+        if max_age_days <= 0 or not self.root.is_dir():
+            return []
+        cutoff = (now if now is not None else time.time()) - max_age_days * 86400
+        with self._lock:
+            in_use = {e.working.parent.resolve() for e in self._entries.values()}
+        removed: list[Path] = []
+        for folder in sorted(p for p in self.root.iterdir() if p.is_dir()):
+            if folder.resolve() in in_use:
+                continue
+            try:
+                images = [p for p in folder.iterdir() if p.is_file() and p.suffix == ".img"]
+                if images and all(p.stat().st_mtime < cutoff for p in images):
+                    for p in images:
+                        p.unlink()
+                        removed.append(p)
+                folder.rmdir()  # (only works if nothing else is in it)
+            except OSError:
+                continue
+        return removed
 
     # ----------------------------------------------------------------------------------------------------------- closing
     def release(self, keep: list[str | os.PathLike] = ()) -> None:

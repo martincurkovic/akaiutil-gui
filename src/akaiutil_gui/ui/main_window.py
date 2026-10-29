@@ -3224,6 +3224,7 @@ class MainWindow(QMainWindow):
                 log.info("deleted %d backup(s) older than %d days from %s", len(removed), days, root)
 
         run_async(lambda: backup.cleanup(root, days), done, lambda message: log.warning("backup cleanup failed: %s", message))
+        run_async(self._hfe.cleanup, lambda removed: removed and log.info("deleted %d old HFE working cop%s", len(removed), "y" if len(removed) == 1 else "ies"))
 
     def _about(self) -> None:
         AboutDialog(self).exec()

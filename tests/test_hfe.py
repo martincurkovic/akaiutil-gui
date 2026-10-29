@@ -316,11 +316,12 @@ def _header(data: bytes) -> tuple:
 @pytest.mark.skipif(not REAL, reason=f"no real .hfe files in {IMAGE_DIR}")
 @pytest.mark.parametrize("path", REAL, ids=lambda p: p.name)
 def test_a_new_file_is_what_hxc_wrote_when_a_real_file_has_the_same_layout(path):
-    """The encoder against software that isn't ours: HxC's own blank Akai disks (S900 low density, S950 high density) are
-    reproduced byte for byte. Files made another way (a sampler's own disks, other generators) are skipped."""
+    """The encoder against software that isn't ours: HxC's own Akai disks (blank S900 low density and S950 high density, and the S900
+    operating-system disk, which holds real data) are reproduced byte for byte. Files made another way (a sampler's own disks,
+    other generators) are skipped."""
     data = path.read_bytes()
     decoded = hfe.decode(data)
-    for layout in (hfe._DD, hfe._HD_HXC):
+    for layout in (hfe._DD, hfe._HD_HXC, hfe._DD_OS):
         if _header(data) == (layout.bitrate, layout.mode, layout.side_bytes * 2) and decoded.sectors_per_track == layout.sectors:
             assert hfe._encode(decoded.image, layout) == data
             return
