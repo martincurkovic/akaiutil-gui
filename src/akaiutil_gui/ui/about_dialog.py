@@ -29,7 +29,8 @@ _TEXT_MAX_WIDTH = 440
 def link_palette(widget) -> QPalette:
     """The widget's palette with links in the theme's accent colour (the default blue is unreadable on the dark theme)."""
     palette = QPalette(widget.palette())
-    palette.setColor(QPalette.ColorRole.Link, QColor(theme.current_palette()["accent"]))
+    colours = theme.current_palette()
+    palette.setColor(QPalette.ColorRole.Link, QColor(colours.get("link", colours["accent"])))
     return palette
 
 

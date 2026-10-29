@@ -29,18 +29,21 @@ offscreen screenshots on macOS; not looked at on Windows or Linux.
 - **Details pane** uses a 13 px font (`font_size_dense`) and waits for 1100 px before it goes to two columns
   (`details_two_columns_min_width`): at 16 px the zone table's headers broke mid-word ("Veloc ity").
 - **Buttons** all have the same height (the font's `…` is taller than its line, so "Show Details…" came out taller), and the Allow-editing style dialog (`ThreeWayDialog`) is as wide as its buttons need ("Edit Without Backup" was squeezed and clipped). Its warning icon is drawn in black and white (`mono_icons.warning_pixmap`); `QMessageBox`es still show the style's coloured icons.
+- **Message boxes** (`QMessageBox`: information, question, warning, critical) show black-and-white icons: `theme._Style`, a `QProxyStyle` over Fusion, hands them out while the theme is on (`mono_icons.message_icon`). Dark and light are unchanged (compared pixel for pixel).
+- **Sliders** are black (the shared stylesheet's green is overridden) and **progress bars** show no percentage (it can't be read on the dither).
+- **Links** in the manual and the notices are near black and underlined (palette key `link`). The About dialog's one link stays blue: Qt ignores the palette colour for a `QLabel` link here.
+- **Marker waveform** looked at with a real waveform: readable; loop markers use dark greys, told apart by their numbers.
 - **Anti-aliasing is off** in the painted widgets (`theme.antialiasing()`, palette key `hard_edges`).
 - **Dialogs** (About, Settings, Rename, New Volume, Sample Settings, Copy Volume / Partition, Format, Import, Repair, the three-way
   question) were rendered offscreen: nothing clipped there. Dark and light still render pixel for pixel as before.
 
 ## To do, roughly in order
 
-- [ ] **QMessageBox icons** (information, warning, question) are still the coloured ones.
+- [ ] **About dialog's link** is blue.
 - [ ] **Real screens.** Everything above was looked at offscreen on a Mac at one scale. The owner reported some cut-off labels and
   button text in a couple of dialogs on a real screen: find which, and fix (the font is wider than the 13 px the layouts were made
   for; fixed-size dialogs are the likely ones).
-- [ ] **Sample waveform and marker waveform** (Sample Settings dialog) with a real sample: colours, selected-marker look, 1-bit lines.
-- [ ] **Tooltips, progress bar, tab bar, menus** are styled but haven't been seen on a real screen (macOS keeps its native menu bar).
+- [ ] **Menus, tooltips and the tab bar** look right offscreen; not seen on a real screen (macOS keeps its native menu bar).
 - [ ] **Screenshots / README:** none yet.
 - [ ] **Windows and Linux:** check the font loads and the in-window menu bar looks right.
 

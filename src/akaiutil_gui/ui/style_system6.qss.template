@@ -261,7 +261,7 @@ QScrollBar::add-line:horizontal:pressed, QScrollBar::sub-line:horizontal:pressed
 QProgressBar {
     background-color: ${bg};
     border: 1px solid ${border};
-    color: ${text};
+    color: transparent;
     text-align: center;
 }
 
@@ -280,4 +280,13 @@ QToolTip {
     background-color: ${bg};
     border: 1px solid ${border};
     padding: 2px 4px;
+}
+
+/* ---------- Sliders: black, not the shared stylesheet's green ---------- */
+QSlider::sub-page:horizontal {
+    background: ${border};
+}
+
+QSlider::handle:horizontal:hover {
+    background: ${text_bright};
 }

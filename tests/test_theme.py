@@ -145,3 +145,50 @@ def test_system6_question_dialog_buttons_are_all_the_same_height_and_not_squeeze
         assert all(b.width() >= b.sizeHint().width() for b in buttons)
     finally:
         theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_system6_message_box_icons_are_grey_only_and_the_others_keep_the_styles(qt_app, delete_widgets):
+    from PySide6.QtWidgets import QStyle
+
+    kinds = (QStyle.StandardPixmap.SP_MessageBoxInformation, QStyle.StandardPixmap.SP_MessageBoxQuestion,
+             QStyle.StandardPixmap.SP_MessageBoxWarning, QStyle.StandardPixmap.SP_MessageBoxCritical)
+
+    def colours(kind):
+        image = qt_app.style().standardIcon(kind).pixmap(32, 32).toImage()
+        return {image.pixelColor(x, y).name() for x in range(32) for y in range(32) if image.pixelColor(x, y).alpha() > 250}
+
+    try:
+        theme.apply_to_app(qt_app, settings.THEME_SYSTEM6)
+        black_and_white = {kind: colours(kind) for kind in kinds}
+        for kind in kinds:
+            assert all(c[1:3] == c[3:5] == c[5:7] for c in colours(kind)), kind  # (greys only: the ? has anti-aliased edges)
+        theme.set_theme_preference(settings.THEME_DARK)
+        assert all(colours(kind) != black_and_white[kind] for kind in kinds)  # (the style's own again: blank on the offscreen platform, coloured elsewhere)
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)
+
+
+def test_system6_sliders_and_progress_bars_are_black_and_white():
+    qss = theme.render_stylesheet(theme.SYSTEM6_PALETTE)
+    assert "#3aa88a" not in qss[qss.index("Sliders: black") :]
+    assert "color: transparent" in qss[qss.rindex("QProgressBar {") :].split("}")[0]
+
+
+def test_system6_links_in_the_notices_are_dark_and_underlined(qt_app, delete_widgets):
+    from akaiutil_gui.ui.notices_dialog import NoticesDialog
+
+    try:
+        theme.apply_to_app(qt_app, settings.THEME_SYSTEM6)
+        dialog = NoticesDialog()
+        links, block = [], dialog.view.document().begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                fmt = it.fragment().charFormat()
+                if it.fragment().isValid() and fmt.isAnchor():
+                    links.append((fmt.foreground().color().name(), fmt.fontUnderline()))
+                it += 1
+            block = block.next()
+        assert links and set(links) == {("#101010", True)}
+    finally:
+        theme.set_theme_preference(settings.THEME_DARK)

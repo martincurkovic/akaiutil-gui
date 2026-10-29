@@ -31,7 +31,7 @@ def open_url(url: str) -> None:
     QDesktopServices.openUrl(QUrl(url))
 
 
-def _recolor_links(document, color: QColor) -> None:
+def _recolor_links(document, color: QColor, underline: bool = False) -> None:
     """Give every link run in the document one colour: Markdown anchors ignore QPalette.Link."""
     cursor = QTextCursor(document)
     block = document.begin()
@@ -44,9 +44,18 @@ def _recolor_links(document, color: QColor) -> None:
                 cursor.setPosition(fragment.position() + fragment.length(), QTextCursor.MoveMode.KeepAnchor)
                 fmt = QTextCharFormat()
                 fmt.setForeground(color)
+                if underline:
+                    fmt.setFontUnderline(True)
                 cursor.mergeCharFormat(fmt)
             it += 1
         block = block.next()
+
+
+def recolor_theme_links(document) -> None:
+    """In a theme that names its link colour (System 6: Qt draws links blue whatever the palette says), write that colour into the links."""
+    link = theme.current_palette().get("link")
+    if link:
+        _recolor_links(document, QColor(link), underline=True)  # (a black link is told from the text by its underline)
 
 
 class UpdateAvailableDialog(QDialog):

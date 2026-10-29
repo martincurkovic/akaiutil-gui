@@ -22,6 +22,7 @@ import sys
 from string import Template
 
 from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtWidgets import QProxyStyle, QStyle
 
 from akaiutil_gui import settings
 
@@ -146,15 +147,15 @@ SYSTEM6_PALETTE = {
     "warning": "#d65a00",
     "critical": "#dd0907",
     "bg_zebra": "#f0f0f0",
-    # eight greys in place of the categorical colours (a stand-in: see the roadmap for hatching)
+    # eight dark greys for what is still coloured by position (the loop markers on the sample waveform); the volumes themselves are hatched
     "volume_color_1": "#000000",
-    "volume_color_2": "#9a9a9a",
-    "volume_color_3": "#4a4a4a",
-    "volume_color_4": "#c4c4c4",
-    "volume_color_5": "#262626",
-    "volume_color_6": "#7a7a7a",
-    "volume_color_7": "#e0e0e0",
-    "volume_color_8": "#626262",
+    "volume_color_2": "#505050",
+    "volume_color_3": "#202020",
+    "volume_color_4": "#606060",
+    "volume_color_5": "#383838",
+    "volume_color_6": "#707070",
+    "volume_color_7": "#181818",
+    "volume_color_8": "#484848",
     # --- only here ---
     # what tells the volumes apart in the usage bar and tree swatches, since there is no colour: Qt brush styles, black on white
     "volume_patterns": ("SolidPattern", "Dense4Pattern", "HorPattern", "VerPattern", "BDiagPattern", "Dense7Pattern", "FDiagPattern", "CrossPattern"),
@@ -168,6 +169,7 @@ SYSTEM6_PALETTE = {
     "scroll_handle_border": "1px solid #000000",
     "font_family": '"ChiKareGo2", "Chicago", "Geneva", "Monaco", monospace',
     "font_size": "16px",
+    "link": "#101010",  # links in the manual and the notices (the About dialog's one link stays Qt's blue: its palette colour is ignored here)
     "font_size_dense": "13px",  # the details pane's tables, which have a lot of columns
     "details_two_columns_min_width": 1100,  # the details pane shows two columns from this width (900 otherwise): the font is wider
     "square_corners": True,  # every border-radius in the shared stylesheet becomes 0
@@ -300,10 +302,33 @@ def render_stylesheet(palette):
         ) from e
 
 
+class _Style(QProxyStyle):
+    """Fusion, except that System 6 swaps the coloured message box icons (a QMessageBox asks the style for them) for black and white ones."""
+
+    _KINDS = {
+        QStyle.StandardPixmap.SP_MessageBoxInformation: "information",
+        QStyle.StandardPixmap.SP_MessageBoxQuestion: "question",
+        QStyle.StandardPixmap.SP_MessageBoxWarning: "warning",
+        QStyle.StandardPixmap.SP_MessageBoxCritical: "critical",
+    }
+
+    def __init__(self):
+        super().__init__("Fusion")
+
+    def standardIcon(self, standard_icon, option=None, widget=None):
+        kind = self._KINDS.get(standard_icon)
+        if kind is not None and current_palette().get("mono_icons"):
+            from . import mono_icons
+
+            return mono_icons.message_icon(kind)
+        return super().standardIcon(standard_icon, option, widget)
+
+
 _active_palette = None  # set by _render_for_current_scheme() - see current_palette()
 _app = None  # the QApplication apply_to_app() was given
 _preference = settings.THEME_SYSTEM
 _connected_app = None  # whose colorSchemeChanged apply_to_app() already hooked
+_style_app = None  # the QApplication whose style apply_to_app() already set
 _qt_palette_overridden = False  # whether _apply_qt_palette() replaced Qt's own application palette
 
 #: (label, value) in the order the Settings > Appearance combo shows them
@@ -479,10 +504,12 @@ def apply_to_app(app, preference=None):
     """
     from PySide6.QtGui import QGuiApplication
 
-    global _app, _connected_app
+    global _app, _connected_app, _style_app
     _app = app
     _load_bundled_fonts()
-    app.setStyle("Fusion")
+    if _style_app is not app:  # (once per app: a new style object restyles every widget)
+        app.setStyle(_Style())
+        _style_app = app
     if preference is None:
         preference = settings.get_theme()
     set_theme_preference(preference)
