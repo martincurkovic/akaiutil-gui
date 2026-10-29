@@ -740,7 +740,8 @@ class MainWindow(QMainWindow):
         log.info("opened %s (%s)", ", ".join(self._images), "editing" if self._writable else "read-only")
         m = re.search(r"Rev\.\s*([\w.]+)", banner)
         names = ", ".join(Path(p).name for p in self._images)
-        self.setWindowTitle(f"{names} — akaiutil-gui")
+        # (one image is named; with several the disk list already names each, and a title of them all would run off the bar)
+        self.setWindowTitle(f"{names if len(self._images) == 1 else f'{len(self._images)} disk images'} — akaiutil-gui")
         message = f"Opened {names}  ·  akaiutil {m.group(1) if m else '?'}  ·  {self._engine_binary}"
         # akaiutil reports unreadable/unformatted disks only in its start-up chatter
         problems = [

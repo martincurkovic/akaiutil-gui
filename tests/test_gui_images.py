@@ -99,7 +99,7 @@ def test_adding_an_image_keeps_the_others_and_what_you_were_looking_at(qt_app, w
     assert names(window) == ["s3000_hd.img", "s1000_floppy.img"]
     assert pump(qt_app, lambda: window._volume is not None and window._volume.name == "DRUMS" and window.table.rowCount() == 2)
     assert window.tree.current_object().name == "DRUMS"  # same volume, still selected
-    assert window.windowTitle() == "s3000_hd.img, s1000_floppy.img — akaiutil-gui"
+    assert window.windowTitle() == "2 disk images — akaiutil-gui"
     assert pump(qt_app, lambda: window._index_ready())  # search covers both
 
 
