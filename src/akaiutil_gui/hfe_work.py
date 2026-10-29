@@ -6,6 +6,10 @@ image in the app's own folder, and gives akaiutil that. akaiutil writes the work
 nothing is waiting for the window to close. A write-back that fails (a read-only card, a full disk) is reported by `sync` and kept
 for the next one; the working copy stays until it has gone back, or the image is opened afresh.
 
+A disk with sectors that can't be read is still opened, for looking at: the unreadable sectors are blank in the working copy.
+Such a disk is never written back (`sync` skips it, `save_as` refuses it, and the window keeps editing off while one is open),
+since patching it would put the blank sectors into the file.
+
 Every other kind of file passes through untouched.
 """
 
@@ -44,6 +48,7 @@ class _Entry:
     working: Path  # the flat image akaiutil has
     signature: tuple[int, int]  # the source's size and time as of the last decode or write-back
     digest: str  # of the working copy as of then
+    missing: tuple[tuple[int, int, int], ...] = ()  # (track, side, sector) of every sector that couldn't be read: a damaged disk
 
 
 class Workspace:
@@ -67,13 +72,17 @@ class Workspace:
             if entry is not None and entry.working.exists() and _digest(entry.working) != entry.digest:
                 log.warning("%s changed on disk while edits to it were waiting to be written; they are dropped", source)
             data = source.read_bytes() if source.exists() else b""
-            decoded = hfe.decode(data)
+            decoded = hfe.decode(data, strict=False)
             folder = self.root / f"{re.sub(r'[^\w.\- ]', '_', source.stem).strip(' .') or 'disk'}-{hashlib.sha1(key.encode()).hexdigest()[:8]}"
             folder.mkdir(parents=True, exist_ok=True)
             working = folder / f"{source.stem}.img"
             working.write_bytes(decoded.image)
-            self._entries[key] = _Entry(source, working, _signature(source), hashlib.sha1(decoded.image).hexdigest())
+            self._entries[key] = _Entry(
+                source, working, _signature(source), hashlib.sha1(decoded.image).hexdigest(), tuple(decoded.missing)
+            )
             log.info("decoded %s (%s, %d bytes) into %s", source, decoded.density, len(decoded.image), working)
+            if decoded.problems:
+                log.warning("%s is damaged, opened read-only: %s", source, "; ".join(decoded.problems[:10]))
             return str(working)
 
     def source_for(self, path: str | os.PathLike) -> str:
@@ -91,6 +100,11 @@ class Workspace:
             entry = self._entries.get(str(Path(source).resolve()))
         return str(entry.working) if entry is not None and entry.working.exists() else str(source)
 
+    def damaged(self) -> dict[str, list[tuple[int, int, int]]]:
+        """The open HFE files that have sectors that couldn't be read, with where those sectors are: {file: [(track, side, sector)]}."""
+        with self._lock:
+            return {str(e.source): list(e.missing) for e in self._entries.values() if e.missing}
+
     def is_hfe(self, source: str | os.PathLike) -> bool:
         with self._lock:
             return str(Path(source).resolve()) in self._entries
@@ -99,7 +113,9 @@ class Workspace:
     def pending(self) -> list[str]:
         """The HFE files whose working copy has changes that haven't gone back."""
         with self._lock:
-            return [str(e.source) for e in self._entries.values() if e.working.exists() and _digest(e.working) != e.digest]
+            return [
+                str(e.source) for e in self._entries.values() if not e.missing and e.working.exists() and _digest(e.working) != e.digest
+            ]
 
     def sync(self) -> list[tuple[str, str]]:
         """Write every changed working copy back into its HFE file. Returns (file, reason) for each that could not be written."""
@@ -107,6 +123,8 @@ class Workspace:
         with self._lock:
             entries = list(self._entries.values())
         for entry in entries:
+            if entry.missing:
+                continue  # (read-only: and writing it back would put the blank sectors into the file)
             try:
                 digest = _digest(entry.working)
                 if digest == entry.digest:
@@ -126,6 +144,8 @@ class Workspace:
         keeps its own layout; a flat image is encoded afresh (high-density floppies only)."""
         source = Path(source)
         entry = self._entries.get(str(source.resolve()))
+        if entry is not None and entry.missing:
+            raise hfe.HfeError(f"{source.name} has sectors that couldn't be read, so saving it as another HFE file would write them as blank.")
         if entry is not None:
             hfe.save(dest, entry.working.read_bytes(), template=source.read_bytes())
             return

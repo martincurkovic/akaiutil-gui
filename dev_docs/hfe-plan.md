@@ -273,14 +273,84 @@ Not covered, deliberately: a working copy left behind by a crash between an edit
 start (the HFE is decoded afresh; the old copy stays in the `hfe-work` folder until someone clears it). The window is the
 size of one edit, so it is small, and `Workspace` logs it. Add a recovery prompt if it ever happens in practice.
 
+## Damaged disks and repair (2026-10-29)
+
+**Done: damaged disks open read-only.** `Workspace.engine_path` decodes with `strict=False`; the bad sectors are blank in the working
+copy and listed (`Decoded.missing`, `Workspace.damaged()`). The window warns once per file with each (track, side, sector), forces the
+engine read-only, refuses Allow Editing (and a reopen that asks for it), and nothing is ever written back: `sync` skips such a disk and
+`save_as` refuses it. Tests in `test_hfe.py`, `test_hfe_work.py`, `test_gui_hfe.py`. The three real damaged disks (JD8 NYLON: 1 sector,
+MARANZANO: 5, METAL KIT 13: 2) open and akaiutil lists their files.
+
+**Not built: repair.** What is possible, in increasing order of risk:
+1. *Find which files are hit.* A blank sector is a block number (`track*2+side)*spt + sector - 1`); akaiutil knows which file owns
+   each block, so the warning could say "KICK.S3 is damaged". Needs the block map from akaiutil (not looked at yet). Read-only and safe.
+2. *Repair a copy by single-bit correction.* CRC-16 locates a single flipped bit exactly. On the three damaged disks 4 of 8 bad
+   sectors were fixed by one flip (METAL KIT 13: 2 of 2; MARANZANO: 2 of 5; JD8 NYLON: 0 of 1). It is not proof: a multi-bit error
+   can look like a single-bit one (roughly 1 in 8 of those, 8208 positions against 65535 checksum values), so the report must say
+   "probably" and the repair must be a *new copy* (Save repaired copy as HFE…), never the original.
+3. *Re-seal what can't be corrected:* write the bytes as read plus a fresh checksum, so a sampler stops reporting a read error. The
+   bit errors stay (a click in a sample if it is audio; a broken file if it is a directory or allocation block), so this too is for a
+   copy, with a list of what was touched. A sector whose *header* is damaged (no sector found at all) can't be repaired this way: it
+   would have to be inserted into the track.
+Implementation sketch: `_find_sectors` also returns the bad data fields (their cell position and bytes read); a `repair(data)`
+produces the new file plus a report; the window gets File > Save Repaired Copy… for a damaged HFE, with the report in the dialog.
+
+## Low density and the S900/S950 samples (2026-10-29)
+
+Three more downloaded sets, all in `~/Downloads/` (commercial or archive material: **not in the repo**; three small ones were copied
+into the git-ignored `testing_images/` for the optional tests):
+
+| Set | Files | Header | Result |
+|---|---|---|---|
+| `AKAI S900 IMAGES/` | 999 `.HFE` | v1, bit rate **250** (DD), track 25,000 bytes, mode 12 | all decode; all patch back byte-identical (the ones checked are blank formatted disks) |
+| `QuickInstall_FloppyDiskImages/SDHxCFE_Akai_S900/` | 32 | the same, plus `DSKA0000` / `S900_OS4` (mode 7, track 25,008) = the S900 operating system disk | all decode and patch identically; akaiutil lists `FIXUPS.F9` |
+| `QuickInstall_FloppyDiskImages/SDHxCFE_Akai_S950/` | 31 | v1, bit rate **500** (HD), track 50,016 (one: 50,176), mode 13 | all decode and patch identically; `DSKA0000` has 1,469 data sectors and lists `PRESIDENT.P9` etc. |
+| `Akai SL5000 Factory Library DD/` | 20 `.AKAI` | not HFE: flat 800 KB images | 19 open in akaiutil (`FLL`); `SL5002` is 803,840 bytes, truncated, refused as too small |
+
+So **1,062 of 1,062** new HFE files decode and patch back to themselves, in both densities, and decoding needed no change for DD.
+
+The two HxC-made sets (SD HxC "QuickInstall" packs, meant for a real S900/S950 through an SD HxC emulator) are a different
+*generator* from the Acrobatics set, so there are now three layouts seen:
+
+| | sampler (Acrobatics, S3000XL, HD) | HxC S900 (DD) | HxC S950 (HD) |
+|---|---|---|---|
+| first 4E filler / index mark | 80 / yes | **230** / yes | 230 / yes |
+| gap1 / gap2 | 50 / 22 | 50 / 22 | 50 / 22 |
+| gap3 | 139 | **86** | **116** (= akaiutil's `0x74`) |
+| first sector on track *t* | 1, 6, 1, 6 ... | 1 every track (in order) | 7, 3, 9, 5, 1 ... = akaiutil's formula (offset 6, skew 4) |
+| stored bytes per side (track_len / 2) | 25,168 | **12,500** | 25,008 |
+| bit rate / mode in header | 500 / 1 | 250 / 12 | 500 / 13 |
+| data-field syncs on the byte grid | not always (rewritten) | yes | yes |
+
+**The independent check at last:** `hfe._DD` (the S900 layout) and `hfe._HD_HXC` (the S950 layout), driven only by the numbers above,
+reproduce HxC's blank-disk files **byte for byte**: every cell of all 160 track sides, the CRCs, the filler, the header and the
+track list (the one difference found was HxC filling the unused end of the track list with 0xFF; fixed). That is a writer other than
+this module's own agreeing with the encoder (the test is `test_a_new_file_is_what_hxc_wrote_...`, run on any real files in
+`testing_images/`). Caveat: the disks reproduced are blank (all-zero data), so it checks structure, CRCs and the 4E/00/sync/filler
+bytes rather than the MFM clock rule on varied data; that rule is what "patch gives the identical file back" on real data disks
+(Acrobatics, the S900 OS, the S950 data disk) already checks. Files from other generators (`DSKA0000`: mode 7, track 25,008 or
+50,176) decode and patch fine but aren't reproduced by a fresh encode, as expected.
+
+Consequences, done: `encode` now offers **both densities** (HD = the sampler's layout, DD = HxC's S900 layout), so File > Save Disk
+as HFE... works for any floppy; `.akai` is in the open dialog's filter. Still open: the layouts are all "known good" to somebody's
+hardware, but a file *this app* wrote has still not been played in a real sampler or Gotek.
+
 ## Next steps
 
 1. **Independent check of written files.** Convert a patched HFE and a freshly encoded HFE with software that isn't ours (the
    maintainer could run `gw convert` from a Greaseweazle checkout, or open both in the HxC Floppy Emulator software) and compare
    with the flat image. Ideally also load one on a Gotek/HxC and a sampler. Until then only this module has read what it wrote.
-2. Run the real-file test over **all 120** sample disks (unpack each zip into its own folder under `testing_images/`).
-3. Get a **DD** HFE and a **v3** HFE. The DD path (5 sectors) decodes in theory and has a synthetic test only; `encode` refuses DD;
-   v3 is refused. The gap and size constants in `hfe.py` are HD values measured on two disks.
+2. ~~Run the real-file test over all 120 sample disks.~~ Done 2026-10-29, straight from the zips in memory: all 120 have the same
+   header (v1, HD, bit rate 500, 50,336-byte tracks; **none is DD**). **117 pass everything** (clean decode, patch with the unchanged
+   image gives the identical file, a changed sector reads back). **3 are refused as damaged**: Vol 4 `JD8 NYLON` (1 sector),
+   Vol 4 `MARANZANO` (10 sectors), Vol 6 `METAL KIT 13` (2 sectors). Their data fields fail the CRC; two of them have a single
+   flipped bit that exactly repairs it, which looks like read errors in the dumps and not a decoder fault (a fault would not leave
+   117 disks, about 187,000 sectors, perfect). So strict refusal is right for these, but it means a disk with 10 bad sectors out
+   of 1600 can't be opened at all. A possible feature: open such a disk **read-only** with the bad sectors zero-filled and a
+   warning (`decode(strict=False)` already does the decoding); editing would stay off, since `patch` refuses a damaged original.
+   **Done** (see "Damaged disks and repair" below).
+3. ~~Get a DD HFE~~ done (above). Still wanted: a **v3** HFE (v3 is refused), and a non-blank DD disk from the same generator as the
+   blank ones, to check the clock rule on varied data against HxC's writer too.
 4. Try it by hand in the real window with a real `.hfe` (nobody has yet; the GUI tests are offscreen): open, edit, check the file,
    close, reopen, Revert, Save as HFE.
 5. Clean up `hfe-work` leftovers at start-up, if they turn out to matter.

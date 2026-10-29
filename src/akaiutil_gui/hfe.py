@@ -11,8 +11,9 @@ Two ways to write:
 - `patch` takes an HFE file and a flat image and changes only the sectors whose data differ, leaving the header, gaps, sector order
   and everything else bit for bit as they were. This is what saving an edited disk does. With an unchanged image the result is
   the original file.
-- `encode` builds a new file from a flat image alone. Only high-density disks so far (no low-density sample has been seen to copy
-  the track layout from), and it is checked against nothing but this module's own decoder.
+- `encode` builds a new file from a flat image alone, high or low density. The low-density layout is HxC's own for Akai S900 disks
+  and is reproduced byte for byte from its files; the high-density one is a real sampler's (an S3000XL's). Both are checked against
+  files this module did not write, but no written file has been tried in a sampler yet.
 
 Sectors are found by searching the cell stream for sync marks, not by stepping in bytes: disks rewritten by a real drive have
 data fields that do not sit on the byte grid of the rest of the track.
@@ -33,17 +34,35 @@ SIDES = 2
 DD_SECTORS, HD_SECTORS = 5, 10
 IMAGE_BYTES = {DD_SECTORS: CYLINDERS * SIDES * DD_SECTORS * SECTOR_SIZE, HD_SECTORS: CYLINDERS * SIDES * HD_SECTORS * SECTOR_SIZE}
 
-# What a new high-density file is made of, copied from real disks (see hfe-plan.md): standard IBM MFM at 500 kbit/s, with a
-# longer gap 3, and the first sector on a track alternating between 1 and 6.
-_HD_SIDE_BYTES = 25168  # stored bytes per side of a track (8 cells each): one 300 RPM turn
-_BLOCKS_PER_TRACK = 99  # 512-byte blocks one track takes in the file
-_GAP4A, _GAP1, _GAP2, _GAP3 = 80, 50, 22, 139
-_HD_FIRST_SECTORS = (1, 6)
-_FILLER = bytes([0x49, 0x2A])  # what the unused end of a track's last block holds
-
+_GAP1, _GAP2 = 50, 22
 _SYNC_A1 = "0100010010001001"  # 0xA1 with the clock bit missing from its fifth data bit
 _SYNC_C2 = "0101001000100100"  # 0xC2, likewise
 _ENCODING_MFM = 0
+_FILLER = bytes([0x49, 0x2A])  # what the unused end of a track's last block holds
+
+
+@dataclass(frozen=True)
+class _Layout:
+    """What a new file's tracks are made of."""
+
+    sectors: int
+    side_bytes: int  # stored bytes per side of a track (8 cells each): one 300 RPM turn
+    gap3: int
+    bitrate: int  # kbit/s, as the header says
+    mode: int  # the header's interface mode
+    first_sectors: tuple[int, ...]  # the first sector on a track, by track number (repeating)
+    gap4a: int = 80  # filler bytes before the index mark
+
+
+# High density, as the sampler's own disks have it (the Acrobatics S3000XL set; see hfe-plan.md): standard IBM MFM at 500 kbit/s,
+# a long gap 3, and the first sector on a track alternating between 1 and 6.
+_HD = _Layout(sectors=HD_SECTORS, side_bytes=25168, gap3=139, bitrate=500, mode=1, first_sectors=(1, 6))
+# Low density, as HxC's own Akai S900 disks have it (the SD HxC "QuickInstall" pack and a library of ~1000 S900 disks; see
+# hfe-plan.md): sectors in order on every track, a short gap 3. Reproduced byte for byte from those files by the tests.
+_DD = _Layout(sectors=DD_SECTORS, side_bytes=12500, gap3=86, bitrate=250, mode=12, first_sectors=(1,), gap4a=230)
+# High density as HxC lays it out for the S950 (the rotation is akaiutil's own formula, offset 6 and skew 4, and gap 3 is 0x74).
+# Only used by the tests, to check the encoder against those files; `encode` writes the sampler's layout above.
+_HD_HXC = _Layout(sectors=HD_SECTORS, side_bytes=25008, gap3=116, bitrate=500, mode=13, first_sectors=(7, 3, 9, 5, 1), gap4a=230)
 
 
 class HfeError(Exception):
@@ -55,6 +74,7 @@ class Decoded:
     image: bytes  # the flat disk image: cylinder by cylinder, side 0 then side 1, sectors in order
     sectors_per_track: int
     problems: list[str] = field(default_factory=list)  # sectors that were bad, missing or doubled (empty for a good disk)
+    missing: list[tuple[int, int, int]] = field(default_factory=list)  # (track, side, sector) of each one left blank in the image
 
     @property
     def density(self) -> str:
@@ -235,17 +255,18 @@ def decode(data: bytes, strict: bool = True) -> Decoded:
     if per_track not in (DD_SECTORS, HD_SECTORS):
         raise HfeError("This HFE file doesn't hold an Akai floppy disk (no 5 or 10 sectors of 1024 bytes per track).")
     blank = bytes(SECTOR_SIZE)
-    parts = []
+    parts, missing = [], []
     for t in range(CYLINDERS):
         for side in range(SIDES):
             for r in range(1, per_track + 1):
                 if (t, side, r) not in sectors:
                     problems.append(f"track {t} side {side}: sector {r} missing")
+                    missing.append((t, side, r))
                 parts.append(sectors.get((t, side, r), blank))
     if strict and problems:
         more = f" (and {len(problems) - 3} more)" if len(problems) > 3 else ""
         raise HfeError("The HFE file is damaged: " + "; ".join(problems[:3]) + more + ".")
-    return Decoded(b"".join(parts), per_track, problems)
+    return Decoded(b"".join(parts), per_track, problems, missing)
 
 
 def read(path: str | os.PathLike, strict: bool = True) -> Decoded:
@@ -288,44 +309,47 @@ def patch(original: bytes, image: bytes) -> bytes:
 
 
 # ---------------------------------------------------------------------------------------------------------------- encode
-def _new_side(image: bytes, t: int, side: int) -> str:
+def _new_side(image: bytes, t: int, side: int, layout: _Layout) -> str:
     run = _Cells()
-    run.add(b"\x4e" * _GAP4A + b"\x00" * 12)
+    run.add(b"\x4e" * layout.gap4a + b"\x00" * 12)
     run.sync(_SYNC_C2)
     run.add(b"\xfc" + b"\x4e" * _GAP1)
-    first = _HD_FIRST_SECTORS[t % 2]
-    for i in range(HD_SECTORS):
-        r = (first - 1 + i) % HD_SECTORS + 1
+    first = layout.first_sectors[t % len(layout.first_sectors)]
+    for i in range(layout.sectors):
+        r = (first - 1 + i) % layout.sectors + 1
         header = bytes([t, side, r, 3])
         run.add(b"\x00" * 12)
         run.sync(_SYNC_A1)
         run.add(b"\xfe" + header + _crc(b"\xa1\xa1\xa1\xfe" + header).to_bytes(2, "big") + b"\x4e" * _GAP2 + b"\x00" * 12)
         run.sync(_SYNC_A1)
-        at = ((t * SIDES + side) * HD_SECTORS + r - 1) * SECTOR_SIZE
+        at = ((t * SIDES + side) * layout.sectors + r - 1) * SECTOR_SIZE
         data = image[at : at + SECTOR_SIZE]
-        run.add(b"\xfb" + data + _crc(b"\xa1\xa1\xa1\xfb" + data).to_bytes(2, "big") + b"\x4e" * _GAP3)
-    run.add(b"\x4e" * (_HD_SIDE_BYTES // 2 - run.length))
+        run.add(b"\xfb" + data + _crc(b"\xa1\xa1\xa1\xfb" + data).to_bytes(2, "big") + b"\x4e" * layout.gap3)
+    run.add(b"\x4e" * (layout.side_bytes // 2 - run.length))
     return run.text()
 
 
-def encode(image: bytes) -> bytes:
-    """A new HFE v1 file from a flat high-density image (1.6 MB)."""
-    if len(image) == IMAGE_BYTES[DD_SECTORS]:
-        raise HfeError("Making a new HFE file from a low-density (800 KB) disk isn't supported yet.")
-    if len(image) != IMAGE_BYTES[HD_SECTORS]:
-        raise HfeError(f"A floppy image is {IMAGE_BYTES[HD_SECTORS]} bytes; this one is {len(image)}.")
+def _encode(image: bytes, layout: _Layout) -> bytes:
+    blocks = (layout.side_bytes + 255) // 256  # (a block holds 256 bytes of each side)
     out = bytearray(b"\xff" * 512)
-    out[:20] = struct.pack("<8sBBBBHHBBH", SIGNATURE_V1, 0, CYLINDERS, SIDES, _ENCODING_MFM, 500, 0, 1, 1, 1)
-    out += bytes(512 * (1 + CYLINDERS * _BLOCKS_PER_TRACK))
+    out[:20] = struct.pack("<8sBBBBHHBBH", SIGNATURE_V1, 0, CYLINDERS, SIDES, _ENCODING_MFM, layout.bitrate, 0, layout.mode, 1, 1)
+    out += b"\xff" * 512 + bytes(512 * CYLINDERS * blocks)  # (HxC fills the unused end of the track list with 0xFF)
     for t in range(CYLINDERS):
-        track = _Track((2 + t * _BLOCKS_PER_TRACK) * 512, _HD_SIDE_BYTES * 2, _BLOCKS_PER_TRACK)
+        track = _Track((2 + t * blocks) * 512, layout.side_bytes * 2, blocks)
         struct.pack_into("<HH", out, 512 + 4 * t, track.offset // 512, track.length)
         for side in range(SIDES):
-            cells = _new_side(image, t, side)
-            stored = len(cells) // 8
-            filler = "".join(_BITS[_FILLER[i % 2]] for i in range(_BLOCKS_PER_TRACK * 256 - stored))
+            cells = _new_side(image, t, side, layout)
+            filler = "".join(_BITS[_FILLER[i % 2]] for i in range(blocks * 256 - len(cells) // 8))
             _store_side(out, track, side, cells + filler)
     return bytes(out)
+
+
+def encode(image: bytes) -> bytes:
+    """A new HFE v1 file from a flat floppy image: high density (1.6 MB) or low density (800 KB)."""
+    for layout in (_HD, _DD):
+        if len(image) == IMAGE_BYTES[layout.sectors]:
+            return _encode(image, layout)
+    raise HfeError(f"A floppy image is {IMAGE_BYTES[DD_SECTORS]} or {IMAGE_BYTES[HD_SECTORS]} bytes; this one is {len(image)}.")
 
 
 # ------------------------------------------------------------------------------------------------------------------ save

@@ -27,11 +27,15 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   after the next edit and when images are closed (`_hfe_written`, which asks before discarding what can't be written).
 - The backup question is asked about the `.hfe` itself, and Revert replaces it: the next open sees the file changed (size and time)
   and decodes afresh. A working copy is reused only while the HFE is untouched since the last decode or write-back.
+- **A damaged disk** (sectors whose checksum fails, or that are missing) is opened anyway, read-only: `hfe.decode(strict=False)` blanks
+  those sectors, `Workspace` records them (`damaged()`), and the window warns once per file (`_warn_damaged_hfe`), opens the engine
+  read-only whatever was asked, refuses Allow Editing, and `sync`/`save_as` never write such a disk. (Checked on the three real
+  damaged disks of the 120 downloads: akaiutil lists their files.)
 - A header problem (v3, not MFM, wrong geometry) is caught by `importing.disk_image_problem` -> `hfe.problem` before akaiutil starts;
   a damaged sector shows up when the file is decoded, which for a newly *added* image happens before akaiutil is restarted, so the
   disks already open stay open.
 - `File > Save Disk as HFE…` is for floppies; an HFE source keeps its own track layout (patched copy), a flat one is encoded afresh
-  (HD only).
+  (both densities).
 
 ## Names
 - akaiutil only takes a file name that ends in a type: `.` and a letter (+ `1`, `3` or `9`), `.S9C`, `.CD`, `.S+`, or `.X` and two hex

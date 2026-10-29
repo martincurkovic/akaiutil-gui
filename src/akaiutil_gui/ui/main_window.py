@@ -80,7 +80,7 @@ RECENT_WIDTH = 520  # px: the recent list on the start screen
 STATUS_BAR_MARGIN = 10  # px: the status bar's text keeps this far from the window's sides (and so its rounded corners)
 RECENT_SHOWN = 6  # how many of the remembered images the start screen lists
 
-IMAGE_FILTER = "Disk images (*.img *.iso *.bin *.dsk *.hfe *.fdi *.raw);;All files (*)"
+IMAGE_FILTER = "Disk images (*.img *.iso *.bin *.dsk *.hfe *.akai *.fdi *.raw);;All files (*)"
 
 
 def export_folder_name(vol: Volume, with_disk: bool) -> str:
@@ -220,6 +220,7 @@ class MainWindow(QMainWindow):
         ] = {}  # bumped when a disk is changed: a load that started earlier is out of date
         self._writable = False  # akaiutil is running read/write (Edit > Allow Editing)
         self._hfe = hfe_work.Workspace()  # flat working copies of the open HFE images: akaiutil only reads flat ones
+        self._hfe_warned: set[str] = set()  # damaged HFE files the user has been told about this session
         self._hfe_failures: list[tuple[str, str]] = []  # write-backs that failed during an edit, to tell the user once it is done
         self._backup_handled: set[str] = set()  # images (resolved paths) already backed up, or made new, or declined, this session
         self._clip: tuple[str, list[tuple[Volume, FileEntry]]] | None = (
@@ -718,8 +719,12 @@ class MainWindow(QMainWindow):
                 writable, note = False, f"Editing is off: switch it on to be asked about a backup of {', '.join(unbacked)}."
         engine, images = self._engine, list(self._images)
         self.statusBar().showMessage("Opening…")
+        def start() -> str:
+            paths = self._engine_paths(images)  # (decoding an HFE can find it damaged: such a disk is only ever opened read-only)
+            return engine.open(paths, writable=writable and not self._hfe.damaged())
+
         self._run(
-            lambda: engine.open(self._engine_paths(images), writable=writable),
+            start,
             lambda banner: self._opened(engine, banner, note),
             self._open_failed,
         )
@@ -799,6 +804,23 @@ class MainWindow(QMainWindow):
             return
         self.tree.load(engine, select=select, files=self._disk_files, disks=disks)
         self._update_actions()
+        self._warn_damaged_hfe()
+
+    def _warn_damaged_hfe(self) -> None:
+        """Tell the user, once per file, about an HFE image with sectors that couldn't be read (it is open read-only)."""
+        new = {path: sectors for path, sectors in self._hfe.damaged().items() if path not in self._hfe_warned}
+        if not new:
+            return
+        self._hfe_warned.update(new)
+        names = ", ".join(Path(p).name for p in new)
+        count = sum(len(sectors) for sectors in new.values())
+        self._warn(
+            "Damaged HFE image",
+            f"{names} {'has' if len(new) == 1 else 'have'} {count} sector{'s' if count != 1 else ''} that couldn't be read "
+            "(the checksum doesn't match). They show as blank, so a file stored there will be missing or wrong. "
+            "The image is open read-only, and editing stays off while it is open.",
+            [f"{Path(p).name}: track {t} side {side}, sector {r}" for p, sectors in new.items() for t, side, r in sectors],
+        )
 
     # ----------------------------------------------- adding and closing single disks
     def add_dialog(self) -> None:
@@ -952,6 +974,7 @@ class MainWindow(QMainWindow):
     def close_images(self) -> None:
         engine, self._engine = self._engine, None
         closed = list(self._images)
+        self._hfe_warned.clear()
         if engine is not None:
             def shut() -> None:
                 engine.close()
@@ -1761,6 +1784,17 @@ class MainWindow(QMainWindow):
             return
         if self._writable:
             then()
+            return
+        damaged = [Path(p).name for p in self._hfe.damaged()]
+        if damaged:
+            QMessageBox.warning(
+                self,
+                "Can't edit this image",
+                "These HFE files have sectors that couldn't be read, so they can only be looked at:\n\n"
+                + "\n".join(damaged)
+                + "\n\nClose them to edit the other images.",
+            )
+            self._sync_mode()
             return
         locked = [Path(p).name for p in self._images if not os.access(p, os.W_OK)]
         if locked:

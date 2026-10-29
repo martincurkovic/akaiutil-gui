@@ -126,8 +126,50 @@ def test_save_as_keeps_an_hfe_s_layout_and_encodes_a_flat_floppy_afresh(work, hf
     work.save_as(flat, fresh)
     assert hfe.read(fresh).image == image
 
+    dd = tmp_path / "dd.img"
+    dd.write_bytes(random.Random(2).randbytes(hfe.IMAGE_BYTES[hfe.DD_SECTORS]))
+    work.save_as(dd, tmp_path / "dd.hfe")
+    assert hfe.read(tmp_path / "dd.hfe").image == dd.read_bytes()
+
     big = tmp_path / "hd.img"
     big.write_bytes(bytes(8192 * 40))
     with pytest.raises(hfe.HfeError):
         work.save_as(big, tmp_path / "nope.hfe")
     assert not (tmp_path / "nope.hfe").exists()
+
+
+# ------------------------------------------------------------------------------------------------------ damaged disks
+@pytest.fixture
+def damaged_file(tmp_path, image):
+    data = bytearray(hfe.encode(image))
+    t = hfe._tracks(bytes(data))[9]
+    found, _ = hfe._find_sectors(hfe._side_cells(bytes(data), t, 0))
+    byte = found[4][1] // 8 + 60
+    data[t.offset + (byte // 256) * 512 + byte % 256] ^= 0x08  # (a data cell: flipping a clock cell wouldn't be noticed)
+    path = tmp_path / "BROKEN.hfe"
+    path.write_bytes(bytes(data))
+    return path
+
+
+def test_a_damaged_disk_is_opened_with_its_bad_sectors_blank_and_listed(work, damaged_file, image):
+    working = work.engine_path(damaged_file)
+    flat = Path(working).read_bytes()
+    where = ((9 * 2 + 0) * 10 + 3) * SECTOR
+    assert flat[where : where + SECTOR] == bytes(SECTOR)
+    assert flat[:where] == image[:where] and flat[where + SECTOR :] == image[where + SECTOR :]
+    assert work.damaged() == {str(damaged_file): [(9, 0, 4)]}
+
+
+def test_a_damaged_disk_is_never_written_back_or_saved_as_another_hfe(work, damaged_file, tmp_path):
+    working = work.engine_path(damaged_file)
+    before = damaged_file.read_bytes()
+    edit(working)  # (the window doesn't allow it, but if something did)
+    assert work.pending() == [] and work.sync() == [] and damaged_file.read_bytes() == before
+    with pytest.raises(hfe.HfeError, match="couldn't be read"):
+        work.save_as(damaged_file, tmp_path / "copy.hfe")
+    assert not (tmp_path / "copy.hfe").exists()
+
+
+def test_a_good_disk_is_not_listed_as_damaged(work, hfe_file):
+    work.engine_path(hfe_file)
+    assert work.damaged() == {}

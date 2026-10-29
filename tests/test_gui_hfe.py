@@ -7,7 +7,7 @@ import pytest
 from PySide6.QtWidgets import QMessageBox
 
 from akaiutil_gui import hfe
-from test_gui_editing import answers, delete_widgets, pump, tree_volumes, window  # noqa: F401  (fixtures)
+from test_gui_editing import answers, delete_widgets, pump, tree_volumes, vol, window  # noqa: F401  (fixtures)
 
 
 @pytest.fixture
@@ -138,3 +138,76 @@ def test_save_as_hfe_is_for_floppies_only(qt_app, window, images):
     qt_app.processEvents()
     window._update_actions()
     assert not window.act_save_hfe.isEnabled()
+
+
+@pytest.fixture
+def damaged_hfe(images, tmp_path):
+    """The small floppy as an HFE with one sector's data damaged (a data cell flipped, so its checksum fails)."""
+    data = bytearray(hfe.encode(Path(images["fl1"]).read_bytes()))
+    t = hfe._tracks(bytes(data))[30]
+    found, _ = hfe._find_sectors(hfe._side_cells(bytes(data), t, 1))
+    byte = found[2][1] // 8 + 40
+    data[t.offset + (byte // 256) * 512 + 256 + byte % 256] ^= 0x08  # (+256: side 1's half of the block)
+    path = tmp_path / "BROKEN.hfe"
+    path.write_bytes(bytes(data))
+    return path
+
+
+def test_a_damaged_hfe_opens_read_only_with_a_warning_naming_the_sectors(qt_app, window, damaged_hfe, answers):
+    open_hfe(qt_app, window, damaged_hfe)
+    assert not window._writable and window.tree.disk(0).type == "FLH"
+    title, text, details = next(w for w in answers.warnings if w[0] == "Damaged HFE image")
+    assert "BROKEN.hfe" in text and "1 sector " in text and "read-only" in text
+    assert details == ["BROKEN.hfe: track 30 side 1, sector 2"]
+
+
+def test_the_warning_is_given_once_not_on_every_reopen(qt_app, window, damaged_hfe, editable_hd, answers):
+    open_hfe(qt_app, window, damaged_hfe)
+    window.add_images([str(editable_hd)])  # (restarts akaiutil on both)
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 2)
+    assert pump(qt_app, lambda: window._pending == 0)
+    assert [w[0] for w in answers.warnings].count("Damaged HFE image") == 1
+
+
+def test_editing_stays_off_while_a_damaged_hfe_is_open(qt_app, window, damaged_hfe, answers):
+    open_hfe(qt_app, window, damaged_hfe)
+    window.act_allow_edit.trigger()
+    assert not window._writable and not window.act_allow_edit.isChecked()
+    assert any(w[0] == "Can't edit this image" and "BROKEN.hfe" in w[1] for w in answers.warnings)
+    window.open_images([str(damaged_hfe)], writable=True)  # (a reopen that asks for editing, as adding an image does)
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1) and not window._writable and not window._engine.is_writable
+
+
+def test_a_damaged_hfe_cant_be_saved_as_another_hfe(qt_app, window, damaged_hfe, answers, tmp_path, monkeypatch):
+    open_hfe(qt_app, window, damaged_hfe)
+    target = tmp_path / "copy.hfe"
+    monkeypatch.setattr(type(window), "_ask_hfe_path", lambda self, suggestion: str(target))
+    window.tree.setCurrentItem(window.tree.topLevelItem(0))
+    assert pump(qt_app, lambda: window.act_save_hfe.isEnabled())
+    window.act_save_hfe.trigger()
+    assert pump(qt_app, lambda: any("couldn't be read" in w[1] for w in answers.warnings if w[0] == "Couldn't save the HFE file"))
+    assert not target.exists()
+
+
+# ------------------------------------------------------------------------------------------------------------- low density
+def test_a_low_density_hfe_opens_edits_and_saves_a_copy(qt_app, window, images, answers, tmp_path, monkeypatch):
+    flat = Path(images["fl9"]).read_bytes()
+    path = tmp_path / "S900.hfe"
+    path.write_bytes(hfe.encode(flat))
+    open_hfe(qt_app, window, path)
+    assert window.tree.disk(0).type == "FLL"
+    before = path.read_bytes()
+    window.tree.reveal_volume(vol(1))  # (an S900 floppy's volume can't be renamed, so rename a file in it)
+    assert pump(qt_app, lambda: window._volume is not None and any(f.name == "KICK.S9" for f in window._volume_files))
+    answers.name = "thump"
+    window._rename_file(window._volume, next(f for f in window._volume_files if f.name == "KICK.S9"))
+    assert pump(qt_app, lambda: window._writable and "thump.S9" in [window.table.item(r, 1).text() for r in range(window.table.rowCount())])  # (S900 names keep their case)
+    assert pump(qt_app, lambda: window._writing == 0 and hfe.read(path).image != flat)
+    assert path.read_bytes()[:1024] == before[:1024] and len(path.read_bytes()) == len(before)
+    target = tmp_path / "copy.hfe"
+    monkeypatch.setattr(type(window), "_ask_hfe_path", lambda self, suggestion: str(target))
+    window.tree.setCurrentItem(window.tree.topLevelItem(0))
+    assert pump(qt_app, lambda: window.act_save_hfe.isEnabled())
+    window.act_save_hfe.trigger()
+    assert pump(qt_app, lambda: target.exists() and "Saved copy.hfe" in window.statusBar().currentMessage())
+    assert hfe.read(target).image == hfe.read(path).image

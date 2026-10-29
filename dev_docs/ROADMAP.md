@@ -22,7 +22,7 @@ None of this could be checked by the test runs, which use a fake audio device, o
 ## Next
 
 0. **HFE floppy images** are wired in (open, edit with write-back after each change, File > Save Disk as HFE…). What's left is checking
-   the written files with other software and a real sampler/Gotek, trying it by hand, and DD and v3 files. See [hfe-plan.md](hfe-plan.md).
+   the written files with other software and a real sampler/Gotek, and v3 files. Low- and high-density disks both work, tested on about 1,100 real files. Damaged HFEs open read-only; repairing them (single-bit correction into a copy) is designed, not built. See [hfe-plan.md](hfe-plan.md).
 1. **Open an SD card / physical drive directly.** akaiutil can open raw devices. Needs OS permissions per platform and safety
    rails against picking the wrong disk; start read-only, add editing later.
 2. **Multis.** akaiutil only prints "S3000 multi" for one, so showing its parts means reading the file's bytes ourselves, which

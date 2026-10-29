@@ -54,9 +54,7 @@ def test_new_sectors_are_in_the_rotated_order_real_disks_use(hfe_bytes):
     assert firsts == [1, 6, 1, 6]
 
 
-def test_a_low_density_or_odd_sized_image_is_not_encoded():
-    with pytest.raises(hfe.HfeError, match="low-density"):
-        hfe.encode(bytes(hfe.IMAGE_BYTES[hfe.DD_SECTORS]))
+def test_an_odd_sized_image_is_not_encoded():
     with pytest.raises(hfe.HfeError, match="bytes"):
         hfe.encode(bytes(1000))
 
@@ -94,7 +92,7 @@ def test_patching_an_image_of_the_wrong_size_is_refused(hfe_bytes):
 # ------------------------------------------------------------------------------------------------- finding sectors
 def test_sectors_are_found_when_the_whole_track_is_off_the_byte_grid(image):
     """Real disks have data fields rewritten at another bit phase, so syncs must be searched for in cells."""
-    cells = hfe._new_side(image, 3, 1)
+    cells = hfe._new_side(image, 3, 1, hfe._HD)
     found, problems = hfe._find_sectors(cells)
     shifted, problems_shifted = hfe._find_sectors("010101" + cells)
     assert not problems and not problems_shifted
@@ -116,6 +114,38 @@ def test_a_low_density_track_with_five_sectors_decodes():
         run.add(b"\xfb" + data + hfe._crc(b"\xa1\xa1\xa1\xfb" + data).to_bytes(2, "big") + b"\x4e" * 40)
     found, problems = hfe._find_sectors(run.text())
     assert sorted(found) == [1, 2, 3, 4, 5] and not problems
+
+
+# ----------------------------------------------------------------------------------------------------------- low density
+@pytest.fixture(scope="module")
+def dd_image():
+    return random.Random(21).randbytes(hfe.IMAGE_BYTES[hfe.DD_SECTORS])
+
+
+@pytest.fixture(scope="module")
+def dd_bytes(dd_image):
+    return hfe.encode(dd_image)
+
+
+def test_a_five_sector_disk_decodes_patches_and_reads_back(dd_image, dd_bytes):
+    decoded = hfe.decode(dd_bytes)
+    assert decoded.image == dd_image and decoded.sectors_per_track == 5 and decoded.density == "DD" and not decoded.problems
+    assert hfe.patch(dd_bytes, dd_image) == dd_bytes
+    changed = bytearray(dd_image)
+    for n in (0, 400, 799):
+        changed[n * SECTOR : (n + 1) * SECTOR] = bytes((n + k) & 0xFF for k in range(SECTOR))
+    patched = hfe.patch(dd_bytes, bytes(changed))
+    assert hfe.decode(patched).image == bytes(changed) and len(patched) == len(dd_bytes)
+
+
+def test_a_new_low_density_file_has_the_layout_hxc_gives_an_s900_disk(dd_bytes):
+    assert dd_bytes[:8] == b"HXCPICFE" and len(dd_bytes) == 2_008_064
+    _, rev, cylinders, sides, encoding, bitrate, _, mode, _, table, _, _ = struct.unpack_from("<8sBBBBHHBBHBB", dd_bytes, 0)
+    assert (rev, cylinders, sides, encoding, bitrate, mode, table) == (0, 80, 2, 0, 250, 12, 1)
+    assert {struct.unpack_from("<HH", dd_bytes, 512 + 4 * t)[1] for t in range(80)} == {25000}
+    for t in range(3):  # sectors in order on every track
+        found, _ = hfe._find_sectors(hfe._side_cells(dd_bytes, hfe._tracks(dd_bytes)[t], 1))
+        assert [r for r, _ in sorted(found.items(), key=lambda item: item[1][1])] == [1, 2, 3, 4, 5]
 
 
 # ----------------------------------------------------------------------------------------------- refusing bad files
@@ -151,6 +181,7 @@ def test_a_damaged_sector_is_named_and_refused_unless_asked_for(image, hfe_bytes
         hfe.decode(bytes(broken))
     loose = hfe.decode(bytes(broken), strict=False)
     assert loose.problems and "track 12 side 1" in loose.problems[0]
+    assert loose.missing == [(12, 1, 7)]
     assert len(loose.image) == HD_BYTES
     where = ((12 * 2 + 1) * 10 + 6) * SECTOR  # (the zero-filled gap is the damaged sector, the rest is untouched)
     assert loose.image[where : where + SECTOR] == bytes(SECTOR)
@@ -275,3 +306,22 @@ def test_real_hfe_files_decode_cleanly_and_patch_back_to_themselves(path):
     changed = bytearray(decoded.image)
     changed[SECTOR * 40 : SECTOR * 41] = bytes(range(256)) * 4
     assert hfe.decode(hfe.patch(data, bytes(changed))).image == bytes(changed)
+
+
+def _header(data: bytes) -> tuple:
+    _, rev, cylinders, sides, encoding, bitrate, _, mode, _, _, _, _ = struct.unpack_from("<8sBBBBHHBBHBB", data, 0)
+    return bitrate, mode, struct.unpack_from("<H", data, 512 + 2)[0]  # (bit rate, interface mode, track length)
+
+
+@pytest.mark.skipif(not REAL, reason=f"no real .hfe files in {IMAGE_DIR}")
+@pytest.mark.parametrize("path", REAL, ids=lambda p: p.name)
+def test_a_new_file_is_what_hxc_wrote_when_a_real_file_has_the_same_layout(path):
+    """The encoder against software that isn't ours: HxC's own blank Akai disks (S900 low density, S950 high density) are
+    reproduced byte for byte. Files made another way (a sampler's own disks, other generators) are skipped."""
+    data = path.read_bytes()
+    decoded = hfe.decode(data)
+    for layout in (hfe._DD, hfe._HD_HXC):
+        if _header(data) == (layout.bitrate, layout.mode, layout.side_bytes * 2) and decoded.sectors_per_track == layout.sectors:
+            assert hfe._encode(decoded.image, layout) == data
+            return
+    pytest.skip("not a layout this encoder reproduces")
