@@ -281,17 +281,45 @@ engine read-only, refuses Allow Editing (and a reopen that asks for it), and not
 `save_as` refuses it. Tests in `test_hfe.py`, `test_hfe_work.py`, `test_gui_hfe.py`. The three real damaged disks (JD8 NYLON: 1 sector,
 MARANZANO: 5, METAL KIT 13: 2) open and akaiutil lists their files.
 
-**Not built: repair.** What is possible, in increasing order of risk:
-1. *Find which files are hit.* A blank sector is a block number (`track*2+side)*spt + sector - 1`); akaiutil knows which file owns
-   each block, so the warning could say "KICK.S3 is damaged". Needs the block map from akaiutil (not looked at yet). Read-only and safe.
-2. *Repair a copy by single-bit correction.* CRC-16 locates a single flipped bit exactly. On the three damaged disks 4 of 8 bad
-   sectors were fixed by one flip (METAL KIT 13: 2 of 2; MARANZANO: 2 of 5; JD8 NYLON: 0 of 1). It is not proof: a multi-bit error
-   can look like a single-bit one (roughly 1 in 8 of those, 8208 positions against 65535 checksum values), so the report must say
-   "probably" and the repair must be a *new copy* (Save repaired copy as HFE…), never the original.
-3. *Re-seal what can't be corrected:* write the bytes as read plus a fresh checksum, so a sampler stops reporting a read error. The
-   bit errors stay (a click in a sample if it is audio; a broken file if it is a directory or allocation block), so this too is for a
-   copy, with a list of what was touched. A sector whose *header* is damaged (no sector found at all) can't be repaired this way: it
-   would have to be inserted into the track.
+**Built: repair (File > Save Repaired Copy..., 2026-10-29).** `hfe.repair(data, rewrite)` -> `Repair(data, fixes)`, `hfe.save_repair`
+(writes the copy only after checking every sector other than the repaired ones reads as before), `Workspace.repair_copy`, `floppy_map`
+(which files a block belongs to), `edit_dialogs.RepairDialog`, and the window's warning/summary. What it does, strongest first, per
+damaged data field (header intact, checksum wrong):
+1. *One flipped bit* (the checksum names it): accepted if the MFM clock violations (if any) are all at that bit -> `FIXED` ("bit"); if
+   there are no violations at all the fix rests on the checksum alone -> `FIXED_PROBABLY`.
+2. *A lost or extra cell* (many violations): one cell inserted or removed in a window from 240 cells before the first violation to 24
+   after (the violation can show up well after the slip); accepted only if exactly one reading of the field results, with no
+   violations left and the checksum right -> `FIXED` ("realigned"). The track keeps its length (the end of a track is filler).
+3. Otherwise `LOST` (left exactly as it was), or with `rewrite` `REWRITTEN` (data as read plus a fresh checksum: reads without
+   an error, may be wrong). A sector whose header is damaged or missing is `LOST` always.
+Results on the three real damaged disks: **all 8 sectors repaired** (JD8 NYLON 1 realigned; MARANZANO 2 bit + 3 realigned; METAL
+KIT 13 1 bit + 1 probable); the first search window (+-40 cells) had missed one. Tests: `test_hfe_repair.py` damages a good disk in
+every way above (and 14 random places) and requires the original back, `test_floppy_map.py` checks the file mapping against akaiutil on
+S1000, S900 and S3000 floppies and a real sampler disk, `test_gui_hfe.py` runs the flow in the window.
+Open: nothing has played a repaired copy on a sampler, and a repair is only as good as the CRC + clock rule: a wrong candidate passes
+by luck about 1 time in 65536 per candidate before the clock rule, far less with it (hence "probably" for checksum-only fixes).
+
+**Two experiments on the 8 bad sectors of the three real damaged disks (2026-10-29)** shaped the design (kept for the reasoning; the
+numbers 7 of 8 are from the first, narrower search, and the built version repairs all 8):
+- *The MFM clock rule is a clean damage detector.* A clock cell is set exactly when both neighbouring data bits are 0. **All 200 good
+  sectors sampled had zero violations**, so any violation inside a data field marks damage, independently of the CRC. The 8 bad
+  sectors: 4 have 0-2 violations, 4 have 92-833.
+- *Single-bit sectors (4):* the one flip that fixes the CRC lands exactly on the violation in 3 of them (a flipped data cell:
+  verified twice over). The 4th (METAL KIT 13, track 20 side 0) has **no violation at all**: the cells are a valid MFM of wrong
+  data (the corruption happened before the cells were made), so its fix is CRC-only, "probably".
+- *Garbled sectors (the other 4) are cell slips:* everything after one point is misaligned by a missing or extra cell. Inserting
+  one cell next to the first violation makes the rest clean **and** the CRC pass in 3 of 4 (JD8 NYLON t4s0, MARANZANO t14s0 and
+  t30s0, each with 0 violations left); MARANZANO t33s0 (567 violations) has no one-cell repair (probably two slips or worse).
+- So **7 of 8** sectors are repairable with both checks, 1 (maybe) with CRC only, and only 1 is lost. Chance that a wrong candidate
+  passes the CRC by luck: about 240 candidates x 1/65536, under 0.4% per sector before the MFM requirement; far lower with it.
+So the design is a ladder, strongest first, and each sector's report says which rung it got: (a) slip realigned, MFM clean + CRC ok;
+(b) single cell flipped at an MFM violation, CRC ok; (c) single bit flipped, CRC ok but no violation ("probably"); (d) not
+recoverable: left as read-and-unreadable (blank), or, only if asked, re-sealed with a fresh CRC (garbage in, but the sampler won't
+report a read error).
+**Which files are hit (feature 1) is easy on a floppy:** the header holds the directory and a FAT of 2-byte entries (`akai_fllhead_s`
+/ `akai_flhhead_s` in `akaiutil.h`: directory entries, then `fatblk[]`, a 1 KB block each; S3000 floppies keep the directory behind
+the header). A bad sector's block number is `((track*2+side)*spt + sector-1)`; walk each file's chain from its start block. A hit in
+the header, directory or FAT is the serious case and should be said so.
 Implementation sketch: `_find_sectors` also returns the bad data fields (their cell position and bytes read); a `repair(data)`
 produces the new file plus a report; the window gets File > Save Repaired Copy… for a damaged HFE, with the report in the dialog.
 

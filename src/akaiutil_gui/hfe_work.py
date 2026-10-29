@@ -103,7 +103,7 @@ class Workspace:
     def damaged(self) -> dict[str, list[tuple[int, int, int]]]:
         """The open HFE files that have sectors that couldn't be read, with where those sectors are: {file: [(track, side, sector)]}."""
         with self._lock:
-            return {str(e.source): list(e.missing) for e in self._entries.values() if e.missing}
+            return {str(e.source.resolve()): list(e.missing) for e in self._entries.values() if e.missing}
 
     def is_hfe(self, source: str | os.PathLike) -> bool:
         with self._lock:
@@ -154,6 +154,21 @@ class Workspace:
         except OSError as e:
             raise hfe.HfeError(f"Couldn't read {source.name}: {e.strerror or e}.") from e
         hfe.save(dest, image)
+
+    def repair_copy(self, source: str | os.PathLike, dest: str | os.PathLike, rewrite: bool = False) -> hfe.Repair:
+        """Save a repaired copy of the HFE file `source` as `dest` (never `source` itself). Returns what was done to each damaged
+        sector. With `rewrite`, sectors that can't be fixed are given a fresh checksum anyway."""
+        source, dest = Path(source), Path(dest)
+        if dest.resolve() == source.resolve():
+            raise hfe.HfeError("A repaired copy has to be a new file: the original is never changed.")
+        try:
+            original = source.read_bytes()
+        except OSError as e:
+            raise hfe.HfeError(f"Couldn't read {source.name}: {e.strerror or e}.") from e
+        repaired = hfe.repair(original, rewrite)
+        hfe.save_repair(dest, original, repaired)
+        log.info("saved a repaired copy of %s as %s: %s", source, dest, [(f.track, f.side, f.sector, f.result, f.how) for f in repaired.fixes])
+        return repaired
 
     # ----------------------------------------------------------------------------------------------------------- closing
     def release(self, keep: list[str | os.PathLike] = ()) -> None:

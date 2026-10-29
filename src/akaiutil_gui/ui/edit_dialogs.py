@@ -848,6 +848,46 @@ class ImportDialog(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Import")
 
 
+class RepairDialog(QDialog):
+    """Save a repaired copy of a damaged HFE disk: one optional extra, with what it costs said next to it."""
+
+    TEXT_WIDTH = 400
+
+    def __init__(self, parent, name: str):
+        super().__init__(parent)
+        self.setWindowTitle("Save Repaired Copy")
+        self.rewrite_box = QCheckBox("Also rewrite sectors that can't be fixed")
+        note = self._text(
+            "They will load without errors, but may hold wrong data: a click in a sample, or a file that won't work. "
+            "Leave this off if you're not sure.",
+            muted=True,
+            indent=True,
+        )
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Save Copy…")
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._text(f"Fix the damaged sectors of “{name}” in a new copy. The original isn't changed."))
+        layout.addWidget(self.rewrite_box)
+        layout.addWidget(note)
+        layout.addWidget(self.buttons)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+
+    def _text(self, text: str, indent: bool = False, muted: bool = False) -> QLabel:
+        label = QLabel(text)
+        label.setWordWrap(True)
+        if muted:
+            label.setObjectName("mutedLabel")
+        label.setContentsMargins(24 if indent else 0, 0, 0, 0)
+        label.setFixedWidth(self.TEXT_WIDTH)
+        return label
+
+    @property
+    def rewrite(self) -> bool:
+        return self.rewrite_box.isChecked()
+
+
 class SortDialog(QDialog):
     """Which files of a volume to put in alphabetical order. Fixed size: the text wraps to a set width instead."""
 

@@ -74,7 +74,9 @@ An **`.hfe`** file is a floppy as a Gotek or HxC floppy emulator plays it. akaiu
 - **Edits are written back into the `.hfe` file after each change,** just as they are for an ordinary image. Only the sectors that changed are touched, and the rest of the file stays exactly as it was. If the file can't be written (a read-only card, a full disk) the app says so, keeps your change in the working copy, and tries again after the next change or when you close the image.
 - **The backup** that editing offers is a copy of the `.hfe` file, and **File > Revert to Backup…** puts it back.
 - **File > Save Disk as HFE…** saves the selected floppy as an `.hfe` file: an HFE image under a new name, or an ordinary floppy image (800 KB or 1.6 MB) as an HFE.
-- **Damaged files** (a few sectors whose checksum doesn't match, usually read errors from when the disk was copied) open **read-only**, with a warning that names the sectors. Those sectors show as blank, so a file stored there will be missing or wrong. Editing is off while one is open, and **Save Disk as HFE…** refuses it, so the blanks never get written into a file.
+- **Damaged files** (a few sectors that can't be read, usually errors from when the disk was copied) open **for viewing only**. The warning says which sectors, and which files they belong to. The damaged sectors show as blank, editing is off, and **Save Disk as HFE…** is refused, so the blanks never get written to a file.
+- **File > Save Repaired Copy…** tries to fix a damaged disk in a **new file**. The original is never changed. It puts right what it can, and the summary says how many sectors were fixed, how many couldn't be, and which files are still affected. A few fixes can't be double-checked, and those are marked "probably right".
+- Sectors that can't be fixed stay unreadable. The option **Also rewrite sectors that can't be fixed** makes them load without errors, but they may hold wrong data: a click in a sample, or a file that won't work. Leave it off if you're not sure.
 - Only the format Akai disks use is understood: HFE version 1, MFM, 80 tracks on two sides. A file in HFE version 3 is turned away with the reason.
 
 ---

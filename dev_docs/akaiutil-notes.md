@@ -31,6 +31,10 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   those sectors, `Workspace` records them (`damaged()`), and the window warns once per file (`_warn_damaged_hfe`), opens the engine
   read-only whatever was asked, refuses Allow Editing, and `sync`/`save_as` never write such a disk. (Checked on the three real
   damaged disks of the 120 downloads: akaiutil lists their files.)
+- **Repair** of a damaged HFE is the GUI's own (hfe.py `repair`, see `hfe-plan.md`): into a *new* file only, never the original, with every
+  other sector checked unchanged before anything is written. `floppy_map.py` names the files hit: it reads only the chain table
+  (FAT, after the 64 directory entries of the header; 4 header blocks low density, 5 high density, 12 more behind it on an S3000
+  floppy) and takes names and start blocks from akaiutil's own listing.
 - A header problem (v3, not MFM, wrong geometry) is caught by `importing.disk_image_problem` -> `hfe.problem` before akaiutil starts;
   a damaged sector shows up when the file is decoded, which for a newly *added* image happens before akaiutil is restarted, so the
   disks already open stay open.

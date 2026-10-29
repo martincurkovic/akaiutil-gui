@@ -36,6 +36,7 @@ from PySide6.QtCore import QSettings, QThreadPool
 from akaiutil_gui import (
     akai_names,
     describe,
+    floppy_map,
     hfe,
     hfe_work,
     importing,
@@ -221,6 +222,7 @@ class MainWindow(QMainWindow):
         self._writable = False  # akaiutil is running read/write (Edit > Allow Editing)
         self._hfe = hfe_work.Workspace()  # flat working copies of the open HFE images: akaiutil only reads flat ones
         self._hfe_warned: set[str] = set()  # damaged HFE files the user has been told about this session
+        self._floppy_files: dict[str, list[floppy_map.DiskFile]] = {}  # damaged HFE file -> the files akaiutil lists on it
         self._hfe_failures: list[tuple[str, str]] = []  # write-backs that failed during an edit, to tell the user once it is done
         self._backup_handled: set[str] = set()  # images (resolved paths) already backed up, or made new, or declined, this session
         self._clip: tuple[str, list[tuple[Volume, FileEntry]]] | None = (
@@ -518,6 +520,7 @@ class MainWindow(QMainWindow):
         )
         self.act_revert = self._action("Revert to &Backup…", self._revert)
         self.act_save_hfe = self._action("Save Disk as &HFE…", self._save_as_hfe)
+        self.act_repair = self._action("Save Repaired &Copy…", self._save_repaired)
         self.act_export = self._action(
             "&Export…", lambda: self._export(False), QKeySequence("Ctrl+E")
         )
@@ -541,6 +544,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.act_revert)
         file_menu.addAction(self.act_save_hfe)
+        file_menu.addAction(self.act_repair)
         file_menu.addSeparator()
         # Ctrl+, everywhere (Qt maps Ctrl to Cmd on a Mac): the standard Preferences key is only defined on macOS and some Linux desktops
         settings_action = self._action("&Settings…", self._open_settings, QKeySequence("Ctrl+,"))
@@ -660,6 +664,8 @@ class MainWindow(QMainWindow):
         self.act_revert.setEnabled(has_images and self._writing == 0)
         disk = self._selected_disk() if has_images else None
         self.act_save_hfe.setEnabled(disk is not None and disk.type.startswith("FL") and self._writing == 0 and self._pending == 0)
+        source = self._disk_files.get(disk.index) if disk is not None else None
+        self.act_repair.setEnabled(source is not None and str(Path(source).resolve()) in self._hfe.damaged() and self._writing == 0 and self._pending == 0)
         self.act_close_disk.setEnabled(
             has_images and self._selected_disk() is not None and self._writing == 0
         )
@@ -804,23 +810,127 @@ class MainWindow(QMainWindow):
             return
         self.tree.load(engine, select=select, files=self._disk_files, disks=disks)
         self._update_actions()
-        self._warn_damaged_hfe()
+        self._warn_damaged_hfe(engine, disks)
 
-    def _warn_damaged_hfe(self) -> None:
-        """Tell the user, once per file, about an HFE image with sectors that couldn't be read (it is open read-only)."""
+    def _warn_damaged_hfe(self, engine: AkaiEngine, disks: list[Disk]) -> None:
+        """Tell the user, once per file, about an HFE image with sectors that couldn't be read (it is open read-only), and which
+        of its files they belong to."""
         new = {path: sectors for path, sectors in self._hfe.damaged().items() if path not in self._hfe_warned}
         if not new:
             return
         self._hfe_warned.update(new)
+        disk_files = dict(self._disk_files)
+
+        def look() -> dict[str, tuple[list[floppy_map.DiskFile], floppy_map.Damage]]:  # (worker thread)
+            found = {}
+            for path, sectors in new.items():
+                try:
+                    index = next(i for i, p in disk_files.items() if str(Path(p).resolve()) == path)
+                    disk = next(d for d in disks if d.index == index)
+                    files = [floppy_map.DiskFile(e.file.name, int(e.file.start_block, 16), e.file.size) for e in engine.disk_usage(disk).catalog]
+                    image = Path(self._hfe.working_path(path)).read_bytes()
+                    spt = len(image) // (160 * 1024)
+                    blocks = {floppy_map.block_of(t, side, r, spt) for t, side, r in sectors}
+                    found[path] = (files, floppy_map.damage(image, blocks, files))
+                except Exception:  # (the names of the files are a bonus: the warning goes ahead without them)
+                    log.warning("couldn't work out which files of %s are damaged", path, exc_info=True)
+            return found
+
+        self._run(look, lambda found: self._show_damage(new, found), lambda _message: self._show_damage(new, {}))
+
+    def _show_damage(self, new: dict, found: dict) -> None:
+        for path, (files, _) in found.items():
+            self._floppy_files[path] = files
         names = ", ".join(Path(p).name for p in new)
         count = sum(len(sectors) for sectors in new.values())
+        hit = [name for path in new if path in found for name in found[path][1].files]
+        header = any(found[path][1].header for path in new if path in found)
+        if header:
+            affected = "The disk's directory is damaged, so any file on it could be affected."
+        elif hit:
+            affected = f"Affected: {', '.join(hit[:6])}{f' and {len(hit) - 6} more' if len(hit) > 6 else ''}."
+        elif found:
+            affected = "No files are affected."
+        else:
+            affected = ""
         self._warn(
             "Damaged HFE image",
-            f"{names} {'has' if len(new) == 1 else 'have'} {count} sector{'s' if count != 1 else ''} that couldn't be read "
-            "(the checksum doesn't match). They show as blank, so a file stored there will be missing or wrong. "
-            "The image is open read-only, and editing stays off while it is open.",
+            f"{names} {'has' if len(new) == 1 else 'have'} {count} damaged sector{'s' if count != 1 else ''}, which show as blank. "
+            f"{affected} It's open for viewing only. File > Save Repaired Copy… can try to fix it.".replace("  ", " "),
             [f"{Path(p).name}: track {t} side {side}, sector {r}" for p, sectors in new.items() for t, side, r in sectors],
         )
+
+    def _ask_repair(self, name: str) -> bool | None:
+        """Ask how to repair; returns whether to also rewrite what can't be fixed, or None if cancelled."""
+        dialog = edit_dialogs.RepairDialog(self, name)
+        return dialog.rewrite if dialog.exec() == dialog.DialogCode.Accepted else None
+
+    def _ask_repair_path(self, suggestion: str) -> str | None:
+        path, _ = QFileDialog.getSaveFileName(self, "Save repaired copy", suggestion, "HFE images (*.hfe);;All files (*)")
+        return path or None
+
+    def _save_repaired(self) -> None:
+        """File > Save Repaired Copy: fix the damaged sectors of the selected HFE disk in a new file."""
+        disk = self._selected_disk()
+        source = self._disk_files.get(disk.index) if disk is not None else None
+        if source is None or str(Path(source).resolve()) not in self._hfe.damaged() or self._busy():
+            return
+        rewrite = self._ask_repair(Path(source).name)
+        if rewrite is None:
+            return
+        start = settings.get_last_dir("save_hfe") or str(Path(source).parent)
+        path = self._ask_repair_path(str(Path(start) / f"{Path(source).stem} (repaired).hfe"))
+        if path is None:
+            return
+        if not Path(path).suffix:
+            path += ".hfe"
+        if any(Path(path).resolve() == Path(p).resolve() for p in self._images):
+            QMessageBox.warning(self, "That image is open", f"{Path(path).name} is open in the window. Close it first if you want to replace it.")
+            return
+        settings.set_last_dir("save_hfe", str(Path(path).parent))
+        self.statusBar().showMessage(f"Repairing {Path(source).name}…")
+        self._run(
+            lambda: self._hfe.repair_copy(source, path, rewrite),
+            lambda repaired: self._repaired(source, path, repaired),
+            lambda message: (self.statusBar().clearMessage(), QMessageBox.critical(self, "Couldn't save the repaired copy", message)),
+        )
+
+    def _repaired(self, source: str, path: str, repaired: hfe.Repair) -> None:
+        self.statusBar().clearMessage()
+        unfixed = [f for f in repaired.fixes if f.result in (hfe.LOST, hfe.REWRITTEN)]
+        files: list[str] = []
+        if unfixed and source in self._floppy_files:
+            try:
+                image = Path(self._hfe.working_path(source)).read_bytes()
+                spt = len(image) // (160 * 1024)
+                files = floppy_map.damage(image, {floppy_map.block_of(f.track, f.side, f.sector, spt) for f in unfixed}, self._floppy_files[source]).files
+            except OSError:
+                files = []
+        if self._show_repair_result(path, repaired, files):
+            self.add_images([path])
+
+    def _show_repair_result(self, path: str, repaired: hfe.Repair, files: list[str]) -> bool:
+        """Say what the repair did; returns whether to open the repaired copy."""
+        count = lambda results: len(repaired.with_result(*results))  # noqa: E731
+        total, probably, rewritten, lost = len(repaired.fixes), count([hfe.FIXED_PROBABLY]), count([hfe.REWRITTEN]), count([hfe.LOST])
+        fixed = count([hfe.FIXED, hfe.FIXED_PROBABLY])
+        plural = lambda n: f"{n} sector{'s' if n != 1 else ''}"  # noqa: E731
+        lines = [f"Fixed {'all ' if total > 1 else ''}{plural(total)}." if fixed == total else f"Fixed {fixed} of {plural(total)}."]
+        if probably:
+            lines.append(f"{probably} of them {'is' if probably == 1 else 'are'} probably right, but couldn't be double-checked.")
+        if rewritten:
+            lines.append(f"{plural(rewritten)} couldn't be fixed and {'was' if rewritten == 1 else 'were'} rewritten. {'It' if rewritten == 1 else 'They'} may hold wrong data.")
+        if lost:
+            lines.append(f"{plural(lost)} couldn't be fixed and still won't read.")
+        if files:
+            lines.append(f"Still affected: {', '.join(files[:6])}{f' and {len(files) - 6} more' if len(files) > 6 else ''}.")
+        words = {hfe.FIXED: "fixed", hfe.FIXED_PROBABLY: "fixed (probably right)", hfe.REWRITTEN: "rewritten, may be wrong", hfe.LOST: "couldn't be fixed"}
+        box = QMessageBox(QMessageBox.Icon.Information, "Repaired copy saved", f"Saved {Path(path).name}.\n\n" + "\n".join(lines), parent=self)
+        box.setDetailedText("\n".join(f"Track {f.track}, side {f.side}, sector {f.sector}: {words[f.result]}" for f in repaired.fixes))
+        open_copy = box.addButton("Open Copy", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Done", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        return box.clickedButton() is open_copy
 
     # ----------------------------------------------- adding and closing single disks
     def add_dialog(self) -> None:
@@ -975,6 +1085,7 @@ class MainWindow(QMainWindow):
         engine, self._engine = self._engine, None
         closed = list(self._images)
         self._hfe_warned.clear()
+        self._floppy_files.clear()
         if engine is not None:
             def shut() -> None:
                 engine.close()

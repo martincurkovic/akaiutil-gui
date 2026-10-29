@@ -210,8 +210,16 @@ def _store_side(out: bytearray, track: _Track, side: int, cells: str) -> None:
 
 
 # ---------------------------------------------------------------------------------------------------------------- decode
-def _find_sectors(cells: str) -> tuple[dict[int, tuple[bytes, int]], list[str]]:
-    """The sectors on one side of a track: {sector number: (data, cell index of its first data cell)}, and what went wrong."""
+@dataclass(frozen=True)
+class _BadField:
+    sector: int
+    start: int  # cell index of the first data cell
+    body: bytes | None  # the 1024 data bytes and 2 checksum bytes as read (None: the track ends before they do)
+
+
+def _find_sectors(cells: str, bad: list[_BadField] | None = None) -> tuple[dict[int, tuple[bytes, int]], list[str]]:
+    """The sectors on one side of a track: {sector number: (data, cell index of its first data cell)}, and what went wrong.
+    The data fields that failed their checksum (their header was fine) are added to `bad` if a list is given."""
     found: dict[int, tuple[bytes, int]] = {}
     problems: list[str] = []
     pos, current = 0, None
@@ -235,6 +243,8 @@ def _find_sectors(cells: str) -> tuple[dict[int, tuple[bytes, int]], list[str]]:
                 found[current] = (body[:SECTOR_SIZE], after + 16)
             else:
                 problems.append(f"sector {current} with a bad checksum")
+                if bad is not None:
+                    bad.append(_BadField(current, after + 16, body))
             current = None
         pos = after
     return found, problems
@@ -277,6 +287,17 @@ def read(path: str | os.PathLike, strict: bool = True) -> Decoded:
 
 
 # ----------------------------------------------------------------------------------------------------------------- patch
+def _write_field(cells: str, start: int, data: bytes) -> str:
+    """The cells with the data field at `start` rewritten as `data` and its checksum, in the same number of cells."""
+    run = _Cells()
+    run.last = 1  # (the data mark 0xFB ends in a 1)
+    run.add(data + _crc(b"\xa1\xa1\xa1\xfb" + data).to_bytes(2, "big"))
+    encoded = run.text()
+    end = start + len(encoded)
+    clock = "1" if (run.last == 0 and cells[end + 1] == "0") else "0"  # (the byte after the checksum)
+    return cells[:start] + encoded + clock + cells[end + 1 :]
+
+
 def patch(original: bytes, image: bytes) -> bytes:
     """A copy of the HFE file `original` carrying the flat `image`: only sectors whose data differ are rewritten (data and
     checksum), the rest of the file is untouched. Refuses a damaged original, since a sector it can't read can't be changed."""
@@ -297,15 +318,124 @@ def patch(original: bytes, image: bytes) -> bytes:
                 new = image[first + (r - 1) * SECTOR_SIZE : first + r * SECTOR_SIZE]
                 if new == old:
                     continue
-                run = _Cells()
-                run.last = 1  # (the data mark 0xFB ends in a 1)
-                run.add(new + _crc(b"\xa1\xa1\xa1\xfb" + new).to_bytes(2, "big"))
-                encoded = run.text()
-                end = start + len(encoded)
-                clock = "1" if (run.last == 0 and cells[end + 1] == "0") else "0"  # (the byte after the checksum)
-                cells = cells[:start] + encoded + clock + cells[end + 1 :]
+                cells = _write_field(cells, start, new)
             _store_side(out, track, side, cells)
     return bytes(out)
+
+
+# ---------------------------------------------------------------------------------------------------------------- repair
+FIXED, FIXED_PROBABLY, REWRITTEN, LOST = "fixed", "fixed_probably", "rewritten", "lost"
+_REALIGN_BEFORE, _REALIGN_AFTER = 240, 24  # cells before and after the first broken clock cell where a lost or extra cell is looked for
+# (a shift can look fine for a while: the broken clock cell shows up some way after the cell that went missing)
+
+
+@dataclass(frozen=True)
+class Fix:
+    track: int
+    side: int
+    sector: int
+    result: str  # FIXED (checked twice), FIXED_PROBABLY (the checksum agrees, nothing else can confirm it), REWRITTEN or LOST
+    how: str = ""  # what was done, for the log: "realigned", "bit", "bit (checksum only)", "checksum only", ""
+
+
+@dataclass(frozen=True)
+class Repair:
+    data: bytes  # the repaired HFE file
+    fixes: list[Fix]  # every sector that was damaged, in disk order
+
+    def with_result(self, *results: str) -> list[Fix]:
+        return [f for f in self.fixes if f.result in results]
+
+
+def _violations(cells: str, start: int) -> list[int]:
+    """Where in the data field at `start` a clock cell breaks the MFM rule (a clock cell is set only when both neighbouring data
+    bits are 0), as data bit positions. A field written correctly has none, so any is damage, whatever the checksum says."""
+    nbits = (SECTOR_SIZE + 2) * 8
+    clocks, data = cells[start : start + 2 * nbits : 2], cells[start + 1 : start + 2 * nbits : 2]
+    out, previous = [], "1"  # (the data mark before the field ends in a 1)
+    for k, (clock, bit) in enumerate(zip(clocks, data)):
+        if clock != ("1" if previous == "0" and bit == "0" else "0"):
+            out.append(k)
+        previous = bit
+    return out
+
+
+def _checksum_ok(body: bytes) -> bool:
+    return _crc(b"\xa1\xa1\xa1\xfb" + body[:SECTOR_SIZE]) == int.from_bytes(body[SECTOR_SIZE:], "big")
+
+
+def _single_flip(body: bytes) -> int | None:
+    """The one data bit whose flipping makes the checksum right (the checksum tells exactly which, if it was only one)."""
+    changed = bytearray(body)
+    for bit in range(len(body) * 8):
+        changed[bit // 8] ^= 0x80 >> (bit % 8)
+        if _checksum_ok(bytes(changed)):
+            return bit
+        changed[bit // 8] ^= 0x80 >> (bit % 8)
+    return None
+
+
+def _realign(cells: str, start: int, first_broken: int) -> str | None:
+    """The cells with one lost or extra cell put right near the first broken clock cell, if that makes the whole field clean and
+    its checksum right, and only one reading of it does (a drive that lost a cell shifts everything after it)."""
+    readings: dict[bytes, str] = {}
+    centre = 2 * first_broken
+    for offset in range(max(0, centre - _REALIGN_BEFORE), centre + _REALIGN_AFTER + 1):
+        at = start + offset
+        for new in (cells[:at] + cells[at + 1 :], cells[:at] + "0" + cells[at:], cells[:at] + "1" + cells[at:]):
+            body = _read_bytes(new, start, SECTOR_SIZE + 2)
+            if body is not None and _checksum_ok(body) and not _violations(new, start):
+                readings.setdefault(body, new)
+    return next(iter(readings.values())) if len(readings) == 1 else None
+
+
+def _repair_field(cells: str, bad: _BadField, rewrite: bool) -> tuple[str, str, str]:
+    """(cells, result, how) for one damaged data field, trying the strongest fix first."""
+    if bad.body is None:
+        return cells, LOST, ""
+    broken = _violations(cells, bad.start)
+    flip = _single_flip(bad.body)
+    if flip is not None and set(broken) <= {flip, flip + 1}:  # (a flipped cell breaks the clock rule just before and after it)
+        data = bytearray(bad.body)
+        data[flip // 8] ^= 0x80 >> (flip % 8)
+        fixed = _write_field(cells, bad.start, bytes(data[:SECTOR_SIZE]))
+        return fixed, FIXED if broken else FIXED_PROBABLY, "bit" if broken else "bit (checksum only)"
+    if broken:
+        realigned = _realign(cells, bad.start, broken[0])
+        if realigned is not None:
+            return realigned, FIXED, "realigned"
+    if rewrite:
+        return _write_field(cells, bad.start, bad.body[:SECTOR_SIZE]), REWRITTEN, "checksum only"
+    return cells, LOST, ""
+
+
+def repair(data: bytes, rewrite: bool = False) -> Repair:
+    """A repaired copy of an HFE file: every damaged data field it can put right is put right (a flipped cell, or a lost or extra
+    cell that shifted the rest of the field), and nothing else is touched. What can't be fixed is left as it was, unless `rewrite`
+    says to give it a fresh checksum anyway (it then reads without an error, but holds whatever was read, wrong or not).
+    A sector whose header is damaged, or that is missing, can't be repaired and is reported as lost."""
+    out = bytearray(data)
+    fixes: list[Fix] = []
+    for t, track in enumerate(_tracks(data)):
+        for side in range(SIDES):
+            cells = _side_cells(data, track, side)
+            bad: list[_BadField] = []
+            _find_sectors(cells, bad)
+            if not bad:
+                continue
+            length = len(cells)
+            for field_ in sorted(bad, key=lambda f: -f.start):  # (last first: a realigned field moves the cells after it)
+                cells, result, how = _repair_field(cells, field_, rewrite)
+                fixes.append(Fix(t, side, field_.sector, result, how))
+            # a realigned field is one cell longer or shorter: the end of the track is only filler, so keep the length as it was
+            cells = cells[:length] if len(cells) >= length else cells + _side_cells(data, track, side)[len(cells) :]
+            _store_side(out, track, side, cells)
+    result_bytes = bytes(out)
+    seen = {(f.track, f.side, f.sector) for f in fixes}
+    for t, side, sector in decode(result_bytes, strict=False).missing:  # (a header that couldn't be read: nothing to repair)
+        if (t, side, sector) not in seen:
+            fixes.append(Fix(t, side, sector, LOST))
+    return Repair(result_bytes, sorted(fixes, key=lambda f: (f.track, f.side, f.sector)))
 
 
 # ---------------------------------------------------------------------------------------------------------------- encode
@@ -358,18 +488,13 @@ def make(image: bytes, template: bytes | None = None) -> bytes:
     return patch(template, image) if template is not None else encode(image)
 
 
-def save(path: str | os.PathLike, image: bytes, template: bytes | None = None) -> None:
-    """Write `image` as an HFE file at `path` (made as `make` does). The result is decoded again and compared before it replaces
-    anything, so a failure leaves the file as it was; the file is written beside the target and moved into place."""
-    path = Path(path)
-    result = make(image, template)
-    if decode(result).image != image:
-        raise HfeError(f"Writing {path.name} didn't come out right, so it was left as it was.")
+def _write_file(path: Path, data: bytes) -> None:
+    """Write beside the target, then move into place, so a failure leaves the target as it was."""
     try:
         fd, temp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
         try:
             with os.fdopen(fd, "wb") as f:
-                f.write(result)
+                f.write(data)
             if path.exists():
                 os.chmod(temp, path.stat().st_mode & 0o7777)
             os.replace(temp, path)
@@ -378,6 +503,34 @@ def save(path: str | os.PathLike, image: bytes, template: bytes | None = None) -
             raise
     except OSError as e:
         raise HfeError(f"Couldn't write {path.name}: {e.strerror or e}.") from e
+
+
+def save(path: str | os.PathLike, image: bytes, template: bytes | None = None) -> None:
+    """Write `image` as an HFE file at `path` (made as `make` does). The result is decoded again and compared before it replaces
+    anything, so a failure leaves the file as it was; the file is written beside the target and moved into place."""
+    path = Path(path)
+    result = make(image, template)
+    if decode(result).image != image:
+        raise HfeError(f"Writing {path.name} didn't come out right, so it was left as it was.")
+    _write_file(path, result)
+
+
+def save_repair(path: str | os.PathLike, original: bytes, repaired: Repair) -> None:
+    """Write a repaired copy of `original` at `path`, after checking that the copy reads as the original does everywhere but the
+    sectors that were repaired (or rewritten), and that each of those now reads without an error."""
+    path = Path(path)
+    before, after = decode(original, strict=False), decode(repaired.data, strict=False)
+    spt = before.sectors_per_track
+    touched = {(f.track * SIDES + f.side) * spt + f.sector - 1 for f in repaired.fixes}
+    unreadable = {(t * SIDES + side) * spt + r - 1 for t, side, r in after.missing}
+    wrong = [
+        n for n in range(len(before.image) // SECTOR_SIZE)
+        if n not in touched and before.image[n * SECTOR_SIZE : (n + 1) * SECTOR_SIZE] != after.image[n * SECTOR_SIZE : (n + 1) * SECTOR_SIZE]
+    ]
+    unfinished = [f for f in repaired.fixes if f.result in (FIXED, FIXED_PROBABLY, REWRITTEN) and (f.track * SIDES + f.side) * spt + f.sector - 1 in unreadable]
+    if wrong or unfinished or len(after.image) != len(before.image):
+        raise HfeError(f"The repair of {path.name} didn't come out right, so nothing was written.")
+    _write_file(path, repaired.data)
 
 
 def update(path: str | os.PathLike, image: bytes) -> None:
