@@ -319,6 +319,8 @@ class MainWindow(QMainWindow):
         self.takes = TakeTable()  # stands in for the file table while a direct-to-disk partition is selected
         self.takes.hide()
         self.takes.selectionTakesChanged.connect(self._on_takes_selected)
+        self.takes.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.takes.customContextMenuRequested.connect(self._on_takes_context)
         tv.addWidget(self.takes)
         self.preview = PreviewPanel()
         self.preview.hide()  # appears when a single sample is selected (below the details, which shrink to make room)
@@ -678,6 +680,8 @@ class MainWindow(QMainWindow):
             bool(rows) and all(v is not None for v, _ in rows) and self._pending == 0
         )
         can_wav = can_export and any(f.is_sample for _, f in rows)
+        if self._takes_shown():  # takes: Export writes the raw .TK, and every take can be a WAV
+            can_export = can_wav = bool(self.takes.selected_takes()) and self._pending == 0
         self.act_close.setEnabled(has_images)
         self.act_add.setEnabled(True)
         self.act_revert.setEnabled(has_images and self._writing == 0)
@@ -1538,6 +1542,7 @@ class MainWindow(QMainWindow):
 
     def _on_takes_selected(self, takes: list[Take]) -> None:
         engine, part = self._engine, self._dd_partition
+        self._update_actions()
         if engine is None or part is None:
             return
         if len(takes) == 1:
@@ -1695,6 +1700,9 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------------- export
     def _export(self, as_wav: bool) -> None:
+        if self._takes_shown():
+            self._export_takes(self._dd_partition, self.takes.selected_takes(), as_wav)
+            return
         engine = self._engine
         rows = [(v, f) for v, f in self.table.selected_rows() if v is not None]
         if engine is None or not rows:
@@ -1739,6 +1747,34 @@ class MainWindow(QMainWindow):
             return merged
 
         self._run(work, lambda res: self._export_done(res, dest))
+
+    def _takes_shown(self) -> bool:
+        return self._dd_partition is not None and self.takes.isVisible()
+
+    def _export_takes(self, part: Partition, takes: list[Take] | None, as_wav: bool) -> None:
+        """Export takes (None: every take in the partition) as WAV files or as raw .TK files."""
+        engine = self._engine
+        if engine is None or part is None or self._busy() or (takes is not None and not takes):
+            return
+        dest = self._export_destination()
+        if not dest:
+            return
+        asker = _OverwriteAsker(self)
+        self.statusBar().showMessage(f"Exporting takes{' as WAV' if as_wav else ''}…")
+
+        def work() -> ExportResult:
+            chosen = engine.list_takes(part) if takes is None else takes
+            if not chosen:
+                return ExportResult()
+            return engine.export_takes(part, chosen, dest, as_wav, confirm_overwrite=asker.ask)
+
+        def done(res: ExportResult) -> None:
+            if not (res.exported or res.skipped or res.failed):
+                self.statusBar().showMessage("There are no takes to export there.", 8000)
+                return
+            self._export_done(res, dest)
+
+        self._run(work, done)
 
     def _export_node(self, obj) -> None:
         """Export every sample in a volume, partition or disk as WAV files, a folder for each volume."""
@@ -3276,7 +3312,9 @@ class MainWindow(QMainWindow):
             if self._can_hold_volumes(obj):
                 menu.addAction("New Volume…", lambda: self._new_volume(obj))
                 menu.addAction("Copy Partition To…", lambda: self._copy_partition(obj))
-            if not obj.is_dd:
+            if obj.is_dd:
+                menu.addAction("Export Takes as WAV…", lambda: self._export_takes(obj, None, True))
+            else:
                 menu.addAction("Export Samples as WAV…", lambda: self._export_node(obj))
         elif isinstance(obj, Disk):
             menu.addAction("Export Samples as WAV…", lambda: self._export_node(obj))
@@ -3310,6 +3348,16 @@ class MainWindow(QMainWindow):
             lambda: self._delete_files(rows),
         )
         return menu
+
+    def _on_takes_context(self, pos) -> None:
+        row = self.takes.rowAt(pos.y())
+        if row >= 0 and not self.takes.item(row, 0).isSelected():
+            self.takes.selectRow(row)
+        if self._engine is not None and self.takes.selected_takes():
+            menu = QMenu(self)
+            menu.addAction(self.act_export)
+            menu.addAction(self.act_export_wav)
+            menu.exec(self.takes.viewport().mapToGlobal(pos))
 
     def _on_table_context(self, pos) -> None:
         row = self.table.rowAt(pos.y())

@@ -3,9 +3,15 @@
 The take table, export and import come later (dev_docs/dd-takes-plan.md); this checks the fixture those need.
 """
 
+import shutil
+import wave
+from pathlib import Path
+
 import pytest
 
+import imagegen
 from akaiutil_gui.engine.api import AkaiEngine
+from akaiutil_gui.engine.models import Take
 
 
 @pytest.fixture
@@ -62,3 +68,62 @@ def test_a_takes_details_read_as_settings_not_as_akaiutil_prints_them(dd_engine)
     assert rows["Fade in"] == "10ms" and rows["MIDI channel"] == "Channel 16" and rows["MIDI note"] == "C3  (MIDI 60)"
     assert rows["Output"] == "OFF" and rows["FX bus"] == "OFF"
     assert [b.title for b in details.blocks] == ["Take", "Playback", "Output", "Technical"]
+
+
+def _frames(path: Path):
+    with wave.open(str(path), "rb") as w:
+        return w.getnchannels(), w.getframerate(), w.readframes(w.getnframes())
+
+
+def test_a_take_exports_as_the_wav_it_was_made_from(dd_engine, images, tmp_path):
+    part = _dd_partition(dd_engine)
+    takes = dd_engine.list_takes(part)
+    res = dd_engine.export_takes(part, takes, tmp_path, as_wav=True)
+    assert (res.skipped, res.failed) == ([], [])
+    assert sorted(Path(p).name for p in res.exported) == ["MONO.wav", "STEREO.wav"]
+    for name in ("MONO", "STEREO"):
+        assert _frames(tmp_path / f"{name}.wav") == _frames(images["dd"].parent / "wavs" / f"{name}.wav")  # the audio comes back bit for bit
+    assert _frames(tmp_path / "STEREO.wav")[:2] == (2, 44100)
+
+
+def test_a_take_exports_raw_as_a_tk_file(dd_engine, tmp_path):
+    part = _dd_partition(dd_engine)
+    res = dd_engine.export_takes(part, dd_engine.list_takes(part)[:1], tmp_path)
+    assert [Path(p).name for p in res.exported] == ["MONO.TK"]
+    assert (tmp_path / "MONO.TK").stat().st_size == 2 * 262144 + 64  # a sample cluster, an envelope cluster, and 64 bytes more
+
+
+def test_existing_files_are_left_alone_unless_the_caller_agrees(dd_engine, tmp_path):
+    part = _dd_partition(dd_engine)
+    take = dd_engine.list_takes(part)[:1]
+    (tmp_path / "MONO.wav").write_bytes(b"mine")
+    res = dd_engine.export_takes(part, take, tmp_path, as_wav=True)
+    assert (res.exported, res.skipped) == ([], [str(tmp_path / "MONO.wav")]) and (tmp_path / "MONO.wav").read_bytes() == b"mine"
+    res = dd_engine.export_takes(part, take, tmp_path, as_wav=True, confirm_overwrite=lambda _p: True)
+    assert len(res.exported) == 1 and (tmp_path / "MONO.wav").read_bytes() != b"mine"
+
+
+def test_two_takes_with_one_name_do_not_overwrite_each_other(binary, images, tmp_path):
+    image = tmp_path / "twins.img"
+    shutil.copy(images["dd"], image)
+    imagegen._script(binary, image, ["cd /disk0/DD", "wav2take MONO.wav"], images["dd"].parent / "wavs")  # a second MONO
+    eng = AkaiEngine(binary)
+    eng.open([image])
+    try:
+        part = _dd_partition(eng)
+        takes = [t for t in eng.list_takes(part) if t.name == "MONO"]
+        assert [t.index for t in takes] == [1, 3]
+        out = tmp_path / "out"
+        out.mkdir()
+        res = eng.export_takes(part, takes, out, as_wav=True)
+        assert sorted(p.name for p in out.iterdir()) == ["MONO (take 3).wav", "MONO.wav"] and len(res.exported) == 2
+    finally:
+        eng.close()
+
+
+def test_a_take_that_is_not_there_is_reported_not_raised(dd_engine, tmp_path):
+    part = _dd_partition(dd_engine)
+    ghost = Take(index=9, name="GHOST", sample_clusters=1, envelope_clusters=1, words=1, rate=44100, stereo=False)
+    res = dd_engine.export_takes(part, [ghost], tmp_path, as_wav=True)
+    assert res.exported == [] and len(res.failed) == 1 and res.failed[0].startswith("GHOST:")
+    assert list(tmp_path.iterdir()) == []

@@ -238,6 +238,46 @@ class AkaiEngine:
                     result.exported.append(str(target))
         return result
 
+    def export_takes(
+        self,
+        part: Partition,
+        takes: list[Take],
+        dest_dir: str | os.PathLike,
+        as_wav: bool = False,
+        confirm_overwrite: Callable[[Path], bool] | None = None,
+    ) -> ExportResult:
+        """Copy takes out of a direct-to-disk partition into dest_dir, as WAV files (`take2wavi`) or as the raw `.TK` files
+        akaiutil's `tput` reads back (`tgeti`). Existing destination files are only replaced if confirm_overwrite(path)
+        says so (default: never). Two takes can share a name, so a name that is already taken in this batch gets the take's
+        number added instead of overwriting the first."""
+        dest = Path(dest_dir)
+        result = ExportResult()
+        used: set[str] = set()
+        with self._lock:
+            log.info("export %d take(s) from disk%d %s to %s%s", len(takes), part.disk, part.name, dest_dir, " as WAV" if as_wav else "")
+            session = self._need_session()
+            self._run(f"cd {part.path}")
+            for t in takes:
+                _clear_dir(session.staging_dir)
+                resp = self._run(f"{'take2wavi' if as_wav else 'tgeti'} {t.index}")
+                produced = sorted(p for p in session.staging_dir.iterdir() if p.is_file())
+                if not produced:
+                    reason = resp.text.strip() or "akaiutil produced no file"
+                    result.failed.append(f"{t.name}: {reason}")
+                    continue
+                for src in produced:
+                    name = src.name
+                    if name.casefold() in used:
+                        name = f"{src.stem} (take {t.index}){src.suffix}"
+                    used.add(name.casefold())
+                    target = dest / name
+                    if target.exists() and not (confirm_overwrite and confirm_overwrite(target)):
+                        result.skipped.append(str(target))
+                        continue
+                    shutil.move(str(src), str(target))
+                    result.exported.append(str(target))
+        return result
+
     # ---------------------------------------------------------------- editing
     # Every one of these needs a writable session (set_writable), changes the image straight away, and
     # raises EngineError, with akaiutil's own explanation, if akaiutil refused. They check afterwards

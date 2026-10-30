@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from akaiutil_gui import settings
 from akaiutil_gui.ui import theme
+from akaiutil_gui.ui.disk_tree import _ROLE_OBJ
 
 
 @pytest.fixture(scope="module")
@@ -95,3 +96,30 @@ def test_searching_while_a_dd_partition_is_selected_shows_the_results_table(app,
 
     window.search.setText("")  # search over: the takes come back
     assert pump(app, lambda: window.takes.isVisible() and not window.table.isVisible())
+
+
+def test_selected_takes_export_from_the_menu_actions(app, window, images, tmp_path, monkeypatch):
+    disk = open_dd(app, window, images)
+    window.tree.setCurrentItem(disk.child(2))
+    assert pump(app, lambda: window.takes.rowCount() == 2)
+    assert not window.act_export.isEnabled() and not window.act_export_wav.isEnabled()  # nothing selected
+
+    window.takes.selectRow(1)
+    assert pump(app, lambda: window.act_export.isEnabled() and window.act_export_wav.isEnabled())
+    monkeypatch.setattr(type(window), "_export_destination", lambda self: str(tmp_path))
+    window.act_export_wav.trigger()
+    assert pump(app, lambda: (tmp_path / "STEREO.wav").exists())
+    window.act_export.trigger()
+    assert pump(app, lambda: (tmp_path / "STEREO.TK").exists())
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["STEREO.TK", "STEREO.wav"]  # just the selected take
+
+
+def test_the_partition_menu_exports_every_take_as_wav(app, window, images, tmp_path, monkeypatch):
+    disk = open_dd(app, window, images)
+    dd = disk.child(2).data(0, _ROLE_OBJ)  # the Partition the tree item stands for
+    menu = window._tree_menu(dd)
+    labels = [a.text() for a in menu.actions()]
+    assert "Export Takes as WAV…" in labels and "Export Samples as WAV…" not in labels
+    monkeypatch.setattr(type(window), "_export_destination", lambda self: str(tmp_path))
+    next(a for a in menu.actions() if a.text() == "Export Takes as WAV…").trigger()
+    assert pump(app, lambda: sorted(p.name for p in tmp_path.iterdir()) == ["MONO.wav", "STEREO.wav"])

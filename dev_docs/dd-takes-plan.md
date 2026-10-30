@@ -1,7 +1,7 @@
 # Direct-to-disk (DD) takes: plan
 
-Written 2026-10-30. **Built so far (2026-10-30): phases 0 and 1** (the test image, and the read-only take list and details). There is no
-export, import, rename or delete yet. Selecting a DD partition shows its takes in a table with each take's settings in the details pane;
+Written 2026-10-30. **Built so far (2026-10-30): phases 0, 1 and 2** (the test image, the read-only take list and details, and export). There is no
+import, rename or delete yet. Selecting a DD partition shows its takes in a table with each take's settings in the details pane;
 the partition's own text (`engine.list_takes_text`) still shows when no take is selected.
 
 A DD take is a recording made by an S1100 or S3000 straight to a hard disk. akaiutil already has every command needed; the work
@@ -71,7 +71,14 @@ Built as: `Take` in `engine/models.py`, `parse.parse_takes` (`dir` table, split 
   and drop-in hang off the same window (`_export`, `_export_for_drag`, the drop handlers).
 - Details pane: `tinfoi` text as rows (fades, pan, MIDI note...), read-only.
 
-### 2. Export (small)
+### 2. Export (small) — done, except drag-out
+
+Built as: `AkaiEngine.export_takes` (WAV via `take2wavi`, raw via `tgeti`; a name already used in the batch gets `(take N)` added),
+File > Export… (raw `.TK`) and Export as WAV… working on the selected takes, the same two in the take table's right-click menu, and
+"Export Takes as WAV…" on a DD partition in the tree (every take). Tests in `test_dd_takes.py` and `test_gui_takes.py`: exported WAVs
+are bit-identical to the WAVs the takes were made from. **Drag-out is not built:** the file list's drag carries an internal
+"copy these files into a volume" type and a URL list the window turns into an import, so a take drag needs its own mime type and a
+decision on what dropping it on a volume should do. The plan text below is what was intended.
 - `AkaiEngine.export_takes(part, takes, dest, as_wav, confirm_overwrite)`: same shape as `export_files`; one take at a time, staging
   dir cleared between, results moved to the chosen folder, overwrite asked.
 - Context menu and drag-out for takes (`ui/file_drag.py` is 39 lines).
