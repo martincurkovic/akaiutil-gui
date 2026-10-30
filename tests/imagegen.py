@@ -5,7 +5,7 @@ real disk images:
 
     uv run python tests/imagegen.py build/images
 
-writes s3000_hd.img, s1000_floppy.img and s900_floppy.img there.
+writes s3000_hd.img, s1000_floppy.img, s900_floppy.img and s3000_dd.img (a hard disk with a direct-to-disk area and two takes) there.
 """
 
 import math
@@ -21,13 +21,14 @@ sys.path.insert(0, str(REPO / "src"))
 from akaiutil_gui.engine.locate import find_akaiutil  # noqa: E402
 
 
-def write_sine_wav(path: Path, freq: float, seconds: float = 0.5, rate: int = 44100) -> None:
+def write_sine_wav(path: Path, freq: float, seconds: float = 0.5, rate: int = 44100, channels: int = 1) -> None:
     n = int(seconds * rate)
     frames = b"".join(
-        struct.pack("<h", int(12000 * math.sin(2 * math.pi * freq * i / rate))) for i in range(n)
+        struct.pack("<" + "h" * channels, *[int(12000 * math.sin(2 * math.pi * freq * (c + 1) * i / rate)) for c in range(channels)])
+        for i in range(n)
     )
     with wave.open(str(path), "wb") as w:
-        w.setnchannels(1)
+        w.setnchannels(channels)
         w.setsampwidth(2)
         w.setframerate(rate)
         w.writeframes(frames)
@@ -61,10 +62,12 @@ def make_images(out_dir: Path, binary: Path | None = None) -> dict[str, Path]:
         "hd": out_dir / "s3000_hd.img",
         "fl1": out_dir / "s1000_floppy.img",
         "fl9": out_dir / "s900_floppy.img",
+        "dd": out_dir / "s3000_dd.img",
     }
     images["hd"].write_bytes(bytes(8192 * 20000))  # 160000 KB
     images["fl1"].write_bytes(bytes(1024 * 1600))  # high-density floppy
     images["fl9"].write_bytes(bytes(1024 * 800))  # low-density floppy
+    images["dd"].write_bytes(bytes(1024 * 1024 * 10))  # 10 MB
 
     # formatting makes akaiutil restart itself, so it gets its own session
     _script(binary, images["hd"], ["formatharddisk3 5M"], wavs)
@@ -92,6 +95,13 @@ def make_images(out_dir: Path, binary: Path | None = None) -> dict[str, Path]:
 
     _script(binary, images["fl9"], ["formatfloppyl9"], wavs)
     _script(binary, images["fl9"], ["cd /disk0/A", "cdi 1", "wav2sample9 KICK.wav"], wavs)
+
+    # A direct-to-disk (DD) area is whatever is left of the file after the second size, so that must be smaller than the file:
+    # two 2 MB sampler partitions, then 5.8 MB for takes (room for about 11 more). A take is named after its WAV file.
+    write_sine_wav(wavs / "MONO.wav", 220, seconds=1)
+    write_sine_wav(wavs / "STEREO.wav", 330, seconds=1, channels=2)
+    _script(binary, images["dd"], ["formatharddisk3 2M 4M"], wavs)
+    _script(binary, images["dd"], ["cd /disk0/DD", "wav2take MONO.wav", "wav2take STEREO.wav"], wavs)
     return images
 
 
