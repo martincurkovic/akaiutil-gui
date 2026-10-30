@@ -27,6 +27,7 @@ A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil
 - **Recent images** on the start screen.
 - **Export** files in Akai format, or convert samples to WAV.
 - **Editing**: rename and delete files and volumes, create volumes, import samples, format and create new empty disk images.
+- **Direct-to-disk takes** (S1100/S3000 recordings): list them, export as WAV or `.TK`, import, rename and delete.
 - **Sample settings**: change an S1000/S3000 sample's root key, tuning, play mode, markers and loops (same mechanism as [AKAISDS](https://github.com/martincurkovic/AKAISDS)).
 - **Settings**: light, dark or Macintosh System 6 theme, audio output device and buffer size.
 
@@ -68,6 +69,7 @@ Every image opens read-only by default. **Edit > Allow Editing** enables edit fu
 - **Copy and move files** between volumes, partitions and disks. Drag audio samples out of the list to Finder, Explorer or your DAW to export as WAV files.
 - **Sort a volume** (Edit > Sort Files by Name, or right-click a volume): puts its files in alphabetical order.
 - **Import** (drop files on a volume, or Edit > Import Files): WAV, AIFF, FLAC, OGG and MP3 files are all converted to Akai format.
+- **Takes** (the direct-to-disk area of an S1100/S3000 disk): import audio or `.TK` files, rename, delete, export. Not yet checked against a real sampler.
 - **HFE floppy image** (Gotek / HxC) support.
 - **File > New Disk Image** makes a new empty image.
 

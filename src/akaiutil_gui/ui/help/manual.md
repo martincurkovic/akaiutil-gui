@@ -21,6 +21,7 @@ akaiutil-GUI allows you to open, view and edit Akai S900, S1000 and S3000 disk i
 - [Copying and moving files](#copying-and-moving-files)
 - [Changing a sample's settings](#changing-a-samples-settings)
 - [Sorting a volume](#sorting-a-volume)
+- [Direct-to-disk takes](#direct-to-disk-takes)
 - [New disk images and formatting](#new-disk-images-and-formatting)
 - [Several disks at once](#several-disks-at-once)
 - [Settings](#settings)
@@ -246,6 +247,20 @@ A volume with every slot in use (510 files, or 64 on an S900) has no room to shu
 
 ---
 
+## Direct-to-disk takes
+
+S1100 and S3000-series samplers can record straight to a hard disk. Those recordings are **takes**. They don't live in a volume: they sit in a separate **direct-to-disk** area, shown as `DD` under the disk. (An S1000 has no direct-to-disk recording.)
+
+Select the area to see its takes: name, mono or stereo, sample rate, length and size. Select a take for its settings (fades, pan, MIDI note, output and so on).
+
+- **Export:** **File > Export…** saves a take as a `.TK` file, which can be imported again, and **Export as WAV…** saves it as a WAV file. Right-click the area in the tree and choose **Export Takes as WAV…** to export all of them.
+- **Import:** **Edit > Import Takes…** (Ctrl/Cmd+I), or drop audio or `.TK` files, or a folder of them, on the window. A take is named after its file (12 characters at most) and stored as 16-bit audio. Files above 65,535 Hz, with more than two channels, or too big for the free space are refused, with the reason.
+- **Rename and delete:** F2 and Delete, as for files. Deleting a take doesn't renumber the others, and two takes can have the same name.
+
+Takes made or changed here haven't been tried on a real sampler yet.
+
+---
+
 ## New disk images and formatting
 
 - **File > New Disk Image…** makes a new, empty, formatted image file and opens it next to the others. Choose the kind: an S3000, S1000 or CD3000 hard disk (up to 512 MB, split into partitions of up to 60 MB), an S900 hard disk (up to 64 MB), or a floppy (S900, S1000 or S3000, DD at 800 KB or HD at 1.6 MB).
@@ -289,10 +304,10 @@ On a Mac use Cmd where this says Ctrl.
 | Ctrl+E / Ctrl+Shift+E    | Export / Export as WAV                     |
 | Ctrl+F, Esc              | Search all files, clear the search         |
 | Space                    | Play or stop the selected sample           |
-| F2                       | Rename the selected file or volume         |
-| Delete                   | Delete the selected files or volume        |
+| F2                       | Rename the selected file, volume or take   |
+| Delete                   | Delete the selected files, volume or takes |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / Cut / Paste files                   |
-| Ctrl+I                   | Import files into the selected volume      |
+| Ctrl+I                   | Import files (or takes) into the selection |
 | Ctrl+J                   | Show or hide the akaiutil console          |
 | Ctrl+,                   | Open Settings                              |
 | F1 (Cmd+? on a Mac)      | This manual                                |
@@ -336,7 +351,7 @@ The log holds the app's version, your operating system, the images you opened an
 - **No undo,** and changes are written at once. Say yes to the backup when editing is switched on, and use **File > Revert to Backup…** to go back.
 - A sample's loops, root key, tuning, play mode and markers can be changed with **Edit > Sample Settings…** (S1000 and S3000 samples only).
 - S900 samples are previewed as one-shots, and get no loops on import.
-- Direct-to-disk recordings (takes) are listed as text only.
+- Direct-to-disk recordings (takes) can be exported, imported, renamed and deleted, but only recordings made by akaiutil have been tried (see [Direct-to-disk takes](#direct-to-disk-takes)).
 - Adding or closing a disk image restarts akaiutil, so disk numbers can change and the search index is rebuilt.
 - An **HFE** floppy is opened as a working copy and written back after each edit (see [HFE images](#hfe-images-gotek-and-hxc-emulators)).
 - The app is built on [akaiutil](https://sourceforge.net/projects/akaiutil/) by Klaus Michael Indlekofer (GPL v2 or later). **Help > About** shows the licence, and **Help > Third-party Notices…** lists the other licences and credits.

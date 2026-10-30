@@ -1,7 +1,7 @@
 # Direct-to-disk (DD) takes: plan
 
-Written 2026-10-30. **Built so far (2026-10-30): phases 0 to 3** (the test image, the take list and details, export, and import, rename and delete).
-Not built: drag-out, saved column widths, the manual page. Nothing has been checked on a real recording or a real sampler. Selecting a DD partition shows its takes in a table with each take's settings in the details pane;
+Written 2026-10-30. **Built so far (2026-10-30): phases 0 to 4** (the test image, the take list and details, export, import, rename and delete, and the
+manual page and README lines). Not built: drag-out, saved column widths, resampling a too-fast file. Nothing has been checked on a real recording or a real sampler. Selecting a DD partition shows its takes in a table with each take's settings in the details pane;
 the partition's own text (`engine.list_takes_text`) still shows when no take is selected.
 
 A DD take is a recording made by an S1100 or S3000 straight to a hard disk. akaiutil already has every command needed; the work
@@ -112,7 +112,11 @@ The plan text below is what was intended.
 - `rename_take`, `delete_take` (`treni`, `tdeli`), with confirmation for delete.
 - A name for a dropped file: its stem, upper-cased and cut to 12; ask or number duplicates.
 
-### 4. Polish
+### 4. Polish — done (manual and README)
+
+The manual has a "Direct-to-disk takes" section (contents entry, shortcuts table, "Good to know" line) and the README two bullets; no
+screenshot yet (`scripts/make_manual_screenshots.py` would need a DD image and a take selected). Every command is already logged by the
+session logger, and the engine methods log what they did. The text below is what was intended.
 - Manual page (user-facing, short), README line, a log entry for every command (the session logger already does this).
 
 ## Waiting on a real image

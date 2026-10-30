@@ -62,7 +62,8 @@ def test_every_screenshot_in_the_manual_exists_and_is_a_real_picture():
 
 def test_the_manual_covers_every_menu_item_it_should():
     for phrase in ("Allow Editing", "Sort Files by Name", "Import Files", "New Disk Image", "Format Disk", "Add Disk Image",
-                   "Close Disk Image", "Copy Files", "Paste Files", "User Manual", "Check for Updates"):
+                   "Close Disk Image", "Copy Files", "Paste Files", "User Manual", "Check for Updates",
+                   "Import Takes", "Export Takes as WAV"):
         assert phrase in MANUAL, phrase
 
 
