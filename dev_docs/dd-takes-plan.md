@@ -1,7 +1,7 @@
 # Direct-to-disk (DD) takes: plan
 
-Written 2026-10-30. **Built so far (2026-10-30): phases 0, 1 and 2** (the test image, the read-only take list and details, and export). There is no
-import, rename or delete yet. Selecting a DD partition shows its takes in a table with each take's settings in the details pane;
+Written 2026-10-30. **Built so far (2026-10-30): phases 0 to 3** (the test image, the take list and details, export, and import, rename and delete).
+Not built: drag-out, saved column widths, the manual page. Nothing has been checked on a real recording or a real sampler. Selecting a DD partition shows its takes in a table with each take's settings in the details pane;
 the partition's own text (`engine.list_takes_text`) still shows when no take is selected.
 
 A DD take is a recording made by an S1100 or S3000 straight to a hard disk. akaiutil already has every command needed; the work
@@ -85,12 +85,30 @@ decision on what dropping it on a volume should do. The plan text below is what 
 - WAV export has no loop chunk to add: takes have none.
 - Check: exported WAV is bit-identical to the one imported (it was, for a take whose cluster chain was fragmented).
 
-### 3. Import, rename, delete (medium)
+### 3. Import, rename, delete (medium) — done
+
+Built as: `takes.py` (Qt-free: `inspect` a file, `prepare_audio` into a clean 16-bit WAV with `soundfile`, `run_import` over several files),
+`AkaiEngine.import_take` / `rename_take` / `delete_takes`, and in the window: Edit > Import Takes… / Rename Take… / Delete Take… (the
+same menu items and shortcuts as for files, worded for takes while a DD partition is open), the take table's right-click menu, "Import
+Takes…" on a DD partition in the tree, and audio or `.TK` files dropped on the window. Behaviour worth knowing:
+
+- A file above 65,535 Hz, with over two channels, with no audio, or that is not audio or a `.TK` is refused with a reason, and the others
+  of a batch carry on. A file is always rewritten as clean 16-bit audio at its own rate (24-bit and 8-bit are converted by the app,
+  not by akaiutil, so the audio conversion `wav2take` does is not relied on). **No resampling:** a 96 kHz file is refused, not
+  converted to 48 kHz; that is the obvious next convenience.
+- Room is checked first (`engine._free_bytes` re-reads the partition, since the `Partition` in hand may be stale), with a message that
+  says how much is needed and free. After `wav2take` the new take must have the file's channels, rate and frame count, or it is
+  deleted again and the import counts as failed.
+- A take's name is its file's name cut to 12 Akai characters (`importing.clean_stem`). Duplicates are allowed, so rename and delete go
+  by number and refuse a stale selection ("isn't take 2 any more").
+- Delete frees the number; the next import takes the lowest free one. Nothing is renumbered.
+- `.TK` import relies on akaiutil to reject a bad file (only the size is checked first).
+
+The plan text below is what was intended.
 - `import_takes(part, paths)`: WAV and `.TK`. Pre-checks from the rules above; then `wav2take`/`tput`; read the slot number from
   akaiutil's reply; re-list and confirm the take is there with the expected size and rate; on a failure, leave the image as it was.
-- Which WAV formats: 8, 16 and 24-bit mono/stereo at 22.05, 44.1 and 48 kHz all imported. **Not checked: that 8- and 24-bit audio
-  was converted correctly** (only that the takes were created with the right counts), or what happens with 32-bit or float.
-  Reuse the existing audio checks in `importing.py` for anything beyond mono/stereo.
+- Which formats: anything soundfile reads, mono or stereo. Tested: 24-bit stereo 48 kHz and 8-bit mono 22.05 kHz files, the audio
+  coming back bit-identical to the 16-bit WAV the app wrote.
 - `rename_take`, `delete_take` (`treni`, `tdeli`), with confirmation for delete.
 - A name for a dropped file: its stem, upper-cased and cut to 12; ask or number duplicates.
 

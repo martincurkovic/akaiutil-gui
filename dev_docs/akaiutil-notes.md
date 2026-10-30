@@ -146,8 +146,9 @@ Plan: [dd-takes-plan.md](dd-takes-plan.md). Everything below was tried on throwa
   sample / WAV import error", leaves no half take, and the free space afterwards is what it was (deleting a take gave back 0.5 MB).
 - **Import takes the first free slot** (it printed `importing "x" to take N`), so a delete followed by an import reuses the number.
   Duplicate names are allowed (two takes called `MONO`); rename and delete go by number.
-- **Formats that imported:** 16-bit mono/stereo at 44.1 and 48 kHz, 8-bit mono 22.05 kHz, 24-bit stereo 44.1 kHz (stored rate = the WAV's).
-  Not checked: that the 8- and 24-bit audio was converted correctly (only the counts were looked at).
+- **Formats that imported** (straight into `wav2take`): 16-bit mono/stereo at 44.1 and 48 kHz, 8-bit mono 22.05 kHz, 24-bit stereo
+  44.1 kHz (stored rate = the WAV's). Whether akaiutil converted the 8- and 24-bit audio correctly was never checked: the GUI writes
+  16-bit WAVs itself (`takes.prepare_audio`) and gives akaiutil only those.
 - **Silent trap: the rate is stored in 16 bits.** A 96 kHz mono WAV imported without a message and showed `srate 30464`
   (96000 mod 65536). The GUI has to refuse rates over 65,535 before calling `wav2take`.
 - **Defaults on import:** fade in 10 ms, fade out 50 ms, stereo level 99, pan 0, stereo mix ON, MIDI channel 16, note 60, start mode
@@ -156,6 +157,8 @@ Plan: [dd-takes-plan.md](dd-takes-plan.md). Everything below was tried on throwa
   (clusters 1, 2, 13...) came back **bit-identical** to the WAV it was made from. `tgeti 1` wrote `MONO.TK`, 524,352 bytes for
   two clusters (64 more than the clusters; presumably a header, not read from the source), and `tput` of it recreated the take.
   An unused take number answers "cannot export take to WAV".
+- `treni` and `tdeli` print nothing when they work (so anything printed is the reason they didn't); `wav2take` and `tput` print
+  `importing "x" to take N`, and the way to know they worked is to list the takes again.
 - Not checked: any take recorded by a sampler; long fragmented chains; 32-bit or float WAVs; several DD partitions on one disk.
 
 ## Effects files (`.X`)

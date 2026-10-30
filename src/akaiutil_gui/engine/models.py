@@ -66,6 +66,12 @@ class Partition:
 DD_CLUSTER_BYTES = 262144  # one cluster of a direct-to-disk partition (akaiutil prints "csizes 0x0001 clusters (262144 bytes)")
 
 
+def take_clusters(frames: int, channels: int) -> int:
+    """What a take of this much 16-bit audio takes in a DD partition: whole clusters of audio and one envelope cluster
+    (the envelope was one cluster even for a 20 s take)."""
+    return -(-frames * channels * 2 // DD_CLUSTER_BYTES) + 1
+
+
 @dataclass(frozen=True)
 class Take:
     """One direct-to-disk take, as `dir` lists it inside a DD partition."""

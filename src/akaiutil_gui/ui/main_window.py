@@ -45,6 +45,7 @@ from akaiutil_gui import (
     search,
     settings,
     sorting,
+    takes as take_files,
     transfer,
 )
 from akaiutil_gui.audio.sample import LoadedSample, load_wav
@@ -334,6 +335,7 @@ class MainWindow(QMainWindow):
         )  # double-click or Enter
         for widget in (
             self.table,
+            self.takes,
             self.tree,
         ):  # F2 and Delete work where the thing to rename or delete is
             rename_key = QShortcut(QKeySequence(Qt.Key.Key_F2), widget)
@@ -2206,6 +2208,9 @@ class MainWindow(QMainWindow):
     def _edit_target(self) -> tuple[str, object] | None:
         """What Rename and Delete would act on: the files selected in the list if that is where you are,
         the volume selected in the tree if that is where you are, else whichever of them there is."""
+        if self._takes_shown():  # (the file list is out of sight, and a DD partition holds no volumes)
+            takes = self.takes.selected_takes()
+            return ("takes", takes) if takes else None
         rows, volume = self._selected_rows(), self._selected_volume()
         if self._focus_in(self.table):
             return ("files", rows) if rows else None
@@ -2253,6 +2258,11 @@ class MainWindow(QMainWindow):
                     True,
                     True,
                 )
+            elif kind == "takes":
+                n = len(what)
+                rename_text = "&Rename Take…" if n == 1 else "&Rename…"
+                delete_text = "&Delete Take…" if n == 1 else f"&Delete {n} Takes…"
+                can_rename, can_delete = n == 1, True
             else:
                 n = len(what)
                 rename_text = "&Rename File…" if n == 1 else "&Rename…"
@@ -2266,7 +2276,8 @@ class MainWindow(QMainWindow):
             has and self._partition_for_new_volume() is not None
         )
         self.act_format.setEnabled(has and self._selected_disk() is not None)
-        self.act_import.setEnabled(has and self._selected_volume() is not None)
+        self.act_import.setText("&Import Takes…" if self._takes_shown() else "&Import Files…")
+        self.act_import.setEnabled(has and (self._selected_volume() is not None or self._takes_shown()))
         self.act_sort.setEnabled(has and self._selected_volume() is not None)
         self.act_select_unused.setEnabled(has and self._selected_volume() is not None and not self._in_results)
         rows = self._selected_rows() if has else []
@@ -2284,6 +2295,9 @@ class MainWindow(QMainWindow):
         kind, what = target
         if kind == "volume":
             self._rename_volume(what)
+        elif kind == "takes":
+            if len(what) == 1:
+                self._rename_take(self._dd_partition, what[0])
         elif len(what) == 1:
             self._rename_file(*what[0])
 
@@ -2294,6 +2308,8 @@ class MainWindow(QMainWindow):
         kind, what = target
         if kind == "volume":
             self._delete_volume(what)
+        elif kind == "takes":
+            self._delete_takes(self._dd_partition, what)
         else:
             self._delete_files(what)
 
@@ -3132,6 +3148,9 @@ class MainWindow(QMainWindow):
         return paths
 
     def _import_dialog(self, volume: Volume | None = None) -> None:
+        if not isinstance(volume, Volume) and self._takes_shown():
+            self._import_takes_dialog(self._dd_partition)
+            return
         volume = volume if isinstance(volume, Volume) else self._selected_volume()
         if self._engine is None or volume is None:
             return
@@ -3169,6 +3188,109 @@ class MainWindow(QMainWindow):
         if dialog.exec() != dialog.DialogCode.Accepted:
             return None
         return dialog.sample_type, dialog.compress_s900, dialog.stereo, dialog.options
+
+    @staticmethod
+    def _is_take_source(path: Path) -> bool:
+        return path.suffix.lower() == take_files.TAKE_EXTENSION or importing.kind_of(path) == "audio"
+
+    def _import_takes_dialog(self, part: Partition | None) -> None:
+        if self._engine is None or part is None:
+            return
+        start = settings.get_last_dir("import") or settings.get_last_dir("open") or str(Path.home())
+        audio = " ".join(f"*{e}" for e in sorted(importing.AUDIO_EXTENSIONS))
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Import takes",
+            start,
+            f"Audio and take files ({audio} *.TK *.tk);;All files (*)",
+        )
+        if paths:
+            settings.set_last_dir("import", str(Path(paths[0]).parent))
+            self.import_takes([Path(p) for p in sorted(paths, key=importing.natural_key)], part)
+
+    def import_takes(self, paths: list, part: Partition | None = None) -> None:
+        """Put audio and .TK files into a direct-to-disk partition (the one given, else the selected one) as takes."""
+        part = part or self._dd_partition
+        if self._engine is None or part is None or self._busy():
+            return
+        given = [Path(p) for p in paths if Path(p).is_file()]  # (named files are reported if they can't be takes; a folder's own files are only the audio and .TK ones)
+        in_folders = [f for f in importing.expand([str(p) for p in paths if Path(p).is_dir()]) if self._is_take_source(f)]
+        sources = [take_files.inspect(p) for p in sorted({*given, *in_folders}, key=importing.natural_key)]
+        if not sources:
+            self.statusBar().showMessage("There are no audio or .TK files there to import as takes.", 8000)
+            return
+        self._ensure_editing(lambda: self._do_import_takes(part, sources))
+
+    def _do_import_takes(self, part: Partition, sources: list) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+        relay = _ProgressRelay(self)
+        relay.message.connect(lambda text: self.statusBar().showMessage(text))
+
+        def work() -> take_files.TakeImportResult:
+            work_dir = Path(tempfile.mkdtemp(prefix="akaiutil-gui-takes-"))
+            try:
+                return take_files.run_import(
+                    engine, part, sources, work_dir,
+                    progress=lambda i, n, name: relay.message.emit(f"Importing take {i + 1} of {n}: {name}…"),
+                )
+            finally:
+                shutil.rmtree(work_dir, ignore_errors=True)
+
+        def done(result: take_files.TakeImportResult) -> None:
+            relay.deleteLater()
+            n = result.count
+            text = f"Imported {n} take{'s' if n != 1 else ''}."
+            if result.failed:
+                text += f"  {len(result.failed)} failed."
+            self._edited(part.disk, message=text)
+            if result.failed:
+                self._warn("Some files weren't imported", f"{len(result.failed)} of {len(sources)} files couldn't be imported as takes.", result.failed)
+
+        def failed(message: str) -> None:
+            relay.deleteLater()
+            self._edit_failed(part.disk, message)
+
+        self._run_edit(work, done, failed)
+
+    def _rename_take(self, part: Partition | None, take: Take) -> None:
+        if self._engine is None or part is None or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_rename_take(part, take))
+
+    def _do_rename_take(self, part: Partition, take: Take) -> None:
+        engine = self._engine
+        name = self._ask_name("take", take.name, "S3000", [])  # (two takes may share a name)
+        if engine is None or name is None:
+            return
+        self._run_edit(
+            lambda: engine.rename_take(part, take, name),
+            lambda new: self._edited(part.disk, message=f"Renamed “{take.name}” to “{new.name}”."),
+            lambda message: self._edit_failed(part.disk, message),
+        )
+
+    def _delete_takes(self, part: Partition | None, takes: list[Take]) -> None:
+        if self._engine is None or part is None or not takes or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_delete_takes(part, takes))
+
+    def _do_delete_takes(self, part: Partition, takes: list[Take]) -> None:
+        engine = self._engine
+        text = f"Delete “{takes[0].name}”?" if len(takes) == 1 else f"Delete {len(takes)} takes?"
+        lines = [f"{t.index}  {t.name}" for t in takes] if len(takes) > 1 else []
+        if engine is None or not edit_dialogs.confirm(self, "Delete takes?", text, "This can't be undone.", details_lines=lines):
+            return
+
+        def done(failed: list[str]) -> None:
+            self._edited(part.disk)
+            n = len(takes) - len(failed)
+            self._status_hold = time.monotonic() + 8
+            self.statusBar().showMessage(f"Deleted {n} take{'s' if n != 1 else ''}.", 8000)
+            if failed:
+                self._warn("Some takes weren't deleted", f"{len(failed)} of {len(takes)} takes couldn't be deleted.", failed)
+
+        self._run_edit(lambda: engine.delete_takes(part, takes), done, lambda message: self._edit_failed(part.disk, message))
 
     def _do_import(self, volume: Volume, sources: list) -> None:
         engine = self._engine
@@ -3313,6 +3435,7 @@ class MainWindow(QMainWindow):
                 menu.addAction("New Volume…", lambda: self._new_volume(obj))
                 menu.addAction("Copy Partition To…", lambda: self._copy_partition(obj))
             if obj.is_dd:
+                menu.addAction("Import Takes…", lambda: self._import_takes_dialog(obj))
                 menu.addAction("Export Takes as WAV…", lambda: self._export_takes(obj, None, True))
             else:
                 menu.addAction("Export Samples as WAV…", lambda: self._export_node(obj))
@@ -3350,14 +3473,21 @@ class MainWindow(QMainWindow):
         return menu
 
     def _on_takes_context(self, pos) -> None:
+        if self._engine is None or self._dd_partition is None:
+            return
         row = self.takes.rowAt(pos.y())
         if row >= 0 and not self.takes.item(row, 0).isSelected():
             self.takes.selectRow(row)
-        if self._engine is not None and self.takes.selected_takes():
-            menu = QMenu(self)
+        menu = QMenu(self)
+        if self.takes.selected_takes():
             menu.addAction(self.act_export)
             menu.addAction(self.act_export_wav)
-            menu.exec(self.takes.viewport().mapToGlobal(pos))
+            menu.addSeparator()
+            menu.addAction(self.act_rename)
+            menu.addAction(self.act_delete)
+            menu.addSeparator()
+        menu.addAction(self.act_import)
+        menu.exec(self.takes.viewport().mapToGlobal(pos))
 
     def _on_table_context(self, pos) -> None:
         row = self.table.rowAt(pos.y())
@@ -3478,6 +3608,11 @@ class MainWindow(QMainWindow):
             if files:
                 self.import_files(files, volume)
             return
+        if self._takes_shown():  # audio and .TK files dropped while a DD partition is open become takes
+            takes = [f for f in files if self._is_take_source(f)]
+            if takes:
+                self.import_takes(takes)
+                return
         samples = [f for f in files if importing.kind_of(f) != "other"]
         images = self._only_disk_images([f for f in files if importing.kind_of(f) == "other"], dropped=True)
         if samples:

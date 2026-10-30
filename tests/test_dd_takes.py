@@ -7,11 +7,15 @@ import shutil
 import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
+import soundfile
 
 import imagegen
 from akaiutil_gui.engine.api import AkaiEngine
+from akaiutil_gui import takes as takes_module
 from akaiutil_gui.engine.models import Take
+from akaiutil_gui.engine.session import EngineError
 
 
 @pytest.fixture
@@ -127,3 +131,152 @@ def test_a_take_that_is_not_there_is_reported_not_raised(dd_engine, tmp_path):
     res = dd_engine.export_takes(part, [ghost], tmp_path, as_wav=True)
     assert res.exported == [] and len(res.failed) == 1 and res.failed[0].startswith("GHOST:")
     assert list(tmp_path.iterdir()) == []
+
+
+# ------------------------------------------------------------------ editing (a copy of the image, editing switched on)
+@pytest.fixture
+def dd_ed(binary, images, tmp_path):
+    image = tmp_path / "edit.img"
+    shutil.copy(images["dd"], image)
+    eng = AkaiEngine(binary)
+    eng.open([image])
+    eng.set_writable(True)
+    yield eng
+    eng.close()
+
+
+def _reread_takes(binary, image):
+    """What a fresh, read-only look at the image on disk shows (proves the change really was written)."""
+    eng = AkaiEngine(binary)
+    eng.open([image])
+    try:
+        return eng.list_takes(_dd_partition(eng))
+    finally:
+        eng.close()
+
+
+def _audio(path, channels=1, rate=44100, seconds=1.0, subtype="PCM_24"):
+    n = int(rate * seconds)
+    t = np.arange(n) / rate
+    data = np.stack([0.5 * np.sin(2 * np.pi * 440 * (c + 1) * t) for c in range(channels)], axis=1)
+    soundfile.write(str(path), data, rate, subtype=subtype)
+    return path
+
+
+def _import(eng, part, src_path, tmp_path):
+    src = takes_module.inspect(src_path)
+    assert not src.problem, src.problem
+    local = tmp_path / f"{takes_module.take_name(src_path)}.wav"
+    takes_module.prepare_audio(src, local)
+    return eng.import_take(part, local, expect=(src.channels, src.rate, src.frames)), local
+
+
+def test_a_24_bit_stereo_file_becomes_a_take_with_its_audio_intact(dd_ed, binary, tmp_path):
+    part = _dd_partition(dd_ed)
+    wav = _audio(tmp_path / "pad sound_1.wav", channels=2, rate=48000, seconds=2)
+    take, prepared = _import(dd_ed, part, wav, tmp_path)
+    assert (take.index, take.name, take.stereo, take.rate, take.frames) == (3, "PAD SOUND 1", True, 48000, 96000)
+    out = tmp_path / "out"
+    out.mkdir()
+    dd_ed.export_takes(part, [take], out, as_wav=True)
+    assert _frames(out / "PAD SOUND 1.wav") == _frames(prepared)  # what was written is what is read back, bit for bit
+    assert [(t.index, t.name) for t in _reread_takes(binary, dd_ed._session.images[0])] == [(1, "MONO"), (2, "STEREO"), (3, "PAD SOUND 1")]
+
+
+def test_an_8_bit_file_is_widened_to_16_bit(dd_ed, tmp_path):
+    take, _ = _import(dd_ed, _dd_partition(dd_ed), _audio(tmp_path / "LOFI.wav", rate=22050, subtype="PCM_U8"), tmp_path)
+    assert (take.name, take.stereo, take.rate, take.frames) == ("LOFI", False, 22050, 22050)
+
+
+def test_a_tk_file_comes_back_as_the_take_it_was(dd_ed, tmp_path):
+    part = _dd_partition(dd_ed)
+    mono = dd_ed.list_takes(part)[0]
+    dd_ed.export_takes(part, [mono], tmp_path)
+    assert dd_ed.delete_takes(part, [mono]) == []
+    back = dd_ed.import_take(part, tmp_path / "MONO.TK")
+    assert (back.index, back.name, back.stereo, back.rate, back.words) == (1, "MONO", False, 44100, 44100)  # the slot it had is free again
+
+
+def test_what_cannot_be_a_take_is_refused_with_a_reason(tmp_path):
+    fast = takes_module.inspect(_audio(tmp_path / "FAST.wav", rate=96000, seconds=0.1))
+    assert "96,000 Hz" in fast.problem and "65,535" in fast.problem  # akaiutil would have stored it as 30,464 Hz without a word
+    many = tmp_path / "MANY.wav"
+    soundfile.write(str(many), np.zeros((100, 3)), 44100, subtype="PCM_16")
+    assert "3 channels" in takes_module.inspect(many).problem
+    (tmp_path / "NOTES.txt").write_text("hello")
+    assert takes_module.inspect(tmp_path / "NOTES.txt").problem
+    (tmp_path / "SMALL.TK").write_bytes(b"x" * 100)
+    assert "too small" in takes_module.inspect(tmp_path / "SMALL.TK").problem
+    assert takes_module.inspect(_audio(tmp_path / "FINE.wav")).problem == ""
+
+
+def test_a_file_that_does_not_fit_says_so_and_changes_nothing(dd_ed, binary, tmp_path):
+    part = _dd_partition(dd_ed)
+    before = dd_ed.list_takes(part)
+    huge = _audio(tmp_path / "HUGE.wav", channels=2, seconds=30, subtype="PCM_16")  # 5.3 MB for a partition with 4.8 free
+    with pytest.raises(EngineError, match="isn't room for “HUGE”"):
+        _import(dd_ed, part, huge, tmp_path)
+    assert dd_ed.list_takes(part) == before
+
+
+def test_a_take_that_comes_out_different_from_the_file_is_taken_out_again(dd_ed, tmp_path):
+    part = _dd_partition(dd_ed)
+    src = takes_module.inspect(_audio(tmp_path / "ODD.wav", subtype="PCM_16"))
+    local = tmp_path / "ODD.wav.prepared.wav"
+    takes_module.prepare_audio(src, local)
+    with pytest.raises(EngineError, match="differently from the file"):
+        dd_ed.import_take(part, local, expect=(1, 44100, 12345))
+    assert [t.name for t in dd_ed.list_takes(part)] == ["MONO", "STEREO"]
+
+
+def test_import_run_reports_each_file_and_carries_on(dd_ed, tmp_path):
+    part = _dd_partition(dd_ed)
+    good = _audio(tmp_path / "GOOD.wav", subtype="PCM_16")
+    bad = _audio(tmp_path / "FAST.wav", rate=96000, seconds=0.1)
+    work = tmp_path / "work"
+    work.mkdir()
+    seen = []
+    res = takes_module.run_import(dd_ed, part, [takes_module.inspect(bad), takes_module.inspect(good)], work, progress=lambda i, n, name: seen.append((i, n, name)))
+    assert res.imported == ["GOOD"] and len(res.failed) == 1 and res.failed[0].startswith("FAST.wav: its sample rate is 96,000 Hz")
+    assert seen == [(0, 2, "FAST.wav"), (1, 2, "GOOD.wav")]
+
+
+def test_a_take_is_renamed_by_number_and_duplicates_are_allowed(dd_ed, binary):
+    part = _dd_partition(dd_ed)
+    mono, stereo = dd_ed.list_takes(part)
+    renamed = dd_ed.rename_take(part, stereo, "my pad")
+    assert (renamed.index, renamed.name) == (2, "MY PAD")
+    twin = dd_ed.rename_take(part, mono, "MY PAD")  # two takes can share a name
+    assert [t.name for t in dd_ed.list_takes(part)] == ["MY PAD", "MY PAD"] and twin.index == 1
+    with pytest.raises(EngineError, match="isn't take 2 any more"):
+        dd_ed.rename_take(part, stereo, "LATE")  # the old name is gone: this is a stale selection
+    with pytest.raises(EngineError):
+        dd_ed.rename_take(part, twin, "bad*name")
+    assert [t.name for t in _reread_takes(binary, dd_ed._session.images[0])] == ["MY PAD", "MY PAD"]
+
+
+def test_deleting_takes_frees_their_numbers_and_the_next_import_reuses_one(dd_ed, tmp_path, binary):
+    part = _dd_partition(dd_ed)
+    mono, stereo = dd_ed.list_takes(part)
+    free_before = dd_ed._free_bytes(part)
+    assert dd_ed.delete_takes(part, [mono]) == []
+    assert [(t.index, t.name) for t in dd_ed.list_takes(part)] == [(2, "STEREO")]  # no renumbering
+    assert dd_ed._free_bytes(part) == free_before + mono.disk_bytes
+    failed = dd_ed.delete_takes(part, [mono])
+    assert failed == ["MONO: it isn't take 1 any more"]
+    take, _ = _import(dd_ed, part, _audio(tmp_path / "NEW.wav", subtype="PCM_16"), tmp_path)
+    assert take.index == 1
+    assert [t.name for t in _reread_takes(binary, dd_ed._session.images[0])] == ["NEW", "STEREO"]
+
+
+def test_takes_cannot_be_changed_while_editing_is_off(binary, images, tmp_path):
+    eng = AkaiEngine(binary)
+    eng.open([images["dd"]])
+    try:
+        part = _dd_partition(eng)
+        take = eng.list_takes(part)[0]
+        for call in (lambda: eng.rename_take(part, take, "NOPE"), lambda: eng.delete_takes(part, [take])):
+            with pytest.raises(EngineError, match="Editing is switched off"):
+                call()
+    finally:
+        eng.close()

@@ -16,4 +16,4 @@ Things worth knowing:
 - `engine/api.py` is the seam for the planned move to a shared library (ctypes/cffi): a new engine just needs the same methods and return types. `parse.py` is the part that goes away.
 - akaiutil writes exports into *its own* working directory and can't take paths with spaces, so it runs in a scratch dir and Python moves the results to your chosen folder (asking before overwriting).
 - Names with spaces: akaiutil accepts `_` for ` ` on its command line, but the GUI avoids that ambiguity by addressing volumes and files by index (`cdi`, `geti`, …).
-- Not yet: DD takes (listed as text only), real floppy/physical-drive access.
+- Direct-to-disk takes are listed, exported, imported, renamed and deleted (`engine/api.py`, `takes.py`, `ui/take_table.py`; see [dd-takes-plan.md](dd-takes-plan.md)). Not yet: real floppy/physical-drive access.

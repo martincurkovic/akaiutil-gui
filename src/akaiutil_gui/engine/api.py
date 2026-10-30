@@ -22,8 +22,9 @@ from pathlib import Path
 
 from .. import akai_header, akai_names, describe, references, sorting, tags as filetags
 from ..audio import wavfile
+from ..formatting import human_size
 from . import formats, parse
-from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, PartitionCopy, SampleInfo, Take, Volume, VolumeCopy
+from .models import DD_CLUSTER_BYTES, Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, PartitionCopy, SampleInfo, Take, Volume, VolumeCopy, take_clusters
 from .session import EngineError, Session, TrafficCallback
 
 log = logging.getLogger(__name__)
@@ -642,6 +643,79 @@ class AkaiEngine:
                     failed.append(f"{f.name}: {e}")
         return failed
 
+    def import_take(self, part: Partition, local: str | os.PathLike, expect: tuple[int, int, int] | None = None) -> Take:
+        """Put one take into a direct-to-disk partition: a `.TK` file (`tput`), or a WAV (`wav2take`), which gives the take the
+        name of its file. `expect` is the WAV's (channels, sample rate, frames): the new take has to come out that way, or
+        it is deleted again and the import counts as failed. Checks there is room first, since akaiutil's only answer to a
+        full partition is "WAV import error". Returns the take that was added."""
+        local = Path(local)
+        is_tk = local.suffix.lower() == ".tk"
+        with self._lock:
+            log.info("import %s as a take into disk%d %s", local.name, part.disk, part.name)
+            self._need_writable()
+            session = self._need_session()
+            self._run(f"cd {part.path}")
+            before = {t.index for t in parse.parse_takes(self._run("dir").text)}
+            if is_tk:
+                need = local.stat().st_size // DD_CLUSTER_BYTES * DD_CLUSTER_BYTES
+            elif expect is not None:
+                need = take_clusters(expect[2], expect[0]) * DD_CLUSTER_BYTES
+            else:
+                need = take_clusters(local.stat().st_size // 2, 1) * DD_CLUSTER_BYTES
+            free = self._free_bytes(part)
+            if need > free:
+                raise EngineError(f"There isn't room for “{local.stem}”: it needs {human_size(need)} and the partition has {human_size(free)} free.")
+            _clear_dir(session.staging_dir)
+            # akaiutil reads a file from its own working directory, and takes '_' on the command line for a space in its name
+            shutil.copyfile(local, session.staging_dir / local.name)
+            text = self._run(f"{'tput' if is_tk else 'wav2take'} {akai_names.command_token(local.name)}", timeout=600).text
+            _clear_dir(session.staging_dir)
+            added = [t for t in parse.parse_takes(self._run("dir").text) if t.index not in before]
+            if len(added) != 1:
+                said = " ".join(ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("importing"))
+                raise EngineError(said or "akaiutil didn't add a take.")
+            take = added[0]
+            if expect is not None and (take.channels, take.rate, take.frames) != expect:
+                self._write(f"tdeli {take.index}")  # (leave the disk as it was)
+                raise EngineError(f"akaiutil stored “{local.stem}” differently from the file (a take of {take.channels} channel(s), {take.rate:,} Hz, {take.frames:,} frames, for a file of {expect[0]}, {expect[1]:,} Hz, {expect[2]:,}), so it was taken out again.")
+            return take
+
+    def rename_take(self, part: Partition, take: Take, new_name: str) -> Take:
+        """Give a take a new name. Two takes can share a name, so the take is found by its number (and has to still have the old name)."""
+        base, problem = akai_names.check_name(new_name)
+        if problem:
+            raise EngineError(problem)
+        with self._lock:
+            log.info("rename take %d %s in disk%d %s -> %s", take.index, take.name, part.disk, part.name, new_name)
+            self._need_writable()
+            self._run(f"cd {part.path}")
+            now = {t.index: t for t in parse.parse_takes(self._run("dir").text)}
+            if take.index not in now or now[take.index].name != take.name:
+                raise EngineError(f"“{take.name}” isn't take {take.index} any more.")
+            self._write(f"treni {take.index} {akai_names.command_token(base)}")
+            renamed = next((t for t in parse.parse_takes(self._run("dir").text) if t.index == take.index), None)
+            if renamed is None or not akai_names.same_name(renamed.name, base):
+                raise EngineError(f"akaiutil didn't rename “{take.name}”.")
+            return renamed
+
+    def delete_takes(self, part: Partition, takes: list[Take]) -> list[str]:
+        """Delete takes. Returns "NAME: reason" for each one that couldn't be."""
+        failed = []
+        with self._lock:
+            log.info("delete %d take(s) from disk%d %s: %s", len(takes), part.disk, part.name, ", ".join(t.name for t in takes[:10]) + (" …" if len(takes) > 10 else ""))
+            self._need_writable()
+            self._run(f"cd {part.path}")
+            present = {t.index: t.name for t in parse.parse_takes(self._run("dir").text)}
+            for t in takes:
+                if present.get(t.index) != t.name:
+                    failed.append(f"{t.name}: it isn't take {t.index} any more")
+                    continue
+                try:
+                    self._write(f"tdeli {t.index}")
+                except EngineError as e:
+                    failed.append(f"{t.name}: {e}")
+        return failed
+
     def sort_files(self, vol: Volume, scope: str = sorting.ALL) -> int:
         """Put the files of a volume in alphabetical order by moving them between slots (the order a sampler lists them in).
         `scope` is sorting.ALL, or sorting.SAMPLES to leave everything but the samples where it is. Returns how many moved.
@@ -838,6 +912,12 @@ class AkaiEngine:
         text = self._run(command, timeout).text.strip()
         if text:
             raise EngineError(text)
+
+    def _free_bytes(self, part: Partition) -> int:
+        """What is free in a partition right now (the Partition we were handed may be from before the last change)."""
+        text = self._run(f"dir /disk{part.disk}").text
+        now = next((p for p in parse.parse_partitions(text, part.disk, part.block_size) if p.name == part.name), None)
+        return (now or part).free_bytes
 
     def _volumes_at(self, disk: int, partition: str) -> list[Volume]:
         return parse.parse_volumes(self._run(f"dir /disk{disk}/{partition}").text, disk, partition)

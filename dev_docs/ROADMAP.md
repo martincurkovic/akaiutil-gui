@@ -22,8 +22,8 @@ None of this could be checked by the test runs, which use a fake audio device, o
 - [ ] **OS boot floppies** (File > Create OS Boot Floppy…, from a `.COD` or a saved `.C`): boot an S2000 from one, as an image on a Gotek
       or as HFE. Written to match what OSMaker's code writes, never compared with a disk OSMaker made. Also unknown: whether a
       `.COD` loads as it is or the sampler wants the `.C` form, and whether the model tag, label or file name matter. See [os-floppy.md](os-floppy.md).
-- [ ] **DD takes** (once built, see [dd-takes-plan.md](dd-takes-plan.md)): only akaiutil-made takes have been read so far. Needs a
-      hard-disk image with takes recorded on an S1100/S3000, and a real sampler loading what the app imported.
+- [ ] **DD takes** (built, see [dd-takes-plan.md](dd-takes-plan.md)): only akaiutil-made takes have been read, exported and imported so
+      far. Needs a hard-disk image with takes recorded on an S1100/S3000, and a real sampler loading what the app imported or renamed.
 
 ## Next
 
@@ -31,10 +31,10 @@ None of this could be checked by the test runs, which use a fake audio device, o
    the written files with other software and a real sampler/Gotek, and v3 files. Low- and high-density disks both work, tested on about 1,100 real files, and the encoder reproduces HxC's own files byte for byte (blank S900/S950 disks, and the S900 OS disk with real data). Damaged HFEs open read-only and name the files they hit; File > Save Repaired Copy… fixes them in a new file (all 8 sectors of the three real damaged disks), with an optional, warned-about rewrite of what can't be fixed. Not yet tried on a real sampler. See [hfe-plan.md](hfe-plan.md).
 1. **Open an SD card / physical drive directly.** akaiutil can open raw devices. Needs OS permissions per platform and safety
    rails against picking the wrong disk; start read-only, add editing later.
-2. **Direct-to-disk takes** (S1100/S3000 recordings): list, export as WAV or `.TK`, import, rename, delete. akaiutil has all of it;
-   the GUI shows a DD partition's takes as text only. Plan, rules akaiutil won't enforce (a 96 kHz WAV is silently stored as
-   30,464 Hz) and what is waiting on a real image: [dd-takes-plan.md](dd-takes-plan.md). Estimated 3 to 5 days (2 for list + export
-   only); no public image exists, so one has to be asked for from an S1100/S3000 owner (the plan says what to ask for).
+2. **Direct-to-disk takes** (S1100/S3000 recordings): listing, settings, export (WAV or `.TK`), import, rename and delete are built
+   (2026-10-30). What's left: a manual page, drag-out, resampling a too-fast file instead of refusing it, and checking all of it against
+   a real recording. Details and the rules akaiutil won't enforce (a 96 kHz WAV is silently stored as 30,464 Hz): [dd-takes-plan.md](dd-takes-plan.md).
+   No public image exists, so one has to be asked for from an S1100/S3000 owner (the plan says what to ask for).
 3. **Multis.** akaiutil only prints "S3000 multi" for one, so showing its parts means reading the file's bytes ourselves, which
    needs the format. A multi names programs, so it would also allow "programs no multi uses".
 4. **Copy a whole partition to a file and back** (`pget`/`pput`). Partition to partition is done (Copy Partition To…); it is not checked on a real sampler.
