@@ -1,7 +1,8 @@
 # Direct-to-disk (DD) takes: plan
 
-Written 2026-10-30. Nothing here is built yet. Today a DD partition shows in the tree and selecting it prints akaiutil's `dir`
-text (`engine.list_takes_text`, `describe.describe_takes`, called from `main_window.py`); there are no rows, no export, no import.
+Written 2026-10-30. **Built so far (2026-10-30): phases 0 and 1** (the test image, and the read-only take list and details). There is no
+export, import, rename or delete yet. Selecting a DD partition shows its takes in a table with each take's settings in the details pane;
+the partition's own text (`engine.list_takes_text`) still shows when no take is selected.
 
 A DD take is a recording made by an S1100 or S3000 straight to a hard disk. akaiutil already has every command needed; the work
 is parsing, a take table, and the checks around import. What akaiutil does, as measured, is in
@@ -49,12 +50,16 @@ The export/import mechanics are the same as for samples (akaiutil's own working 
 
 ## Phases
 
-### 0. Fixture (small)
+### 0. Fixture (small) — done
 - `tests/imagegen.py`: add a `dd` image: a 10 MB file, `formatharddisk3 2M 4M` (**the second size must be smaller than the file**,
   or no DD partition is made), then `cd /disk0/DD` and `wav2take` a mono and a stereo WAV. Leave room for a few more takes.
 - Tests that need it skip without akaiutil, like the rest.
 
-### 1. Parse and show (small)
+### 1. Parse and show (small) — done
+
+Built as: `Take` in `engine/models.py`, `parse.parse_takes` (`dir` table, split on akaiutil's own printf widths), `AkaiEngine.list_takes` / `take_info`,
+`describe.describe_take` (Take / Playback / Output / Technical), `ui/take_table.py` (a sibling of `FileTable`, swapped in by
+`MainWindow._show_takes`). Tests: `tests/test_dd_takes.py`, `test_parse.py`, `test_gui_takes.py`. The plan text below is what was intended.
 - `engine/parse.py`: `parse_takes(text)` for the `dir` table. Names contain spaces (`LONG NAME TE`) and are padded, so split from
   the right (the last seven columns are fixed-format), not on whitespace. A `Take` model in `engine/models.py`.
 - `AkaiEngine.list_takes(part)` next to `list_takes_text`; keep the text version for the details pane until it is replaced.

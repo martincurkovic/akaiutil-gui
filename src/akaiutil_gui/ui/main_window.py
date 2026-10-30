@@ -60,6 +60,7 @@ from akaiutil_gui.engine.models import (
     ExportResult,
     FileEntry,
     Partition,
+    Take,
     Volume,
 )
 
@@ -74,6 +75,7 @@ from .preview_panel import PreviewPanel
 from .settings_dialog import SettingsDialog
 from .splitter import Splitter
 from .file_table import FileTable
+from .take_table import TakeTable
 from .tasks import run_async
 from .update_helper import CHECK_INTERVAL_SECONDS, UpdateCheckRunner
 from .usage_bar import UsageSummary
@@ -212,6 +214,7 @@ class MainWindow(QMainWindow):
         self._info_current = 0
         self._volume_token = 0  # the request for the selected volume's own details
         self._files_token = 0
+        self._dd_partition: Partition | None = None  # the selected direct-to-disk partition, whose takes the take table shows
         self._usage_token = 0
         self._usage_cache: dict[
             int, DiskUsage
@@ -313,6 +316,10 @@ class MainWindow(QMainWindow):
             max(w.sizeHint().height() for w in (self.search, self.search_kind))
         )
         tv.addWidget(self.table)
+        self.takes = TakeTable()  # stands in for the file table while a direct-to-disk partition is selected
+        self.takes.hide()
+        self.takes.selectionTakesChanged.connect(self._on_takes_selected)
+        tv.addWidget(self.takes)
         self.preview = PreviewPanel()
         self.preview.hide()  # appears when a single sample is selected (below the details, which shrink to make room)
         QGuiApplication.instance().focusWindowChanged.connect(self._on_focus_window)
@@ -1119,6 +1126,9 @@ class MainWindow(QMainWindow):
 
     def _reset_views(self) -> None:
         self._volume = None
+        self._dd_partition = None
+        self.takes.clear_takes()
+        self._show_takes(False)
         self._volume_details = None
         self._info_current = 0
         self._files_token += 1
@@ -1364,6 +1374,7 @@ class MainWindow(QMainWindow):
             self._catalog, query, self.search_kind.currentData()
         )
         self._in_results = True
+        self._show_takes(False)  # (results are files, wherever the selection is)
         self.table.set_results(results)
         what = f"“{query}”" if query else self.search_kind.currentText().lower()
         title = f"{len(results):,}{'+' if truncated else ''} result{'s' if len(results) != 1 else ''} for {what}"
@@ -1379,6 +1390,7 @@ class MainWindow(QMainWindow):
 
     def _leave_search(self) -> None:
         """Back to the selected volume's files."""
+        self._show_takes(self._dd_partition is not None)
         if not self._in_results:
             self.files_title.setText(self._files_title_text)
             return
@@ -1424,6 +1436,10 @@ class MainWindow(QMainWindow):
         self._volume_files = []
         self._reset_search_ui()  # picking something in the tree ends a search
         self.table.clear_files()
+        self._dd_partition = None  # (before the clear: nothing is selected in a table that is being emptied)
+        self.takes.clear_takes()
+        self._dd_partition = obj if isinstance(obj, Partition) and obj.is_dd else None
+        self._show_takes(self._dd_partition is not None)
         engine = self._engine
         if engine is None or obj is None:
             self._set_files_title("Files")
@@ -1453,15 +1469,16 @@ class MainWindow(QMainWindow):
                 lambda: engine.volume_info(obj), volume_details, remember=True
             )
         elif isinstance(obj, Partition):
-            self._set_files_title("Select a volume to see its files")
             if obj.is_dd:
-                self._show_info(
-                    lambda: engine.list_takes_text(obj),
-                    lambda t: describe.describe_takes(
-                        f"Direct-to-disk area {obj.name}", t
-                    ),
+                self._set_files_title(f"Takes in {obj.path}")
+                self._show_dd_details()
+                token = self._files_token
+                self._run(
+                    lambda: engine.list_takes(obj),
+                    lambda takes: self._takes_loaded(token, takes),
                 )
             else:
+                self._set_files_title("Select a volume to see its files")
                 self._show_info(
                     lambda: engine.partition_info(obj), describe.describe_partition
                 )
@@ -1497,6 +1514,37 @@ class MainWindow(QMainWindow):
         ) == (vol.disk, vol.partition, vol.index):
             self._pending_reveal = None
             self.table.select_file(self._volume, file_index)
+
+    def _show_takes(self, show: bool) -> None:
+        """The take table or the file table: a direct-to-disk partition holds takes, everything else files."""
+        self.takes.setVisible(show)
+        self.table.setVisible(not show)
+
+    def _show_dd_details(self) -> None:
+        engine, part = self._engine, self._dd_partition
+        if engine is None or part is None:
+            return
+        self._show_info(
+            lambda: engine.list_takes_text(part),
+            lambda t: describe.describe_takes(f"Direct-to-disk area {part.name}", t),
+        )
+
+    def _takes_loaded(self, token: int, takes: list[Take]) -> None:
+        if token != self._files_token:
+            return
+        self.takes.blockSignals(True)  # (nothing is selected yet, and the partition's details are already showing)
+        self.takes.set_takes(takes)
+        self.takes.blockSignals(False)
+
+    def _on_takes_selected(self, takes: list[Take]) -> None:
+        engine, part = self._engine, self._dd_partition
+        if engine is None or part is None:
+            return
+        if len(takes) == 1:
+            take = takes[0]
+            self._show_info(lambda: engine.take_info(part, take), lambda text: describe.describe_take(text, take))
+        else:
+            self._show_dd_details()  # nothing selected (or several): back to the partition's own details
 
     def _set_files_title(self, text: str) -> None:
         self._files_title_text = text

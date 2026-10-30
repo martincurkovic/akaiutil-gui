@@ -19,11 +19,11 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .engine.models import DiskUsage, FileEntry, Loop, SampleInfo
+from .engine.models import DiskUsage, FileEntry, Loop, SampleInfo, Take
 
 if TYPE_CHECKING:
     from .references import VolumeReferences
-from .formatting import human_size, note_name, panel_os_version, percent, plural
+from .formatting import human_duration, human_size, note_name, panel_os_version, percent, plural
 
 
 # ------------------------------------------------------------------ the result
@@ -647,6 +647,62 @@ def describe_volume(text: str, usage: DiskUsage | None = None, refs: "VolumeRefe
 def describe_takes(title: str, text: str) -> Details:
     """Direct-to-disk partitions: akaiutil's list of takes, as printed."""
     return Details(title=title, blocks=[Block("Takes", text=text.strip("\n"))], raw=text)
+
+
+def describe_take(text: str, take: Take) -> Details:
+    """One direct-to-disk take, from akaiutil's `tinfoi`. The list gave the size and rate; this adds its settings."""
+    _path, root, _other = parse_info(text)
+    midi_note = _num(root.get("midinote")) if root.has("midinote") else None
+    blocks = [
+        Block(
+            "Take",
+            _rows(
+                ("Type", "Stereo" if take.stereo else "Mono"),
+                ("Sample rate", f"{take.rate:,} Hz"),
+                ("Length", human_duration(take.seconds)),
+                ("Audio", _size_text(take.audio_bytes)),
+                ("Space used on disk", human_size(take.disk_bytes)),
+            ),
+        ),
+        Block(
+            "Playback",
+            _rows(
+                ("Start mode", root.get("startm")),
+                ("MIDI channel", _midi_channel(root.get("midich")) if root.has("midich") else None),
+                ("MIDI note", f"{note_name(midi_note)}  (MIDI {midi_note})" if midi_note is not None else None),
+                ("Fade in", root.get("fadein")),
+                ("Fade out", root.get("fadeout")),
+                ("Pre-delay", f"{root.get('predel')} ms" if root.has("predel") else None),
+                ("De-emphasis", root.get("deemph")),
+                ("Varispeed", root.get("vspeed")),
+                ("Fine rate", root.get("finerate")),
+            ),
+        ),
+        Block(
+            "Output",
+            _rows(
+                ("Stereo level", root.get("stlvl")),
+                ("Pan", root.get("pan")),
+                ("Stereo mix", root.get("stmix")),
+                ("Output level", root.get("outlvl")),
+                ("Output", root.get("outch")),
+                ("FX bus", root.get("fxbus")),
+                ("Send level", root.get("sendlvl")),
+            ),
+        ),
+        Block(
+            "Technical",
+            _rows(
+                ("Take number", str(take.index)),
+                ("Sample clusters", f"{take.sample_clusters:,}  ({root.get('cstarts')})" if root.has("cstarts") else None),
+                ("Envelope clusters", f"{take.envelope_clusters:,}  ({root.get('cstarte')})" if root.has("cstarte") else None),
+                ("Start / end (words)", f"{root.get('wstart')} – {root.get('wend')}" if root.has("wstart") else None),
+                ("Edit markers (words)", f"{root.get('wstartm')} – {root.get('wendm')}" if root.has("wstartm") else None),
+            ),
+            muted=True,
+        ),
+    ]
+    return Details(title=take.name, subtitle=f"Direct-to-disk take {take.index}", blocks=[b for b in blocks if b.rows], raw=text)
 
 
 # ------------------------------------------------------------------ sample data

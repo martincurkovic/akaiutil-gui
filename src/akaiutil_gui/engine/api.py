@@ -23,7 +23,7 @@ from pathlib import Path
 from .. import akai_header, akai_names, describe, references, sorting, tags as filetags
 from ..audio import wavfile
 from . import formats, parse
-from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, PartitionCopy, SampleInfo, Volume, VolumeCopy
+from .models import Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, PartitionCopy, SampleInfo, Take, Volume, VolumeCopy
 from .session import EngineError, Session, TrafficCallback
 
 log = logging.getLogger(__name__)
@@ -124,10 +124,19 @@ class AkaiEngine:
             return DiskUsage(disk, partitions, volumes, catalog)
 
     def list_takes_text(self, part: Partition) -> str:
-        """DD (direct-to-disk) partitions list takes, not files; the proof of
-        concept just shows akaiutil's own text for them."""
+        """DD (direct-to-disk) partitions list takes, not files; this is akaiutil's own text for them."""
         with self._lock:
             return self._run(f"dir {part.path}").text.strip("\n")
+
+    def list_takes(self, part: Partition) -> list[Take]:
+        with self._lock:
+            return parse.parse_takes(self._run(f"dir {part.path}").text)
+
+    def take_info(self, part: Partition, take: Take) -> str:
+        """akaiutil's `tinfoi` for one take (it only works from inside the DD partition)."""
+        with self._lock:
+            self._run(f"cd {part.path}")
+            return self._run(f"tinfoi {take.index}").text.strip("\n")
 
     # ----------------------------------------------------------------- info
     def disk_info(self, disk: Disk) -> str:

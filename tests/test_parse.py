@@ -181,3 +181,40 @@ def test_dirrec_gives_volume_sizes_in_whole_blocks():
         ("MY SYNTH", 3, "LEAD.S3"),
     ]
     assert catalog[0].volume.path == "/disk0/A/DRUMS" and catalog[0].file.index == 1
+
+
+TAKES = """
+/disk0/DD
+tnr  tname         cstarts cstarte csizes  csizee     scount  srate  stype
+---------------------------------------------------------------------------
+  1  RENAMED       0x0001  0x0002  0x0001  0x0001      44100  44100  MONO  
+  2  MONO          0x0003  0x0004  0x0001  0x0001      44100  44100  MONO  
+  3  S48           0x0005  0x0006  0x0001  0x0001      96000  48000  STEREO
+  6  R96           0x000b  0x000c  0x0001  0x0001      96000  30464  MONO  
+  8  LONG NAME TE  0x000f  0x0010  0x0001  0x0001      44100  44100  MONO  
+ 11  ST10          0x0001  0x0013  0x0008  0x0001     960000  48000  STEREO
+---------------------------------------------------------------------------
+total:   6 take(s)
+
+"""
+
+
+def test_takes():
+    takes = parse.parse_takes(TAKES)
+    assert [(t.index, t.name, t.rate, t.stereo) for t in takes] == [
+        (1, "RENAMED", 44100, False),
+        (2, "MONO", 44100, False),
+        (3, "S48", 48000, True),
+        (6, "R96", 30464, False),
+        (8, "LONG NAME TE", 44100, False),  # spaces in a name; a take can have numbers that skip (deleted ones)
+        (11, "ST10", 48000, True),
+    ]
+    s48, st10 = takes[2], takes[5]
+    assert (s48.words, s48.frames, s48.seconds, s48.channels) == (96000, 48000, 1.0, 2)  # a stereo take counts both channels
+    assert (st10.sample_clusters, st10.envelope_clusters) == (8, 1)
+    assert st10.audio_bytes == 1920000 and st10.disk_bytes == 9 * 262144
+
+
+def test_takes_in_an_empty_partition():
+    text = TAKES.split("tnr")[0] + "tnr  tname\n" + "-" * 75 + "\n" + "-" * 75 + "\ntotal:   0 take(s)\n"
+    assert parse.parse_takes(text) == []

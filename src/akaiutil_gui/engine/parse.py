@@ -9,7 +9,7 @@ exact text. A ctypes/cffi engine would make this module disappear.
 import math
 import re
 
-from .models import CatalogEntry, Disk, FileEntry, Partition, Volume, VolumeUsage
+from .models import CatalogEntry, Disk, FileEntry, Partition, Take, Volume, VolumeUsage
 
 _HEX = r"0x[0-9a-fA-F]+"
 
@@ -34,6 +34,13 @@ def _table_rows(text: str):
             continue
         if inside:
             yield line
+
+
+# akai_ddtake_info(): "  1  MONO          0x0001  0x0002  0x0001  0x0001      44100  44100  MONO  "
+# (printf "%3u  %-12s  0x%04x  0x%04x  0x%04x  0x%04x  %9u  %5u  %s": the name is 12 wide and may hold spaces)
+_TAKE_RE = re.compile(
+    rf"^\s*(\d+)  (.{{12}})  {_HEX}  {_HEX}  ({_HEX})  ({_HEX})  +(\d+)  +(\d+)  (MONO|STEREO)\s*$"
+)
 
 
 def parse_disks(text: str) -> list[Disk]:
@@ -200,3 +207,24 @@ def split_infoall(text: str) -> dict[int, str]:
         if number.isdigit():
             blocks[int(number)] = block
     return blocks
+
+
+def parse_takes(text: str) -> list[Take]:
+    """The takes in a direct-to-disk partition's `dir`."""
+    takes = []
+    for line in _table_rows(text):
+        m = _TAKE_RE.match(line)
+        if m:
+            index, name, csizes, csizee, words, rate, stype = m.groups()
+            takes.append(
+                Take(
+                    index=int(index),
+                    name=name.rstrip(),
+                    sample_clusters=int(csizes, 16),
+                    envelope_clusters=int(csizee, 16),
+                    words=int(words),
+                    rate=int(rate),
+                    stereo=stype == "STEREO",
+                )
+            )
+    return takes

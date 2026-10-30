@@ -63,6 +63,43 @@ class Partition:
         return self.size_bytes - self.free_bytes
 
 
+DD_CLUSTER_BYTES = 262144  # one cluster of a direct-to-disk partition (akaiutil prints "csizes 0x0001 clusters (262144 bytes)")
+
+
+@dataclass(frozen=True)
+class Take:
+    """One direct-to-disk take, as `dir` lists it inside a DD partition."""
+
+    index: int  # 1-based "tnr" column, usable with `tinfoi` / `take2wavi` / `tgeti`
+    name: str  # up to 12 characters; two takes can have the same name, so go by the index
+    sample_clusters: int
+    envelope_clusters: int
+    words: int  # 16-bit words of audio ("scount"): a stereo take counts both channels
+    rate: int  # Hz
+    stereo: bool
+
+    @property
+    def channels(self) -> int:
+        return 2 if self.stereo else 1
+
+    @property
+    def frames(self) -> int:
+        return self.words // self.channels
+
+    @property
+    def seconds(self) -> float:
+        return self.frames / self.rate if self.rate else 0.0
+
+    @property
+    def audio_bytes(self) -> int:
+        return self.words * 2
+
+    @property
+    def disk_bytes(self) -> int:
+        """What the take occupies in the DD partition: whole clusters, the envelope's too."""
+        return (self.sample_clusters + self.envelope_clusters) * DD_CLUSTER_BYTES
+
+
 @dataclass(frozen=True)
 class Volume:
     disk: int
