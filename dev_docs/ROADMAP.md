@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated 2026-10-29. Current status of the app is in the
+Last updated 2026-10-30. Current status of the app is in the
 [README](../README.md) and the manual.
 
 ## Verification debt
@@ -22,6 +22,8 @@ None of this could be checked by the test runs, which use a fake audio device, o
 - [ ] **OS boot floppies** (File > Create OS Boot Floppy…, from a `.COD` or a saved `.C`): boot an S2000 from one, as an image on a Gotek
       or as HFE. Written to match what OSMaker's code writes, never compared with a disk OSMaker made. Also unknown: whether a
       `.COD` loads as it is or the sampler wants the `.C` form, and whether the model tag, label or file name matter. See [os-floppy.md](os-floppy.md).
+- [ ] **DD takes** (once built, see [dd-takes-plan.md](dd-takes-plan.md)): only akaiutil-made takes have been read so far. Needs a
+      hard-disk image with takes recorded on an S1100/S3000, and a real sampler loading what the app imported.
 
 ## Next
 
@@ -29,15 +31,19 @@ None of this could be checked by the test runs, which use a fake audio device, o
    the written files with other software and a real sampler/Gotek, and v3 files. Low- and high-density disks both work, tested on about 1,100 real files, and the encoder reproduces HxC's own files byte for byte (blank S900/S950 disks, and the S900 OS disk with real data). Damaged HFEs open read-only and name the files they hit; File > Save Repaired Copy… fixes them in a new file (all 8 sectors of the three real damaged disks), with an optional, warned-about rewrite of what can't be fixed. Not yet tried on a real sampler. See [hfe-plan.md](hfe-plan.md).
 1. **Open an SD card / physical drive directly.** akaiutil can open raw devices. Needs OS permissions per platform and safety
    rails against picking the wrong disk; start read-only, add editing later.
-2. **Multis.** akaiutil only prints "S3000 multi" for one, so showing its parts means reading the file's bytes ourselves, which
+2. **Direct-to-disk takes** (S1100/S3000 recordings): list, export as WAV or `.TK`, import, rename, delete. akaiutil has all of it;
+   the GUI shows a DD partition's takes as text only. Plan, rules akaiutil won't enforce (a 96 kHz WAV is silently stored as
+   30,464 Hz) and what is waiting on a real image: [dd-takes-plan.md](dd-takes-plan.md). Estimated 3 to 5 days (2 for list + export
+   only); no public image exists, so one has to be asked for from an S1100/S3000 owner (the plan says what to ask for).
+3. **Multis.** akaiutil only prints "S3000 multi" for one, so showing its parts means reading the file's bytes ourselves, which
    needs the format. A multi names programs, so it would also allow "programs no multi uses".
-3. **Copy a whole partition to a file and back** (`pget`/`pput`). Partition to partition is done (Copy Partition To…); it is not checked on a real sampler.
-4. **Editing tags** (setting, clearing, renaming a partition's tag names). Showing them and keeping them on copy are done.
+4. **Copy a whole partition to a file and back** (`pget`/`pput`). Partition to partition is done (Copy Partition To…); it is not checked on a real sampler.
+5. **Editing tags** (setting, clearing, renaming a partition's tag names). Showing them and keeping them on copy are done.
    akaiutil's `settagi` & co crash (see akaiutil-notes.md), so editing means either patching akaiutil or rewriting a file's tags
    with the same tar trick (delete + import, which moves the file's slot), or `rentag` for the names.
-5. **Import polish:** AIFF loop points (INST + MARK chunks: the end-marker convention needs checking), fade in/out, a pitch
+6. **Import polish:** AIFF loop points (INST + MARK chunks: the end-marker convention needs checking), fade in/out, a pitch
    fraction from `smpl`, per-file overrides in the import dialog, a progress dialog for big batches.
-6. **ctypes/cffi engine** to replace the subprocess and the text parsing in `engine/parse.py`. `engine/api.py` is the seam
+7. **ctypes/cffi engine** to replace the subprocess and the text parsing in `engine/parse.py`. `engine/api.py` is the seam
    (see [ARCHITECTURE.md](ARCHITECTURE.md)). Worth doing once the feature set settles: it removes the restart-on-add/close and the text fragility.
 
 ## Converting files between samplers
@@ -61,6 +67,12 @@ How it would fit: the question in `main_window._ask_add_anyway` and the import d
 for the pairs above, with a one-line list of what changes. The pair table goes next to `importing.sampler_mismatch`. The
 conversion itself should be Qt-free and tested against the real akaiutil, like the sample-settings edit. The sampler
 verification debt above comes first: it tells us whether most users need the conversion at all or are content with Add Anyway.
+
+## Blocked on hardware
+
+- **Effects files (`.X`) editing.** akaiutil only knows the type and name; the contents are undocumented and nobody here has an
+  S1100/S3000 with an effects board to measure one. What is known, the 7,312-byte vs 2 x 51 x 128-byte puzzle and how someone with
+  the hardware could map it: [fx-files.md](fx-files.md). An S1000 has no effects.
 
 ## Known limitations
 

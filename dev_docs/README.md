@@ -5,6 +5,8 @@ Notes for whoever works on akaiutil-GUI next (usually future me).
 - [ARCHITECTURE.md](ARCHITECTURE.md): how the app talks to akaiutil and how the code is laid out.
 - [ROADMAP.md](ROADMAP.md): what's next, what hasn't been verified by hand, and the known limits.
 - [program-editor-plan.md](program-editor-plan.md): plan for editing programs and keygroups in disk images, and sharing code with AKAISDS.
+- [dd-takes-plan.md](dd-takes-plan.md): plan for showing, exporting and importing direct-to-disk takes (akaiutil already does the work; measured on akaiutil-made images, no real recording seen yet).
+- [fx-files.md](fx-files.md): what is known about `.X` effects files (little), and what someone with an S1100/S3000 would need to do to map them.
 - [hfe-plan.md](hfe-plan.md): plan and findings for opening and saving `.hfe` floppy images by converting to and from a flat image (built: `hfe.py` is the codec, `hfe_work.py` the working copies; what's unchecked is listed there).
 - [os-floppy.md](os-floppy.md): what OSMaker writes for an OS boot floppy (read from its code), for making one from a `.COD`; not built yet.
 - [system6-theme.md](system6-theme.md): the Macintosh System 6 theme (ported from JV Studio): what exists and what is left to look at.

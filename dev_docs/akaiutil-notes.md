@@ -128,3 +128,36 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
 - `dir` of a volume has a `(max. N)` volume limit; a floppy holds one volume.
 - `reni <idx> /disk0/A/VOL_NAME/NEW_NAME.S3` moves between volumes of one partition.
 - `updateuncompri` recomputes the uncompressed size of a compressed S900 file.
+
+## Direct-to-disk (DD) takes (measured 2026-10-30 on akaiutil-made images, akaiutil 4.6.8; no real sampler recording seen yet)
+Plan: [dd-takes-plan.md](dd-takes-plan.md). Everything below was tried on throwaway images in the scratchpad, with takes made by
+`wav2take` from sine and noise WAVs.
+- **Making a DD partition:** `formatharddisk3 <part> <total>`. The DD partition is what is left of the *file* after `<total>`, so
+  `<total>` must be smaller than the image: a 100 MB image with `formatharddisk3 10M 40M` gives A-D (10 MB each) and `DD` (59.8 MB).
+  `formatharddisk3 5M` or `15M 100M` gives none (the leftover became another HD partition, or nothing). `tests/imagegen.py` has no DD
+  image yet. `engine.list_partitions` already reports it (`is_dd` true) and `list_takes_text` returns its `dir`.
+- **Commands** (all need `cd /diskN/DD`; elsewhere "must be inside a DD partition"): `dir` (table), `tinfoi <n>` / `tinfoall`
+  (key: value lines), `take2wavi <n>` / `take2wavall`, `tgeti <n>` / `tgetall` (a `.TK`), `wav2take <wav>` (`*.wav` for all), `tput <tk>`,
+  `treni <n> <name>`, `tdeli <n>`, `lstfati <n>` (cluster chain). Takes are 1 to 256.
+- **`dir` columns:** `tnr tname cstarts cstarte csizes csizee scount srate stype`. Names have spaces and are cut at 12, so parse
+  from the right. `scount` is in 16-bit words, so a stereo take counts both channels (one second of 44.1 kHz stereo is 88,200).
+- **Space:** a cluster is 262,144 bytes. A take is `ceil(scount*2/262144)` sample clusters plus 1 envelope cluster (still 1 for a
+  20 s take). A one-second mono take costs 512 KiB. A full partition answers "not enough space left / cannot allocate FAT chain for
+  sample / WAV import error", leaves no half take, and the free space afterwards is what it was (deleting a take gave back 0.5 MB).
+- **Import takes the first free slot** (it printed `importing "x" to take N`), so a delete followed by an import reuses the number.
+  Duplicate names are allowed (two takes called `MONO`); rename and delete go by number.
+- **Formats that imported:** 16-bit mono/stereo at 44.1 and 48 kHz, 8-bit mono 22.05 kHz, 24-bit stereo 44.1 kHz (stored rate = the WAV's).
+  Not checked: that the 8- and 24-bit audio was converted correctly (only the counts were looked at).
+- **Silent trap: the rate is stored in 16 bits.** A 96 kHz mono WAV imported without a message and showed `srate 30464`
+  (96000 mod 65536). The GUI has to refuse rates over 65,535 before calling `wav2take`.
+- **Defaults on import:** fade in 10 ms, fade out 50 ms, stereo level 99, pan 0, stereo mix ON, MIDI channel 16, note 60, start mode
+  `M.NOTE+DEL`, de-emphasis OFF, pre-delay 500, output level 50, output/FX bus OFF, send level 25.
+- **Export:** `take2wavi 2` wrote a stereo 44.1 kHz 16-bit WAV with all its frames, and a take whose chain was fragmented
+  (clusters 1, 2, 13...) came back **bit-identical** to the WAV it was made from. `tgeti 1` wrote `MONO.TK`, 524,352 bytes for
+  two clusters (64 more than the clusters; presumably a header, not read from the source), and `tput` of it recreated the take.
+  An unused take number answers "cannot export take to WAV".
+- Not checked: any take recorded by a sampler; long fragmented chains; 32-bit or float WAVs; several DD partitions on one disk.
+
+## Effects files (`.X`)
+akaiutil knows the type and the name and nothing else: no struct, no parser, no edit command. The format is undocumented anywhere
+found; see [fx-files.md](fx-files.md). The GUI lists, copies, renames and deletes them like any file.
