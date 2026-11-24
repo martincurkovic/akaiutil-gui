@@ -16,9 +16,9 @@ def test_palettes_have_same_keys():
 
 
 # ------------------------------------------------------------------ the Macintosh System 6 theme
-import re
+import re  # noqa: E402
 
-from akaiutil_gui import settings
+from akaiutil_gui import settings  # noqa: E402
 from test_gui_editing import delete_widgets  # noqa: E402,F401  (fixture: clears leftover widgets before the app-wide restyles below)
 
 
@@ -289,7 +289,6 @@ def test_system6_usage_bar_fills_partitions_in_black_not_in_warning_colours(qt_a
 
 
 def test_system6_selected_tree_row_draws_its_arrows_in_the_inverted_colour(qt_app, delete_widgets):
-    from PySide6.QtGui import QImage, QPainter
     from PySide6.QtWidgets import QTreeWidgetItem
 
     from akaiutil_gui.ui.disk_tree import DiskTree

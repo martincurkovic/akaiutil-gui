@@ -7,7 +7,7 @@ import time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox
+from PySide6.QtWidgets import QDialogButtonBox, QMessageBox
 
 from akaiutil_gui import settings
 from akaiutil_gui.engine import formats
@@ -417,7 +417,7 @@ def test_the_edit_keys_act_on_the_focused_pane(qt_app, window, editable_hd, answ
 
 
 def test_the_f2_and_delete_keys_are_wired_to_both_panes(qt_app, window, editable_hd):
-    from PySide6.QtGui import QKeySequence, QShortcut
+    from PySide6.QtGui import QShortcut
 
     for widget in (window.table, window.tree):
         keys = {s.key().toString() for s in widget.findChildren(QShortcut)}
@@ -996,7 +996,6 @@ def sample_dialog(root=60, loops=((3000, 4000),), frames=22050, audio=None):
 
 
 def test_the_sample_dialog_shows_the_settings_and_gives_them_back_unchanged(qt_app):
-    from akaiutil_gui import akai_header
 
     d = sample_dialog(root=60)
     assert (d.root.value(), d.root_name.text(), d.semitone.value(), d.cents.value()) == (60, "C3", 0, 0)
@@ -1239,7 +1238,6 @@ def preview_dialog(loops=((3000, 4000),), play_mode=0, audio=True):
 
     import numpy as np
 
-    from akaiutil_gui import akai_header
     from akaiutil_gui.ui import edit_dialogs
 
     base = sample_dialog(loops=loops)
@@ -1392,7 +1390,6 @@ def import_dialog_for(window_or_none=None, sources=3):
 
 
 def test_the_import_dialogs_widgets_never_overlap_even_when_shown_at_its_smallest(qt_app):
-    from PySide6.QtWidgets import QWidget
 
     d = import_dialog_for()
     d.show()

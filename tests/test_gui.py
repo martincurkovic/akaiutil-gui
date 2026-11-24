@@ -283,7 +283,10 @@ def test_partition_cells_are_filled_in_the_colour_of_how_full_they_are(app):
     img = bar.grab().toImage()
     a, b, _outside = bar.span_rects()
     mid = img.height() // 2
-    px = lambda x: img.pixelColor(int(x), mid).name()
+
+    def px(x):
+        return img.pixelColor(int(x), mid).name()
+
     assert px(a.left() + 3) == level_color(0.93).name()  # A: used part, in the critical colour
     assert px(a.right() - 4) == p["bg_disabled"]  # ...and its free tail is empty track
     assert px(b.left() + 3) == level_color(0.07).name()  # B: used part, blue
@@ -1303,7 +1306,6 @@ def test_a_column_can_be_hidden_and_shown_again_and_name_cannot_be_hidden(app, w
 
 def test_which_columns_are_hidden_and_how_wide_they_are_is_remembered(app, window):
     from akaiutil_gui import settings
-    from akaiutil_gui.ui import file_table
     from akaiutil_gui.ui.file_table import FileTable
 
     table = window.table

@@ -1,6 +1,5 @@
 """Importing audio and Akai files into volumes: the conversion, the naming, and the real akaiutil."""
 
-import struct
 from pathlib import Path
 
 import numpy as np

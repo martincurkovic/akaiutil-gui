@@ -115,7 +115,6 @@ def sample_settings_picture(app, window, work: Path, volume, name: str) -> None:
 
 def extra_pictures(app, window, work: Path, volume) -> None:
     """The start screen with some recent images, the Sample Settings dialog (with a loop switched on) and the backup question."""
-    from akaiutil_gui.audio.sample import load_wav
     from akaiutil_gui.ui.main_window import MainWindow
 
     home = (work / "home").resolve()

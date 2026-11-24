@@ -1,7 +1,6 @@
 """Repairing damaged HFE disks: damage is put into a good disk on purpose, so every kind can be checked against the original."""
 
 import random
-from pathlib import Path
 
 import pytest
 

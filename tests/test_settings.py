@@ -1,7 +1,6 @@
 """The Settings dialog and how the main window uses what it saves."""
 
 import time
-from pathlib import Path
 
 import pytest
 from PySide6.QtWidgets import QFileDialog, QPushButton
@@ -210,7 +209,6 @@ def test_backup_and_log_settings_have_defaults_and_keep_what_is_saved():
 
 
 def test_the_settings_dialog_shows_and_saves_the_backup_and_log_options(qt_app, monkeypatch):
-    from akaiutil_gui import logsetup
 
     shown = []
     monkeypatch.setattr(settings_dialog.reveal, "show_log_file", lambda: shown.append(1))

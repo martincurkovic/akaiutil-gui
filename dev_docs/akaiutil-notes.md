@@ -131,8 +131,13 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
 - It takes the sample header from an **extra chunk after the audio data**: `S1H ` / `S3H ` (150 / 192 bytes) for S1000 / S3000.
   That's how a WAV exported by `sample2wav` keeps its loops on the way back, and how the GUI sets loops and root note
   (`akai_header.py`, layout in its docstring). It trusts the header: the sample rate, end marker and loops must be right.
-- Chunk skipping in akaiutil's reader doesn't allow for the pad byte after an odd-sized chunk, so `audio/wavfile.py` writes a
-  clean WAV (fmt, data, header chunk) rather than appending to someone else's.
+- Chunk skipping in akaiutil 4.6.x's reader doesn't allow for the pad byte after an odd-sized chunk, so `audio/wavfile.py` writes a
+  clean WAV (fmt, data, header chunk) rather than appending to someone else's. **4.7 does allow for it** (measured 2026-11-24, 4.6.8 against 4.7, on generated
+  22,050 Hz files, `wav2sample` and `wav2take`; `tests/test_wav_padding.py`): an odd-sized chunk *before* the audio (a 7-byte `LIST`) is refused by 4.6.8 (`invalid file size`, `WAV import error`) and
+  imported by 4.7, mono, stereo and as a take; 8-bit audio of an odd length followed by an `S3H ` chunk is imported by both, but **4.6.8 read the `S3H ` from the wrong place and silently dropped its loop**
+  (loop count 0), where 4.7 keeps it; an odd chunk *after* the audio, and even-sized audio, were fine on both. What akaiutil exports (`sample2wav`, `take2wav`) is `fmt `, `data`, the `S3H `/`TKH ` chunk, all even-sized,
+  with a RIFF size of file size minus 8, so 4.7's new pad-byte writing never fires for real samples or takes (16-bit audio is always even and the header chunks are 150/192/64 bytes). The app still writes
+  its own clean WAVs: that is only needed for 4.6.x now.
 - A loop's `at` is its **last frame** and `len` how far back it starts, so a WAV `smpl` loop (start, last frame) maps directly.
   Time 9999 is HOLD.
 

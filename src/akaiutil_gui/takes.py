@@ -14,7 +14,7 @@ import soundfile
 
 from . import importing
 from .audio import wavfile
-from .engine.models import DD_CLUSTER_BYTES, Partition, take_clusters
+from .engine.models import DD_CLUSTER_BYTES, Partition
 from .engine.session import EngineError
 
 TAKE_EXTENSION = ".tk"

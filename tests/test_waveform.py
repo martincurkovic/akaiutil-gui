@@ -67,7 +67,6 @@ def wave(qt_app):
 
 
 def image(w):
-    qt_app = w.window()
     return w.grab().toImage()
 
 

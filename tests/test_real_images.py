@@ -149,7 +149,6 @@ def test_a_real_samples_settings_can_be_edited_and_everything_else_stays(binary,
     import dataclasses
     import shutil
 
-    from akaiutil_gui import akai_header
 
     image = next((p for p in REAL if "HD5" in p.name), None)
     if image is None:

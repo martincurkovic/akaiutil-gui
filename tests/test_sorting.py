@@ -102,12 +102,10 @@ def volume(eng, name="DRUMS"):
 
 def scramble(eng, vol, names):
     """Make `vol` hold copies of the DRUMS sample under these names, added in the order given."""
-    from akaiutil_gui import transfer
 
     drums = volume(eng, "DRUMS")
     kick = next(f for f in eng.list_files(drums) if f.name == "KICK.S3")
     for name in names:
-        base = name[:-3]
         eng.copy_file(drums, kick, vol, name)
     return [f.name for f in eng.list_files(vol)]
 

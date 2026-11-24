@@ -5,7 +5,6 @@ import shutil
 import pytest
 
 from akaiutil_gui import akai_names
-from akaiutil_gui.engine import parse
 from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.session import EngineError
 
@@ -65,7 +64,7 @@ def test_a_name_that_is_taken_is_refused_rather_than_merged_into(ed):
 
 def test_the_load_number_is_cleared_when_the_partition_already_uses_it(ed):
     v = vols(ed)
-    ed._run(f"cd /disk0/A")
+    ed._run("cd /disk0/A")
     ed._write(f"setlnumi {v['DRUMS'].index} 7")
     drums = vols(ed)["DRUMS"]
     assert drums.load_number == "007"
