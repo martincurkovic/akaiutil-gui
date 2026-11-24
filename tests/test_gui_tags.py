@@ -304,3 +304,86 @@ def test_the_partition_menu_offers_rename_tags_only_where_there_are_tags(qt_app,
     assert pump(qt_app, lambda: window._pending == 0)
     part = window._engine.list_partitions(window._engine.list_disks()[0])[0]  # (a floppy's one partition isn't shown in the tree)
     assert part.type.startswith("FL") and "Rename Tags…" not in texts(window._tree_menu(part))
+
+
+# --------------------------------------------------------------------------------- the tag filter
+@pytest.fixture
+def tagged_hd(binary, editable_hd):
+    """The editable image with KICK tagged 2 and SNARE tagged 2 and 5, and tag 2 named KICKS."""
+    eng = AkaiEngine(binary)
+    eng.open([editable_hd])
+    eng.set_writable(True)
+    try:
+        part = next(p for p in eng.list_partitions(eng.list_disks()[0]) if p.name == "A")
+        vol = next(v for v in eng.list_volumes(part) if v.name == "DRUMS")
+        files = {f.name: f for f in eng.list_files(vol)}
+        assert eng.change_file_tags(vol, [files["KICK.S3"], files["SNARE.S3"]], add=[2], remove=[]) == []
+        assert eng.change_file_tags(vol, [files["SNARE.S3"]], add=[5], remove=[]) == []
+        eng.rename_tags(part, {2: "KICKS"})
+    finally:
+        eng.close()
+    return editable_hd
+
+
+def test_the_tag_menu_lists_the_tags_in_use(qt_app, window, tagged_hd):
+    open_and_show(qt_app, window, tagged_hd)
+    assert pump(qt_app, lambda: window.search_tag.count() == 3)
+    assert [window.search_tag.itemText(i) for i in range(3)] == ["Any tag", "KICKS", "TAG E"]
+    assert window.search_tag.currentData() is None and not window._in_results
+
+
+def test_choosing_a_tag_shows_the_files_with_it_across_the_disks(qt_app, window, tagged_hd):
+    open_and_show(qt_app, window, tagged_hd)
+    assert pump(qt_app, lambda: window.search_tag.count() == 3)
+    window.search_tag.setCurrentIndex(window.search_tag.findData("TAG E"))
+    assert pump(qt_app, lambda: window._in_results and window.table.rowCount() == 1)
+    assert pump(qt_app, lambda: "1 result for tag TAG E" in window.files_title.text())
+    window.search_tag.setCurrentIndex(window.search_tag.findData("KICKS"))
+    assert pump(qt_app, lambda: window.table.rowCount() == 2 and "2 results for tag KICKS" in window.files_title.text())
+
+
+def test_the_tag_works_together_with_the_words_and_the_type(qt_app, window, tagged_hd):
+    open_and_show(qt_app, window, tagged_hd)
+    assert pump(qt_app, lambda: window.search_tag.count() == 3)
+    window.search.setText("snare")
+    window.search_tag.setCurrentIndex(window.search_tag.findData("KICKS"))
+    assert pump(qt_app, lambda: window.table.rowCount() == 1 and "with tag KICKS" in window.files_title.text())
+    window.search.setText("kick")
+    window.search_tag.setCurrentIndex(window.search_tag.findData("TAG E"))
+    assert pump(qt_app, lambda: window.table.rowCount() == 0)
+
+
+def test_escape_and_opening_a_result_clear_the_tag_too(qt_app, window, tagged_hd):
+    open_and_show(qt_app, window, tagged_hd)
+    assert pump(qt_app, lambda: window.search_tag.count() == 3)
+    window.search_tag.setCurrentIndex(window.search_tag.findData("KICKS"))
+    assert pump(qt_app, lambda: window._in_results)
+    window._escape_search()
+    assert pump(qt_app, lambda: not window._in_results)
+    assert window.search_tag.currentData() is None
+    window.search_tag.setCurrentIndex(window.search_tag.findData("KICKS"))
+    assert pump(qt_app, lambda: window._in_results and window.table.rowCount() == 2)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    window._activate_result()
+    assert pump(qt_app, lambda: not window._in_results and window.table.rowCount() == 2)
+    assert window.search_tag.currentData() is None
+
+
+def test_a_chosen_tag_survives_an_edit_that_reloads_the_disks(qt_app, window, tagged_hd, answers, asked_tags):
+    open_and_show(qt_app, window, tagged_hd)
+    assert pump(qt_app, lambda: window.search_tag.count() == 3)
+    window.search_tag.setCurrentIndex(window.search_tag.findData("TAG E"))
+    assert pump(qt_app, lambda: window._in_results and window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    answers.confirm = True
+    asked_tags.answer = ([], [5])  # (take the tag the filter is on off the only file that has it)
+    window._tag_selected()
+    assert pump(qt_app, lambda: "Changed the tags of 1 file." in window.statusBar().currentMessage())
+    assert pump(qt_app, lambda: window.table.rowCount() == 0 and window._in_results)  # nothing has it now; still looking at that tag
+    assert window.search_tag.currentData() == "TAG E"
+
+
+def test_the_tag_menu_is_off_without_images(qt_app, window):
+    assert not window.search_tag.isEnabled()

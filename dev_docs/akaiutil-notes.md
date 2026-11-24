@@ -77,6 +77,9 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   An S1000 floppy file accepts tags (there are no names for them: `lstags` is per partition). `rentag <n> <name>` renames a tag of the partition (capitals, `_` for a space).
   `settagall`/`clrtagall` act on the whole volume, so `engine.change_file_tags` uses the per-file commands (`settagi`/`clrtagi`), clears first, and checks the listing afterwards.
   It leaves OS files of S1000-and-older volumes alone: their four tag bytes hold the sampler model (os-floppy.md).
+- **`setfiltertag <n>` / `clrfiltertag <n|all>`** set a tag filter in the akaiutil *session* (shown by `lstags` as "filter tags"): `dir` (`akai_list_vol`) and the tar exports then list/export only files
+  carrying all of the filter tags (up to four; a file with S1000-style tag bytes matches only an empty filter). **The GUI doesn't use it**: it is state in the process, so one left set would hide files from every
+  later listing. The tag menu next to the search box filters in the GUI instead, from the tags the catalog already holds (`search.matches_tag`, matched by tag name).
 - **`rentag <n> <name>`** (all versions we looked at; measured 2026-11-24 on 4.7) renames tag *n* of the partition akaiutil is in, which must be at partition level
   (`cd /disk0/A`, not inside a volume), on a writable disk. The name is stored as an S1000/S3000 name (12 characters, capitals; `_` reads as a space), and a name needs at least one character
   because the command takes it as an argument, so a tag can't be blanked. `rentag 30 X` says `invalid volume index` (wrong wording). A partition that isn't `HD` says `no tags in this partition type`.

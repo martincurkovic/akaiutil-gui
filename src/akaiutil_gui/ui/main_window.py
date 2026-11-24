@@ -294,6 +294,12 @@ class MainWindow(QMainWindow):
         self.search_kind = QComboBox()
         for value, label in search.KINDS:
             self.search_kind.addItem(label, value)
+        self.search_tag = QComboBox()
+        self.search_tag.setToolTip("Only files with this tag (the tags in use on the open disks)")
+        self.search_tag.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.search_tag.setMinimumContentsLength(9)
+        self.search_tag.setMaximumWidth(170)
+        self._fill_search_tags([])
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(
@@ -304,9 +310,11 @@ class MainWindow(QMainWindow):
         self.search_kind.currentIndexChanged.connect(
             lambda _i: self._search_timer.start()
         )
+        self.search_tag.currentIndexChanged.connect(lambda _i: self._search_timer.start())
         header.addWidget(self.files_title, 1)
         header.addWidget(self.search)
         header.addWidget(self.search_kind)
+        header.addWidget(self.search_tag)
         # a line edit is shorter than the combo box beside it in some themes: give it the combo's height, again whenever the theme changes
         theme.notifier.changed.connect(lambda: QTimer.singleShot(0, self._match_search_height))
         QTimer.singleShot(0, self._match_search_height)
@@ -315,7 +323,7 @@ class MainWindow(QMainWindow):
         # left title the same height (the text stays vertically centred) so the tree and the file table start at
         # the same y.
         self.disks_title.setMinimumHeight(
-            max(w.sizeHint().height() for w in (self.search, self.search_kind))
+            max(w.sizeHint().height() for w in (self.search, self.search_kind, self.search_tag))
         )
         tv.addWidget(self.table)
         self.takes = TakeTable()  # stands in for the file table while a direct-to-disk partition is selected
@@ -702,6 +710,7 @@ class MainWindow(QMainWindow):
         )
         self.search.setEnabled(has_images)
         self.search_kind.setEnabled(has_images)
+        self.search_tag.setEnabled(has_images)
         self.act_export.setEnabled(can_export)
         self.act_export_wav.setEnabled(can_wav)
         self._update_edit_actions()
@@ -1335,7 +1344,21 @@ class MainWindow(QMainWindow):
         return (
             bool(self.search.text().strip())
             or self.search_kind.currentData() != search.ALL
+            or self.search_tag.currentData() is not None
         )
+
+    def _fill_search_tags(self, names: list[str]) -> None:
+        """The tag choices: any, then the tags in use. The one chosen stays on the list while no file has it (a disk reloading
+        after an edit has no files for a moment), and goes back to "any tag" only when the search is cleared."""
+        chosen = self.search_tag.currentData()
+        self.search_tag.blockSignals(True)
+        self.search_tag.clear()
+        self.search_tag.addItem("Any tag", None)
+        for name in sorted({*names, *([chosen] if chosen else [])}, key=str.casefold):
+            self.search_tag.addItem(name, name)
+        index = self.search_tag.findData(chosen) if chosen else 0
+        self.search_tag.setCurrentIndex(max(index, 0))
+        self.search_tag.blockSignals(False)
 
     def _reset_search_ui(self) -> None:
         """Clear the search box and type filter without reacting to it."""
@@ -1344,6 +1367,7 @@ class MainWindow(QMainWindow):
         for widget, clear in (
             (self.search, lambda: self.search.clear()),
             (self.search_kind, lambda: self.search_kind.setCurrentIndex(0)),
+            (self.search_tag, lambda: self.search_tag.setCurrentIndex(0)),
         ):
             widget.blockSignals(True)
             clear()
@@ -1356,6 +1380,7 @@ class MainWindow(QMainWindow):
             for index in sorted(self._usage_cache)
             for entry in self._usage_cache[index].catalog
         ]
+        self._fill_search_tags(search.tags_in_use(self._catalog))
         if self._searching():
             self._apply_search()  # the index just grew: results may have too
 
@@ -1370,6 +1395,7 @@ class MainWindow(QMainWindow):
     def _escape_search(self) -> None:
         self.search.clear()
         self.search_kind.setCurrentIndex(0)
+        self.search_tag.setCurrentIndex(0)
         self.table.setFocus()
 
     def _apply_search(self) -> None:
@@ -1382,13 +1408,16 @@ class MainWindow(QMainWindow):
             self.files_title.setText("Indexing the disks…")
             return
         query = self.search.text().strip()
+        tag = self.search_tag.currentData()
         results, truncated = search.filter_catalog(
-            self._catalog, query, self.search_kind.currentData()
+            self._catalog, query, self.search_kind.currentData(), tag=tag
         )
         self._in_results = True
         self._show_takes(False)  # (results are files, wherever the selection is)
         self.table.set_results(results)
-        what = f"“{query}”" if query else self.search_kind.currentText().lower()
+        what = f"“{query}”" if query else self.search_kind.currentText().lower() if self.search_kind.currentData() != search.ALL else ""
+        if tag:
+            what = f"{what} with tag {tag}" if what else f"tag {tag}"
         title = f"{len(results):,}{'+' if truncated else ''} result{'s' if len(results) != 1 else ''} for {what}"
         self.files_title.setText(
             title
@@ -1429,6 +1458,9 @@ class MainWindow(QMainWindow):
         self.search_kind.blockSignals(True)
         self.search_kind.setCurrentIndex(0)
         self.search_kind.blockSignals(False)
+        self.search_tag.blockSignals(True)
+        self.search_tag.setCurrentIndex(0)
+        self.search_tag.blockSignals(False)
         if current is not None and (current.disk, current.partition, current.index) == (
             vol.disk,
             vol.partition,

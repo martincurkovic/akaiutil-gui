@@ -128,3 +128,41 @@ def test_clearing_results_clears_the_selection_signal(table):
     table.selectionFilesChanged.connect(seen.append)
     table.set_results(CATALOG[:2])
     assert seen[-1] == []
+
+
+# ----------------------------------------------------------------------------------- tags
+def tagged(name, volume, tags, names=(), number=1):
+    return CatalogEntry(volume, FileEntry(number, name, 1000, "0x0001", "17.00", tags, tuple(names)))
+
+
+TAGGED = [
+    tagged("KICK.S3", DRUMS, "01 02", ("DRUMS", "Loud"), 1),
+    tagged("SNARE.S3", DRUMS, "01", ("DRUMS",), 2),
+    tagged("BASS 1.S3", BASS, "02", ("BASSES",), 1),  # (another partition: its tag 2 has another name)
+    tagged("LEAD.S1", KEYS, "03", (), 1),  # (a floppy-like volume with no names: "Tag 3")
+    entry("PLAIN.S3", KEYS, 2),
+]
+
+
+def test_a_tag_is_matched_by_its_name_ignoring_case():
+    assert names(search.filter_catalog(TAGGED, "", tag="drums")[0]) == ["KICK.S3", "SNARE.S3"]
+    assert names(search.filter_catalog(TAGGED, "", tag="LOUD")[0]) == ["KICK.S3"]
+    assert names(search.filter_catalog(TAGGED, "", tag="Tag 3")[0]) == ["LEAD.S1"]  # a tag with no name is called by its number
+    assert names(search.filter_catalog(TAGGED, "", tag="nope")[0]) == []
+
+
+def test_the_same_number_with_a_different_name_is_a_different_tag():
+    assert names(search.filter_catalog(TAGGED, "", tag="BASSES")[0]) == ["BASS 1.S3"]  # not KICK, though both carry tag 02
+
+
+def test_a_tag_combines_with_the_words_and_the_type():
+    assert names(search.filter_catalog(TAGGED, "kick", tag="drums")[0]) == ["KICK.S3"]
+    assert search.filter_catalog(TAGGED, "bass", tag="drums")[0] == []
+    assert names(search.filter_catalog(TAGGED, "", "samples", tag="tag 3")[0]) == ["LEAD.S1"]
+    assert names(search.filter_catalog(TAGGED, "", tag=None)[0]) == names(TAGGED)
+    assert names(search.filter_catalog(TAGGED, "", tag="")[0]) == names(TAGGED)
+
+
+def test_the_tags_in_use_are_listed_once_each_in_order():
+    assert search.tags_in_use(TAGGED) == ["BASSES", "DRUMS", "Loud", "Tag 3"]
+    assert search.tags_in_use(CATALOG) == []

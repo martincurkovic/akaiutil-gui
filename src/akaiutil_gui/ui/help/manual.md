@@ -103,7 +103,9 @@ The list of files shows each file's number (its slot in the volume, which is the
 
 Type in the search box (Ctrl/Cmd+F) to search **every open disk** at once. The type menu next to it narrows the search to samples, programs or other files.
 
-Results show where each file lives. Double-click a result (or press Enter) to jump to it in its location. You can preview, export, rename, copy and delete results just as you can in a volume. Press Escape, or clear the box, to go back.
+The **tag menu** beside it lists the tags that files on the open disks carry, and shows only the files with the one you pick. It works on its own or together with the words and the type. Tags are matched by name, so "DRUMS" finds the files tagged DRUMS in every partition that has a tag of that name, whatever its number; a tag with no name is called "Tag 7".
+
+Results show where each file lives. Double-click a result (or press Enter) to jump to it in its location. You can preview, export, rename, copy and delete results just as you can in a volume. Press Escape, or clear the box and the menus, to go back.
 
 Results are indexed. If you try to search before indexing is complete, only the indexed results will appear and the app will let you know that indexing is still happening in the background.
 

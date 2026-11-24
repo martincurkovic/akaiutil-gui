@@ -1044,7 +1044,7 @@ def test_search_waits_for_the_index_instead_of_showing_nothing(app, three_disks,
 def test_a_long_result_list_says_it_was_cut(app, three_disks, monkeypatch):
     w = three_disks
     original = search.filter_catalog
-    monkeypatch.setattr(search, "filter_catalog", lambda c, q, k=search.ALL, limit=3: original(c, q, k, limit=3))
+    monkeypatch.setattr(search, "filter_catalog", lambda c, q, k=search.ALL, limit=3, tag=None: original(c, q, k, limit=3, tag=tag))
     search_for(app, w, "", kind=search.SAMPLES)
     assert w.table.rowCount() == 3 and "narrow the search" in w.files_title.text() and "3+ results" in w.files_title.text()
 
