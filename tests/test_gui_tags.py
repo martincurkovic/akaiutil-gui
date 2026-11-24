@@ -25,7 +25,11 @@ def asked_tags(monkeypatch):
 
     a = Asked()
     a.shown = []
-    monkeypatch.setattr(MainWindow, "_ask_tags", lambda self, files, names: (a.shown.append(([f.name for f in files], names)), a.answer)[1])
+    def ask(self, files, names, can_rename=False):
+        a.shown.append(([f.name for f in files], names, can_rename))
+        return a.answer.pop(0) if isinstance(a.answer, list) else a.answer  # (a list is a run of answers, one for each time it is asked)
+
+    monkeypatch.setattr(MainWindow, "_ask_tags", ask)
     return a
 
 
@@ -387,3 +391,90 @@ def test_a_chosen_tag_survives_an_edit_that_reloads_the_disks(qt_app, window, ta
 
 def test_the_tag_menu_is_off_without_images(qt_app, window):
     assert not window.search_tag.isEnabled()
+
+
+# --------------------------------------------------------------------------------- the last tag touches
+def test_the_tag_dialog_offers_to_rename_the_tags_only_where_that_is_possible(qt_app):
+    plain = edit_dialogs.TagFilesDialog(None, [entry("01")], {})
+    assert not any(b.text() == "Rename Tags…" for b in plain.buttons.buttons())
+    d = edit_dialogs.TagFilesDialog(None, [entry("01")], {}, can_rename=True)
+    button = next(b for b in d.buttons.buttons() if b.text() == "Rename Tags…")
+    d._boxes[5].click()  # (a change made first isn't kept)
+    button.click()
+    assert d.rename_requested and d.result() == d.DialogCode.Rejected
+    plain.deleteLater()
+    d.deleteLater()
+
+
+def test_a_name_shared_with_another_tag_is_warned_about_but_allowed(qt_app):
+    d = edit_dialogs.TagNamesDialog(None, "A", {n: f"TAG {chr(64 + n)}" for n in range(1, 27)})
+    ok = d.buttons.button(d.buttons.StandardButton.Ok)
+    d._edits[1].setText("tag b")
+    assert ok.isEnabled() and "“TAG B”" in d.problem.text() and "tags 1, 2" in d.problem.text()
+    d._edits[1].setText("TAG A")
+    d._edits[2].setText("KICKS")
+    assert ok.isEnabled() and d.problem.text() == ""
+    d.deleteLater()
+
+
+def test_two_tags_that_already_shared_a_name_are_not_nagged_about(qt_app):
+    names = {n: f"TAG {chr(64 + n)}" for n in range(1, 27)}
+    names[2] = "TAG A"
+    d = edit_dialogs.TagNamesDialog(None, "A", names)
+    d._edits[7].setText("SNARES")
+    assert d.problem.text() == ""
+    d.deleteLater()
+
+
+def test_renaming_the_tags_from_the_tag_dialog_comes_back_to_it(qt_app, window, editable_hd, answers, asked_tags, asked_names):
+    open_and_show(qt_app, window, editable_hd)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    answers.confirm = True
+    asked_names.answer = {2: "SNARES"}
+    asked_tags.answer = [edit_dialogs.RENAME_TAGS, ([2], [])]  # (first "Rename Tags…", then the tag is given)
+    window._tag_selected()
+    assert pump(qt_app, lambda: "Changed the tags of 1 file." in window.statusBar().currentMessage())
+    assert [s[2] for s in asked_tags.shown] == [True, True]  # (the button was there both times)
+    assert asked_names.shown[0][0] == "A"
+    assert pump(qt_app, lambda: window._pending == 0 and window._writing == 0 and window.tree.partition(0, "A") is not None)  # (the tree has reloaded)
+    assert window._engine.partition_tag_names(window.tree.partition(0, "A"))[2] == "SNARES"
+    assert pump(qt_app, lambda: tags_of(window, "KICK.S3") == "02")
+    assert asked_tags.shown[1][1][2] == "SNARES"  # the second dialog was given the new names
+
+
+def test_cancelling_the_renaming_comes_back_to_the_tag_dialog_too(qt_app, window, editable_hd, answers, asked_tags, asked_names):
+    open_and_show(qt_app, window, editable_hd)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    answers.confirm = True
+    asked_names.answer = None  # (the names dialog is cancelled)
+    asked_tags.answer = [edit_dialogs.RENAME_TAGS, None]
+    window._tag_selected()
+    assert pump(qt_app, lambda: len(asked_tags.shown) == 2)
+    assert tags_of(window, "KICK.S3") == ""
+
+
+def test_a_floppys_tag_dialog_has_no_rename_button(qt_app, window, images, answers, asked_tags):
+    window.open_images([str(images["fl1"])])
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1)
+    window.tree.reveal_volume(vol(1))
+    assert pump(qt_app, lambda: window._volume is not None and window.table.rowCount() >= 1)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    answers.confirm = True
+    asked_tags.answer = None
+    window._tag_selected()
+    assert pump(qt_app, lambda: asked_tags.shown)
+    assert asked_tags.shown[0][2] is False
+
+
+def test_several_files_stay_selected_after_their_tags_change(qt_app, window, editable_hd, answers, asked_tags):
+    open_and_show(qt_app, window, editable_hd)
+    window.table.selectAll()
+    assert pump(qt_app, lambda: len(window._selected_rows()) == 2)
+    answers.confirm = True
+    asked_tags.answer = ([4], [])
+    window._tag_selected()
+    assert pump(qt_app, lambda: "Changed the tags of 2 files." in window.statusBar().currentMessage())
+    assert pump(qt_app, lambda: sorted(f.name for _, f in window.table.selected_rows()) == ["KICK.S3", "SNARE.S3"])

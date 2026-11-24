@@ -258,7 +258,7 @@ A tick means every selected file has that tag, a dash means only some of them do
 
 ### Renaming the tags
 
-The 26 tags are named per partition. Select a partition (or a volume in it) and choose **Edit > Rename Tags…**, or right-click the partition. Type the new names (up to 12 characters, capitals, the same characters as file names) and press OK; **Default Names** puts back `TAG A` to `TAG Z`. The files keep their tags and show them under the new names. A tag can't be given an empty name, but one that has none can be left as it is. A hard disk partition of an S1000 or S3000 has tags; a floppy, an S900 disk and a direct-to-disk area don't.
+The 26 tags are named per partition. Select a partition (or a volume in it) and choose **Edit > Rename Tags…**, or right-click the partition. The **Tag Files** window has a **Rename Tags…** button too: it closes that window, lets you rename, and brings it back with the new names. Type the new names (up to 12 characters, capitals, the same characters as file names) and press OK; **Default Names** puts back `TAG A` to `TAG Z`. The files keep their tags and show them under the new names. If a name you type is already the name of another tag, the dialog says so but lets you go ahead (files with either tag would look the same in the list). A tag can't be given an empty name, but one that has none can be left as it is. A hard disk partition of an S1000 or S3000 has tags; a floppy, an S900 disk and a direct-to-disk area don't.
 
 Nothing else about a file changes. Editing tags needs akaiutil 4.7 or newer, which is the version the app downloads. Files in S900 volumes have no tags, and an S1000 floppy's operating system file keeps its bytes (they hold the sampler model), so those can't be tagged.
 

@@ -984,6 +984,9 @@ class SortDialog(QDialog):
         return sorting.SAMPLES if self.only_samples.isChecked() else sorting.ALL
 
 
+RENAME_TAGS = "rename-tags"  # what the main window is told when the Tag Files dialog was closed to rename the tags
+
+
 class _TagBox(QCheckBox):
     """A tag's check box: checked (every file has it), empty (none does), or dashed (some do). Clicking a dashed one ticks it."""
 
@@ -996,11 +999,13 @@ class _TagBox(QCheckBox):
 
 
 class TagFilesDialog(QDialog):
-    """Which of a partition's 26 tags the chosen files carry. `add` and `remove` are what the user changed, as tag numbers."""
+    """Which of a partition's 26 tags the chosen files carry. `add` and `remove` are what the user changed, as tag numbers.
+    With `can_rename`, a button closes the dialog asking for the tags' names to be edited instead (`rename_requested`)."""
 
-    def __init__(self, parent, files: list, names: dict[int, str]):
+    def __init__(self, parent, files: list, names: dict[int, str], can_rename: bool = False):
         super().__init__(parent)
         self._files = files
+        self.rename_requested = False
         self.setWindowTitle("Tag Files" if len(files) > 1 else "Tags")
         self.setMinimumWidth(460)
         have = [set(f.tag_numbers) for f in files]
@@ -1023,12 +1028,20 @@ class TagFilesDialog(QDialog):
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
+        if can_rename:
+            rename = self.buttons.addButton("Rename Tags…", QDialogButtonBox.ButtonRole.ActionRole)
+            rename.setToolTip("Change the names of this partition's tags. Nothing chosen here is kept.")
+            rename.clicked.connect(self._ask_rename)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(intro))
         layout.addLayout(grid)
         layout.addWidget(self.problem)
         layout.addWidget(self.buttons)
         self._validate()
+
+    def _ask_rename(self) -> None:
+        self.rename_requested = True
+        self.reject()
 
     @property
     def add(self) -> list[int]:
@@ -1094,6 +1107,7 @@ class TagNamesDialog(QDialog):
     def _checked(self) -> tuple[dict[int, str], str | None]:
         """(the names that differ from what they were, the first problem). An empty field is fine only if it was empty."""
         changes, problem = {}, None
+        self._final: dict[int, str] = {}
         for n, edit in self._edits.items():
             text = edit.text().strip()
             if not text and not self._start[n]:
@@ -1101,9 +1115,20 @@ class TagNamesDialog(QDialog):
             name, why = akai_names.check_name(text, "S3000")
             if why:
                 problem = problem or f"Tag {n}: {why}"
-            elif not akai_names.same_name(name, self._start[n]):
-                changes[n] = name
+            else:
+                self._final[n] = name
+                if not akai_names.same_name(name, self._start[n]):
+                    changes[n] = name
         return changes, problem
+
+    def _duplicate_note(self, changes: dict[int, str]) -> str:
+        """A warning (not a refusal) when a tag just renamed shares its name with another tag: files would look the same under both."""
+        for n, name in changes.items():
+            same = [m for m in range(1, filetags.TAG_COUNT + 1) if m != n and akai_names.same_name(self._final.get(m, self._start[m]), name)]
+            if same:
+                numbers = ", ".join(str(m) for m in sorted([n, *same]))
+                return f"“{name}” would be the name of tags {numbers}: files with either look the same in the list."
+        return ""
 
     @property
     def changes(self) -> dict[int, str]:
@@ -1111,7 +1136,7 @@ class TagNamesDialog(QDialog):
 
     def _validate(self) -> None:
         changes, problem = self._checked()
-        self.problem.setText(problem or "")
+        self.problem.setText(problem or self._duplicate_note(changes))
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(problem is None and bool(changes))
 
 

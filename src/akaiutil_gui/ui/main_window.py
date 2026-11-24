@@ -200,6 +200,7 @@ class MainWindow(QMainWindow):
         self._pending_reveal: tuple[Volume, int] | None = (
             None  # select this file once its volume has loaded
         )
+        self._pending_reselect: tuple[Volume, set[int]] | None = None  # select these files (by number) once the volume has loaded
         self._preview_token = (
             0  # numbers each preview load; only the newest may show its result
         )
@@ -1156,6 +1157,7 @@ class MainWindow(QMainWindow):
         self._catalog = []
         self._volume_files = []
         self._pending_reveal = None
+        self._pending_reselect = None
         self._reset_search_ui()
         self._preview_token += 1
         self._preview_cache.clear()
@@ -1547,17 +1549,20 @@ class MainWindow(QMainWindow):
         self._update_actions()
 
     def _select_pending_file(self) -> None:
-        """After revealing a search result: select its file once the volume's list is showing."""
-        if self._pending_reveal is None or self._in_results:
+        """After revealing a search result, or editing files: select them again once the volume's list is showing."""
+        if self._in_results:
             return
-        vol, file_index = self._pending_reveal
-        if self._volume is not None and (
-            self._volume.disk,
-            self._volume.partition,
-            self._volume.index,
-        ) == (vol.disk, vol.partition, vol.index):
-            self._pending_reveal = None
-            self.table.select_file(self._volume, file_index)
+        for pending in (self._pending_reveal, self._pending_reselect):
+            if pending is None:
+                continue
+            vol, what = pending
+            if self._volume is not None and (self._volume.disk, self._volume.partition, self._volume.index) == (vol.disk, vol.partition, vol.index):
+                if isinstance(what, set):
+                    self._pending_reselect = None
+                    self.table.select_files(what)
+                else:
+                    self._pending_reveal = None
+                    self.table.select_file(self._volume, what)
 
     def _show_takes(self, show: bool) -> None:
         """The take table or the file table: a direct-to-disk partition holds takes, everything else files."""
@@ -2475,7 +2480,8 @@ class MainWindow(QMainWindow):
         dialog = edit_dialogs.TagNamesDialog(self, part.name, names)
         return dialog.changes if dialog.exec() == dialog.DialogCode.Accepted else None
 
-    def _do_rename_tags(self, part: Partition) -> None:
+    def _do_rename_tags(self, part: Partition, then=None) -> None:
+        """Ask for new names and write them. `then` runs afterwards, whether or not anything was renamed."""
         engine = self._engine
         if engine is None:
             return
@@ -2486,11 +2492,15 @@ class MainWindow(QMainWindow):
                 return
             changes = self._ask_tag_names(part, names)
             if not changes:
+                if then is not None:
+                    then()
                 return
 
             def done(_after: dict[int, str]) -> None:
                 n = len(changes)
                 self._edited(part.disk, message=f"Renamed {n} tag{'s' if n != 1 else ''} of partition {part.name}.")
+                if then is not None:
+                    then()
 
             self._run_edit(lambda: engine.rename_tags(part, changes), done, lambda message: self._edit_failed(part.disk, message))
 
@@ -2509,9 +2519,12 @@ class MainWindow(QMainWindow):
             return
         self._ensure_editing(lambda: self._do_tag_files(rows))
 
-    def _ask_tags(self, files: list[FileEntry], names: dict[int, str]) -> tuple[list[int], list[int]] | None:
-        dialog = edit_dialogs.TagFilesDialog(self, files, names)
-        return (dialog.add, dialog.remove) if dialog.exec() == dialog.DialogCode.Accepted else None
+    def _ask_tags(self, files: list[FileEntry], names: dict[int, str], can_rename: bool = False):
+        """(tags to add, tags to take off), None if cancelled, or edit_dialogs.RENAME_TAGS if the names are to be edited first."""
+        dialog = edit_dialogs.TagFilesDialog(self, files, names, can_rename)
+        if dialog.exec() == dialog.DialogCode.Accepted:
+            return dialog.add, dialog.remove
+        return edit_dialogs.RENAME_TAGS if dialog.rename_requested else None
 
     def _do_tag_files(self, rows: list[tuple[Volume, FileEntry]]) -> None:
         engine = self._engine
@@ -2519,7 +2532,12 @@ class MainWindow(QMainWindow):
             return
 
         def show(names: dict[int, str]) -> None:
-            chosen = self._ask_tags([f for _, f in rows], names)
+            part = self.tree.partition(rows[0][0].disk, rows[0][0].partition)
+            can_rename = part is not None and self._has_tags(part)
+            chosen = self._ask_tags([f for _, f in rows], names, can_rename)
+            if chosen == edit_dialogs.RENAME_TAGS and part is not None:
+                self._do_rename_tags(part, then=lambda: self._do_tag_files(rows))  # (and then the tags again, under their new names)
+                return
             if chosen is None:
                 return
             add, remove = chosen
@@ -2536,6 +2554,7 @@ class MainWindow(QMainWindow):
             def done(failed: list[str]) -> None:
                 vol, first = rows[0]
                 self._pending_reveal = (vol, first.index) if len(rows) == 1 and not self._in_results else None
+                self._pending_reselect = (vol, {f.index for _, f in rows}) if len(rows) > 1 and not self._in_results else None
                 n = len(rows) - len(failed)
                 self._edited(vol.disk, message=f"Changed the tags of {n} file{'s' if n != 1 else ''}." if n else "")
                 if failed:

@@ -39,8 +39,8 @@ None of this could be checked by the test runs, which use a fake audio device, o
    needs the format. A multi names programs, so it would also allow "programs no multi uses".
 4. **Copy a whole partition to a file and back** (`pget`/`pput`). Partition to partition is done (Copy Partition To…); it is not checked on a real sampler.
 5. **Tags**: setting and clearing a file's tags (Edit > Tag Files…, the file menu, a link in the details pane; akaiutil 4.7 or newer), renaming a partition's tag names (Edit > Rename Tags…,
-   the partition menu) and a tag menu beside the search box (files with a tag, across the open disks) are built, tested against akaiutil only. What's left: keeping a multi-file selection
-   after an edit, and checking a tagged and renamed image on a real sampler.
+   the partition menu, and a button in the Tag Files window) and a tag menu beside the search box (files with a tag, across the open disks) are built, tested against akaiutil only.
+   What's left: checking a tagged and renamed image on a real sampler.
 6. **Import polish:** AIFF loop points (INST + MARK chunks: the end-marker convention needs checking), fade in/out, a pitch
    fraction from `smpl`, per-file overrides in the import dialog, a progress dialog for big batches.
 7. **ctypes/cffi engine** to replace the subprocess and the text parsing in `engine/parse.py`. `engine/api.py` is the seam
