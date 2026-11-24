@@ -27,12 +27,12 @@ from pathlib import Path
 
 from .locate import EXE_NAME, default_install_dir
 
-VERSION = "4.6.8"
+VERSION = "4.7"
 BASE_URL = "https://sourceforge.net/projects/akaiutil/files/"
 SOURCE_ARCHIVE = f"akaiutil-{VERSION}.tar.gz"
-SOURCE_SHA256 = "48ea733cc38d90c2f9f70a6ff9c4fb12a8e64ddd7024d4b436e9ebeef2bf57b1"
+SOURCE_SHA256 = "28d416745aa195c8c16e2d4a088c34106b7d833c94985f401b1828767da6c2bb"
 WIN_ARCHIVE = f"akaiutil-{VERSION}win.zip"
-WIN_SHA256 = "c6c310ac4ec42c1b8601f38f53f44628f349d12e14225807a0305aff40a4b9de"
+WIN_SHA256 = "3eeef4aaab4f085ed689487da3d1e8a22b5751342f39b23be947a95227ca246a"
 
 Progress = Callable[[str], None]
 

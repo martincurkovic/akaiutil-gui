@@ -25,7 +25,7 @@ To run the app without building a packaged one:
 
 ```sh
 uv sync                                        # Python deps
-uv run python scripts/get_akaiutil.py          # fetch + verify + build akaiutil 4.6.8 into build/bin/
+uv run python scripts/get_akaiutil.py          # fetch + verify + build akaiutil 4.7 into build/bin/
 uv run python tests/imagegen.py build/images   # optional: synthetic S3000/S1000/S900 images to play with
 uv run akaiutil-gui build/images/s3000_hd.img  # or just `uv run akaiutil-gui` and use File > Open
 ```

@@ -67,7 +67,7 @@ def find_akaiutil(configured: str | None = None) -> Path | None:
 
 
 def binary_version(path: Path) -> str | None:
-    """The version akaiutil says it is ("4.6.8"), read from the banner `akaiutil -h` prints before it exits; None if
+    """The version akaiutil says it is ("4.7"), read from the banner `akaiutil -h` prints before it exits; None if
     it can't be run or says nothing recognisable."""
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash on Windows
     try:

@@ -6,19 +6,19 @@ file shipped with the app. It includes or uses the following third-party softwar
 
 ## akaiutil
 
-The app contains a compiled copy of **akaiutil 4.6.8** and does all of its work by
+The app contains a compiled copy of **akaiutil 4.7** and does all of its work by
 running it as a separate program.
 
 - Copyright (C) 2008-2025 Klaus Michael Indlekofer. All rights reserved.
 - Licensed under the GNU General Public License, version 2 or (at your option) any
   later version (see `LICENSE`). There is no warranty.
 - Included **unmodified**: built from the original source release, whose SHA-256 is
-  `48ea733cc38d90c2f9f70a6ff9c4fb12a8e64ddd7024d4b436e9ebeef2bf57b1`.
+  `28d416745aa195c8c16e2d4a088c34106b7d833c94985f401b1828767da6c2bb`.
 - Project page: <https://sourceforge.net/projects/akaiutil/>
 - **Source code:** the exact source this copy was built from is attached to every
-  release of akaiutil-gui on GitHub as `SOURCE-CODE-ONLY-akaiutil-4.6.8.tar.gz`, and can also be
+  release of akaiutil-gui on GitHub as `SOURCE-CODE-ONLY-akaiutil-4.7.tar.gz`, and can also be
   downloaded from SourceForge:
-  <https://sourceforge.net/projects/akaiutil/files/akaiutil-4.6.8.tar.gz/download>
+  <https://sourceforge.net/projects/akaiutil/files/akaiutil-4.7.tar.gz/download>
 
 The name akaiutil is used here only to say what the program is. This project is not
 affiliated with or endorsed by its author. "Akai" and the names of Akai samplers are

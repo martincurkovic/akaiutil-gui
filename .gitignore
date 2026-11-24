@@ -22,6 +22,9 @@ build/
 # from SourceForge themselves; we don't redistribute it)
 /akaiutil-*/
 
+# Private working notes (the 4.7 upgrade to-do list)
+/dev_docs/*.local.md
+
 # Real disk images: hundreds of MB each, and other people's samples.
 # testing_images/ is where the real ones live; *.img catches strays anywhere else.
 testing_images/

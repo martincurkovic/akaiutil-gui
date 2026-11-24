@@ -637,7 +637,7 @@ def test_the_notices_dialog_shows_the_licence_information(app, window):
 
     dialog = NoticesDialog(window)
     text = dialog.view.toPlainText()
-    assert "akaiutil 4.6.8" in text and "Klaus Michael Indlekofer" in text and "GNU General Public License" in text
+    assert "akaiutil 4.7" in text and "Klaus Michael Indlekofer" in text and "GNU General Public License" in text
     from akaiutil_gui.ui.about_dialog import AboutDialog
 
     assert AboutDialog(window).licences_button.text() == "Licences"  # reached from Help > About, as in AKAISDS
