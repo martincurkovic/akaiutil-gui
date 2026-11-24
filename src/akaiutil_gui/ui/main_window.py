@@ -747,6 +747,7 @@ class MainWindow(QMainWindow):
         if self._engine is not None:
             self._engine.close()
         self._engine = AkaiEngine(binary, on_traffic=self._traffic.feed)
+        run_async(lambda engine=self._engine: engine.version, lambda _version: None)  # (asked here, on a worker, so the window only ever reads the answer)
         self._engine_binary = binary
         self._writable = False  # until akaiutil says otherwise (see _opened)
         self._reset_views()
@@ -2254,6 +2255,8 @@ class MainWindow(QMainWindow):
         """What Rename and Delete would act on: the files selected in the list if that is where you are,
         the volume selected in the tree if that is where you are, else whichever of them there is."""
         if self._takes_shown():  # (the file list is out of sight, and a DD partition holds no volumes)
+            if self._focus_in(self.tree):  # (the tree has the keyboard: takes selected in the table aren't what Delete or F2 is aimed at)
+                return None
             takes = self.takes.selected_takes()
             return ("takes", takes) if takes else None
         rows, volume = self._selected_rows(), self._selected_volume()
@@ -2486,25 +2489,36 @@ class MainWindow(QMainWindow):
         if engine is None:
             return
 
+        def back() -> None:
+            if then is not None:
+                then()
+
+        def failed(message: str) -> None:
+            self._edit_failed(part.disk, message)
+            back()
+
         def show(names: dict[int, str]) -> None:
             if not names:
                 self._warn("No tags", f"Partition {part.name} has no tags to rename.")
+                back()
                 return
             changes = self._ask_tag_names(part, names)
             if not changes:
-                if then is not None:
-                    then()
+                back()
                 return
 
             def done(_after: dict[int, str]) -> None:
                 n = len(changes)
                 self._edited(part.disk, message=f"Renamed {n} tag{'s' if n != 1 else ''} of partition {part.name}.")
-                if then is not None:
-                    then()
+                back()
 
-            self._run_edit(lambda: engine.rename_tags(part, changes), done, lambda message: self._edit_failed(part.disk, message))
+            self._run_edit(lambda: engine.rename_tags(part, changes), done, failed)
 
-        self._run(lambda: engine.partition_tag_names(part), show)
+        def not_read(message: str) -> None:
+            self._report_error(message)
+            back()
+
+        self._run(lambda: engine.partition_tag_names(part), show, not_read)
 
     def _on_details_link(self, link_id: str) -> None:
         if link_id == describe.TAGS_LINK:

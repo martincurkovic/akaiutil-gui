@@ -183,3 +183,31 @@ def test_the_pinned_akaiutil_has_the_4_7_features(engine):
 
     assert engine.version == locate.parse_version(fetch.VERSION)
     assert engine.can_edit_tags and engine.can_put_bytes
+
+
+def test_asking_the_version_does_not_wait_for_a_busy_engine(tmp_path):
+    """The window asks from its own thread while a worker can be holding the engine's lock for a long job: that mustn't freeze it."""
+    import threading
+
+    from akaiutil_gui.engine.api import AkaiEngine
+
+    eng = AkaiEngine(_stub_binary(tmp_path, "File Manager, Rev. 4.7"))
+    held, release = threading.Event(), threading.Event()
+
+    def busy():
+        with eng._lock:
+            held.set()
+            release.wait(10)
+
+    worker = threading.Thread(target=busy)
+    worker.start()
+    try:
+        assert held.wait(5)
+        answer = []
+        asker = threading.Thread(target=lambda: answer.append((eng.version, eng.can_edit_tags, eng.can_put_bytes)))
+        asker.start()
+        asker.join(5)
+        assert not asker.is_alive() and answer == [((4, 7), True, True)]
+    finally:
+        release.set()
+        worker.join()

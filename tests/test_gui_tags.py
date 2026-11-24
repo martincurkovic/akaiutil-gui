@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt
 from akaiutil_gui import describe
 from akaiutil_gui.engine.api import AkaiEngine
 from akaiutil_gui.engine.models import FileEntry
+from akaiutil_gui.engine.session import EngineError
 from akaiutil_gui.ui import edit_dialogs
 from akaiutil_gui.ui.main_window import MainWindow
 from test_gui_editing import answers, delete_widgets, open_and_show, pump, vol, window  # noqa: F401  (fixtures)
@@ -478,3 +479,40 @@ def test_several_files_stay_selected_after_their_tags_change(qt_app, window, edi
     window._tag_selected()
     assert pump(qt_app, lambda: "Changed the tags of 2 files." in window.statusBar().currentMessage())
     assert pump(qt_app, lambda: sorted(f.name for _, f in window.table.selected_rows()) == ["KICK.S3", "SNARE.S3"])
+
+
+def test_the_tag_dialog_comes_back_when_renaming_goes_wrong(qt_app, window, editable_hd, answers, asked_tags, asked_names, monkeypatch):
+    """"Rename Tags…" closes the Tag Files dialog; whatever happens to the renaming, the user gets it back."""
+    open_and_show(qt_app, window, editable_hd)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    answers.confirm = True
+    asked_names.answer = {2: "SNARES"}
+    asked_tags.answer = [edit_dialogs.RENAME_TAGS, None]
+
+    def refuse(self, part, names):
+        raise EngineError("akaiutil said no")
+
+    monkeypatch.setattr(AkaiEngine, "rename_tags", refuse)
+    window._tag_selected()
+    assert pump(qt_app, lambda: len(asked_tags.shown) == 2)  # (the rename failed, and the tag dialog is there again)
+    assert any(w[0] == "Couldn't change the disk image" for w in answers.warnings)
+
+
+def test_the_tag_dialog_comes_back_when_the_partition_has_no_tags_to_rename(qt_app, window, editable_hd, answers, asked_tags, monkeypatch):
+    open_and_show(qt_app, window, editable_hd)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    answers.confirm = True
+    asked_tags.answer = [edit_dialogs.RENAME_TAGS, None]
+    real = AkaiEngine.partition_tag_names
+    calls = []
+
+    def names(self, part):
+        calls.append(part.name)
+        return {} if len(calls) == 1 else real(self, part)  # (empty for the rename, as a partition without tags would be)
+
+    monkeypatch.setattr(AkaiEngine, "partition_tag_names", names)
+    window._tag_selected()
+    assert pump(qt_app, lambda: len(asked_tags.shown) == 2)
+    assert any(w[0] == "No tags" for w in answers.warnings)

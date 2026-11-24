@@ -50,12 +50,15 @@ class AkaiEngine:
     @property
     def version(self) -> tuple[int, ...] | None:
         """The akaiutil version, e.g. (4, 7), asked of the program once (it runs `akaiutil -h`) and then remembered. None if
-        it can't be read; the capability checks below then say no, because a program that won't say what it is may be an old one."""
-        with self._lock:
-            if not self._version_read:
-                self._version = locate.parse_version(locate.binary_version(Path(self._binary)))
-                self._version_read = True
-            return self._version
+        it can't be read; the capability checks below then say no, because a program that won't say what it is may be an old one.
+
+        This takes no lock: the window asks from its own thread while a worker may be holding the engine's lock for a long job,
+        and the version doesn't depend on any of that. Two threads asking at once would both run `-h` and agree. The window reads
+        it in the background when it makes the engine, so asking is normally just reading the answer."""
+        if not self._version_read:
+            self._version = locate.parse_version(locate.binary_version(Path(self._binary)))
+            self._version_read = True  # (after the version is set, so a reader on another thread never sees one without the other)
+        return self._version
 
     def at_least(self, minimum: tuple[int, ...]) -> bool:
         version = self.version
@@ -615,13 +618,10 @@ class AkaiEngine:
         clean, problem = akai_names.check_name(base, vol.type)
         if problem or clean.casefold() != base.casefold():
             raise EngineError(f"“{f.name}” has a name akaiutil can't move safely, so it can't be edited.")
-        _clear_dir(session.staging_dir)
-        self._run(f"geti {f.index}")
-        produced = [p for p in session.staging_dir.iterdir() if p.is_file()]
-        if len(produced) != 1:
-            raise EngineError(f"akaiutil couldn't read “{f.name}”.")
-        original = produced[0].read_bytes()
-        _clear_dir(session.staging_dir)
+        try:
+            original = self._read_bytes(session, f.index)
+        except EngineError:
+            raise EngineError(f"akaiutil couldn't read “{f.name}”.") from None
         if len(original) < size:
             raise EngineError(f"“{f.name}” is too short to be a sample.")
         try:
@@ -675,12 +675,8 @@ class AkaiEngine:
         return final
 
     def _read_whole(self, index: int, session) -> bytes:
-        _clear_dir(session.staging_dir)
-        self._run(f"geti {index}")
-        produced = [p for p in session.staging_dir.iterdir() if p.is_file()]
-        data = produced[0].read_bytes() if produced else b""
-        _clear_dir(session.staging_dir)
-        return data
+        """A file's bytes, read back to check an edit (its own method so a test can make the read-back look wrong)."""
+        return self._read_bytes(session, index)
 
     def _undo_sample_edit(self, f: FileEntry, old: str, temp: str, temp_index: int, spare: int | None) -> None:
         """Put things back as they were after a step of edit_sample_settings failed (best effort, and logged)."""

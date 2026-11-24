@@ -151,6 +151,7 @@ def editable(window, app, images, tmp_path, monkeypatch):
     disk = open_dd(app, window, {"dd": image})
     window.tree.setCurrentItem(disk.child(2))
     assert pump(app, lambda: window.takes.rowCount() == 2)
+    monkeypatch.setattr(MainWindow, "_focus_in", lambda self, widget: widget is self.takes)  # (the user has clicked in the take table, so the keyboard is there)
     a.window, a.tmp = window, tmp_path
     return a
 
@@ -232,3 +233,16 @@ def test_a_folder_is_searched_for_audio_and_tk_files_only(app, editable):
     w.import_takes([folder])
     assert pump(app, lambda: names(w) == ["MONO", "STEREO", "A ONE"])
     assert editable.warnings == []  # the text file was not an error: it was not looked at
+
+
+def test_delete_and_rename_leave_the_takes_alone_while_the_tree_has_the_keyboard(app, editable, monkeypatch):
+    w = editable.window
+    w.takes.selectRow(0)
+    assert pump(app, lambda: w.takes.selected_takes())
+    monkeypatch.setattr(type(w), "_focus_in", lambda self, widget: widget is self.takes)
+    assert w._edit_target() is not None and w._edit_target()[0] == "takes"  # (the take table has the keyboard: they are its takes)
+    monkeypatch.setattr(type(w), "_focus_in", lambda self, widget: widget is self.tree)
+    assert w._edit_target() is None  # a DD partition holds no volumes, and the selected takes aren't the tree's business
+    w._update_edit_actions()
+    assert not w.act_delete.isEnabled() and not w.act_rename.isEnabled()
+    assert names(w) == ["MONO", "STEREO"]
