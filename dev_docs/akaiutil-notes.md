@@ -87,8 +87,16 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
 - Native `copyi` also keeps tags (by number), so the tar route in `tags.py` is only needed to map tags by name.
 
 ## Editing a sample's header
-- No akaiutil command edits one. `geti <n> 0 192` reads the first 192 bytes (the end offset is exclusive: 191 gives 191 bytes).
-- `engine.edit_sample_settings`: patch the header (`akai_header.write_settings`: only the edited fields change, and a loop entry
+- akaiutil 4.6.8 has no command that edits one. `geti <n> 0 192` reads the first 192 bytes (the end offset is exclusive: 191 gives 191 bytes).
+- **akaiutil 4.7 has `puti <external-file> <file-index> [<begin> [<end>]]`** (file name first, then the index; the reverse of `geti <n>`), which writes
+  bytes into an existing file in place. Measured 2026-11-24 on the generated images and a copy of a real one (HD0): a 2-byte header patch changed exactly
+  those 2 bytes of the image and nothing in the directory entry, neighbours or audio; it worked on S3000, S1000 and S900 samples and on a `.P3`. It never grows a
+  file (`invalid end` past the size, `invalid begin/end`), truncates a longer external file, and writes only the length of a shorter one. It always prints
+  `importing "NAME"` first. 4.7's `geti` now also refuses a range past the end (`invalid end`) and leaves a 0-byte file behind when it does.
+- `engine.edit_sample_settings` uses `puti` when the akaiutil is 4.7 or newer (`engine.can_put_bytes`): `geti` the file, patch the header, `puti` the header
+  bytes back, check the directory entry (name, size, start block, OS version, tags) and the whole file, and `puti` the old header back if a check fails. No spare
+  slots, no temporary names. Older akaiutil takes the long way below (`_edit_settings_by_rewrite`); tests run both paths.
+- The long way (4.6.x, `_edit_settings_by_rewrite`): patch the header (`akai_header.write_settings`: only the edited fields change, and a loop entry
   that wasn't touched keeps its exact bytes), import the whole sample through the tar route under a temporary name (`#EDIT.S3`),
   move the original aside to a spare slot (`#OLD.S3`), `reni` the copy to the original name and slot, `fixramnamei` (the name
   inside the header is otherwise the temporary one), check size, OS version, tags and audio, and only then `deli` the old copy.

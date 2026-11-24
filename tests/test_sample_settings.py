@@ -94,10 +94,14 @@ def test_a_loop_outside_the_sample_or_backwards_is_refused():
 
 
 # ------------------------------------------------------------------- with the real akaiutil
-@pytest.fixture
-def ed(binary, editable_hd):
+@pytest.fixture(params=["puti", "rewrite"])
+def ed(request, binary, editable_hd, monkeypatch):
+    """The engine on an editable image. The edits run both ways: in place with `puti` (akaiutil 4.7+), and the way older
+    akaiutil needs (write the sample again and swap it in), which is the fallback and is forced here by hiding `puti`."""
     import imagegen
 
+    if request.param == "rewrite":
+        monkeypatch.setattr(AkaiEngine, "can_put_bytes", property(lambda self: False))
     imagegen.add_loop(editable_hd, "KICK", loop_end=4000, loop_length=1000, time_ms=None)
     eng = AkaiEngine(binary)
     eng.open([editable_hd])
@@ -205,6 +209,48 @@ def test_a_check_that_fails_puts_everything_back(ed, monkeypatch):
     monkeypatch.undo()
     assert [(x.index, x.name, x.size, x.start_block, x.tags) for x in ed.list_files(vol)] == before  # the original, where it was
     assert ed.read_sample_settings(vol, kick(ed)).root == 60
+
+
+def test_an_in_place_edit_writes_only_the_header(ed, editable_hd):
+    if not ed.can_put_bytes:
+        pytest.skip("the in-place path needs puti")
+    vol, f = drums(ed), kick(ed)
+    before = editable_hd.read_bytes()
+    before_files = [(x.index, x.name, x.size, x.start_block, x.os_version, x.tags) for x in ed.list_files(vol)]
+    s = ed.read_sample_settings(vol, f)
+    ed.edit_sample_settings(vol, f, dataclasses.replace(s, root=48, cents=-7))
+    after = editable_hd.read_bytes()
+    changed = [i for i in range(len(before)) if before[i] != after[i]]
+    assert 0 < len(changed) <= 4 and changed[-1] - changed[0] < akai_header.HEADER_SIZES["S3000"]  # a few bytes of one header, nothing else
+    assert [(x.index, x.name, x.size, x.start_block, x.os_version, x.tags) for x in ed.list_files(vol)] == before_files
+
+
+def test_a_failed_in_place_write_puts_the_old_header_back(ed, monkeypatch):
+    if not ed.can_put_bytes:
+        pytest.skip("the in-place path needs puti")
+    vol, f = drums(ed), kick(ed)
+    s = ed.read_sample_settings(vol, f)
+    real, calls = ed._put_header, []
+
+    def flaky(session, index, header):
+        calls.append(header)
+        return "boom" if len(calls) == 1 else real(session, index, header)  # the first write is refused, the restore works
+
+    monkeypatch.setattr(ed, "_put_header", flaky)
+    with pytest.raises(EngineError, match="“KICK.S3” wasn't changed: boom"):
+        ed.edit_sample_settings(vol, f, dataclasses.replace(s, root=33))
+    monkeypatch.undo()
+    assert ed.read_sample_settings(vol, kick(ed)).root == 60
+
+
+def test_if_the_old_header_cant_be_put_back_it_says_so(ed, monkeypatch):
+    if not ed.can_put_bytes:
+        pytest.skip("the in-place path needs puti")
+    vol, f = drums(ed), kick(ed)
+    s = ed.read_sample_settings(vol, f)
+    monkeypatch.setattr(ed, "_put_header", lambda session, index, header: "boom")
+    with pytest.raises(EngineError, match="may not be as it was"):
+        ed.edit_sample_settings(vol, f, dataclasses.replace(s, root=33))
 
 
 def test_s900_samples_and_other_files_are_refused(binary, images, tmp_path):

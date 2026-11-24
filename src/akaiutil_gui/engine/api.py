@@ -521,9 +521,10 @@ class AkaiEngine:
             raise EngineError(f"“{f.name}” isn't file {f.index} of {vol.name} any more.")
 
     def edit_sample_settings(self, vol: Volume, f: FileEntry, new: akai_header.SampleSettings) -> FileEntry:
-        """Change a sample's loops, root key, tuning, play mode or markers. akaiutil can't edit a header in place, so the sample
-        is written again with the new header (its audio untouched) and put where the old one was, with the same name, tags and
-        OS version. The old copy is only deleted once the new one is in place, and every step is checked."""
+        """Change a sample's loops, root key, tuning, play mode or markers, leaving its audio, name, slot, tags and OS version as
+        they were. With akaiutil 4.7 or newer only the header's bytes are written, in place (`puti`). Older versions can't do
+        that, so there the sample is written again and put where the old one was (see _edit_settings_by_rewrite). Either way
+        the result is checked, and the original is put back if the check fails."""
         size = self._header_size(vol, f)
         with self._lock:
             log.info("edit settings of %s in %s", f.name, vol.name)
@@ -534,71 +535,144 @@ class AkaiEngine:
             files = parse.parse_files(text)
             if not any(x.index == f.index and x.name == f.name for x in files):
                 raise EngineError(f"“{f.name}” isn't file {f.index} of {vol.name} any more.")
-            osver = filetags.osver_value(f.os_version)
-            if osver is None:
-                raise EngineError(f"Can't read the OS version of “{f.name}”.")
-            base, ext = akai_names.split_extension(f.name)
-            clean, problem = akai_names.check_name(base, vol.type)
-            if problem or clean.casefold() != base.casefold():
-                raise EngineError(f"“{f.name}” has a name akaiutil can't move safely, so it can't be edited.")
+            if self.can_put_bytes:
+                return self._edit_settings_in_place(f, new, size, session)
+            return self._edit_settings_by_rewrite(vol, f, new, size, session, text, files)
+
+    def _edit_settings_in_place(self, f: FileEntry, new: akai_header.SampleSettings, size: int, session) -> FileEntry:
+        """akaiutil 4.7+: write the new header over the old one with `puti`. Nothing else moves, so no spare slots are needed
+        and the name, slot, tags, OS version and audio can't change. It is still checked, and the old header goes back if not."""
+        original = self._read_bytes(session, f.index)
+        if len(original) < size:
+            raise EngineError(f"“{f.name}” is too short to be a sample.")
+        try:
+            header = akai_header.write_settings(original[:size], new)
+        except ValueError as e:
+            raise EngineError(str(e)) from None
+        if header == original[:size]:
+            return f  # nothing was changed
+        problem = self._put_header(session, f.index, header)
+        if problem is None:
+            try:
+                now = next((x for x in parse.parse_files(self._run("dir").text) if x.index == f.index), None)
+                if now is None or not akai_names.same_name(now.name, f.name) or (now.size, now.start_block, now.os_version, now.tags) != (
+                    f.size,
+                    f.start_block,
+                    f.os_version,
+                    f.tags,
+                ):
+                    problem = "the file's entry in the volume changed"
+                elif self._read_whole(f.index, session) != header + original[size:]:
+                    problem = "what was written isn't the new header and the old audio"
+            except EngineError as e:
+                problem = str(e)
+        if problem is not None:
+            put_back = self._put_header(session, f.index, original[:size]) is None and self._read_bytes(session, f.index, 0, size) == original[:size]
+            if not put_back:
+                log.error("couldn't restore the header of %s after a failed edit: %s", f.name, problem)
+                raise EngineError(f"Editing “{f.name}” failed ({problem}) and its header may not be as it was. Check the file.")
+            raise EngineError(f"“{f.name}” wasn't changed: {problem}.")
+        final = next((x for x in parse.parse_files(self._run("dir").text) if x.index == f.index), None)
+        if final is None:
+            raise EngineError(f"“{f.name}” is missing after the edit: check the volume.")
+        return final
+
+    def _put_header(self, session, index: int, header: bytes) -> str | None:
+        """`puti` the bytes over the start of a file. None if it worked, else what akaiutil said (it prints its own `importing "NAME"`
+        line first, and after that only a reason)."""
+        _clear_dir(session.staging_dir)
+        (session.staging_dir / "patch.bin").write_bytes(header)
+        try:
+            said = self._run(f"puti patch.bin {index} 0 {len(header)}").text
+        finally:
             _clear_dir(session.staging_dir)
-            self._run(f"geti {f.index}")
+        reasons = [ln.strip() for ln in said.splitlines() if ln.strip() and not ln.strip().startswith("importing ")]
+        return " ".join(reasons) if reasons else None
+
+    def _read_bytes(self, session, index: int, begin: int | None = None, end: int | None = None) -> bytes:
+        """`geti`: a file's bytes (all of them, or from `begin` up to but not including `end`)."""
+        _clear_dir(session.staging_dir)
+        try:
+            span = "" if begin is None else f" {begin} {end}" if end is not None else f" {begin}"
+            self._run(f"geti {index}{span}")
             produced = [p for p in session.staging_dir.iterdir() if p.is_file()]
             if len(produced) != 1:
-                raise EngineError(f"akaiutil couldn't read “{f.name}”.")
-            original = produced[0].read_bytes()
+                raise EngineError("akaiutil couldn't read the file.")
+            return produced[0].read_bytes()
+        finally:
             _clear_dir(session.staging_dir)
-            if len(original) < size:
-                raise EngineError(f"“{f.name}” is too short to be a sample.")
-            try:
-                header = akai_header.write_settings(original[:size], new)
-            except ValueError as e:
-                raise EngineError(str(e)) from None
-            if header == original[:size]:
-                return f  # nothing was changed
-            patched = header + original[size:]
 
-            taken = {x.name.casefold() for x in files}
-            limit = parse.parse_volume_limit(text) or 510
-            free = [i for i in range(1, limit + 1) if i not in {x.index for x in files}]
-            if len(free) < 2:
-                raise EngineError(f"{vol.name} has no free file slots left to work in. Delete a file first.")
-            temp = next(n for n in (f"#EDIT{i or ''}{ext}" for i in range(100)) if n.casefold() not in taken)
-            old = next(n for n in (f"#OLD{i or ''}{ext}" for i in range(100)) if n.casefold() not in taken | {temp.casefold()})
+    def _edit_settings_by_rewrite(
+        self, vol: Volume, f: FileEntry, new: akai_header.SampleSettings, size: int, session, text: str, files: list[FileEntry]
+    ) -> FileEntry:
+        """akaiutil before 4.7 has no way to change part of a file. The sample is written again with the new header (its audio
+        untouched) and put where the old one was, with the same name, tags and OS version. The old copy is only deleted once the
+        new one is in place, and every step is checked."""
+        osver = filetags.osver_value(f.os_version)
+        if osver is None:
+            raise EngineError(f"Can't read the OS version of “{f.name}”.")
+        base, ext = akai_names.split_extension(f.name)
+        clean, problem = akai_names.check_name(base, vol.type)
+        if problem or clean.casefold() != base.casefold():
+            raise EngineError(f"“{f.name}” has a name akaiutil can't move safely, so it can't be edited.")
+        _clear_dir(session.staging_dir)
+        self._run(f"geti {f.index}")
+        produced = [p for p in session.staging_dir.iterdir() if p.is_file()]
+        if len(produced) != 1:
+            raise EngineError(f"akaiutil couldn't read “{f.name}”.")
+        original = produced[0].read_bytes()
+        _clear_dir(session.staging_dir)
+        if len(original) < size:
+            raise EngineError(f"“{f.name}” is too short to be a sample.")
+        try:
+            header = akai_header.write_settings(original[:size], new)
+        except ValueError as e:
+            raise EngineError(str(e)) from None
+        if header == original[:size]:
+            return f  # nothing was changed
+        patched = header + original[size:]
 
-            # 1. the new copy, under a temporary name
-            (session.staging_dir / "edit.tar").write_bytes(filetags.tagged_file_tar(temp, patched, osver, f.tag_numbers))
-            said = self._run("tarx edit.tar", timeout=600).text
-            _clear_dir(session.staging_dir)
-            after = parse.parse_files(self._run("dir").text)
-            made = next((x for x in after if akai_names.same_name(x.name, temp)), None)
-            if made is None or made.size != f.size:
-                if made is not None:
-                    self._write(f"deli {made.index}")
-                reason = " ".join(ln.strip() for ln in said.splitlines() if ln.strip())
-                raise EngineError(f"akaiutil couldn't write the new copy of “{f.name}”{': ' + reason if reason else ''}. Nothing was changed.")
-            moved_old = False
-            try:
-                # 2. the old one steps aside, 3. the new one takes its name and place
-                spare = next(i for i in free if i != made.index)
-                self._write(f"reni {f.index} {akai_names.command_token(old)} {spare}")
-                moved_old = True
-                self._write(f"reni {made.index} {akai_names.command_token(f.name)} {f.index}")
-                self._write(f"fixramnamei {f.index}")  # (the name inside the header is the temporary one)
-                # 4. check it before the old one goes
-                now = next((x for x in parse.parse_files(self._run("dir").text) if x.index == f.index), None)
-                if now is None or not akai_names.same_name(now.name, f.name) or (now.size, now.os_version, now.tags) != (f.size, f.os_version, f.tags):
-                    raise EngineError("the new copy didn't come out the same size, OS version and tags as the original")
-                if self._read_whole(f.index, session)[size:] != original[size:]:
-                    raise EngineError("the audio of the new copy isn't the same as the original's")
-            except EngineError as e:
-                self._undo_sample_edit(f, old, temp, made.index, spare if moved_old else None)
-                raise EngineError(f"“{f.name}” wasn't changed: {e}.") from None
-            self._write(f"deli {spare}")  # (the old copy, now in the spare slot)
-            final = next((x for x in parse.parse_files(self._run("dir").text) if x.index == f.index), None)
-            if final is None:
-                raise EngineError(f"“{f.name}” is missing after the edit: check {vol.name}.")
-            return final
+        taken = {x.name.casefold() for x in files}
+        limit = parse.parse_volume_limit(text) or 510
+        free = [i for i in range(1, limit + 1) if i not in {x.index for x in files}]
+        if len(free) < 2:
+            raise EngineError(f"{vol.name} has no free file slots left to work in. Delete a file first.")
+        temp = next(n for n in (f"#EDIT{i or ''}{ext}" for i in range(100)) if n.casefold() not in taken)
+        old = next(n for n in (f"#OLD{i or ''}{ext}" for i in range(100)) if n.casefold() not in taken | {temp.casefold()})
+
+        # 1. the new copy, under a temporary name
+        (session.staging_dir / "edit.tar").write_bytes(filetags.tagged_file_tar(temp, patched, osver, f.tag_numbers))
+        said = self._run("tarx edit.tar", timeout=600).text
+        _clear_dir(session.staging_dir)
+        after = parse.parse_files(self._run("dir").text)
+        made = next((x for x in after if akai_names.same_name(x.name, temp)), None)
+        if made is None or made.size != f.size:
+            if made is not None:
+                self._write(f"deli {made.index}")
+            reason = " ".join(ln.strip() for ln in said.splitlines() if ln.strip())
+            raise EngineError(f"akaiutil couldn't write the new copy of “{f.name}”{': ' + reason if reason else ''}. Nothing was changed.")
+        moved_old = False
+        try:
+            # 2. the old one steps aside, 3. the new one takes its name and place
+            spare = next(i for i in free if i != made.index)
+            self._write(f"reni {f.index} {akai_names.command_token(old)} {spare}")
+            moved_old = True
+            self._write(f"reni {made.index} {akai_names.command_token(f.name)} {f.index}")
+            self._write(f"fixramnamei {f.index}")  # (the name inside the header is the temporary one)
+            # 4. check it before the old one goes
+            now = next((x for x in parse.parse_files(self._run("dir").text) if x.index == f.index), None)
+            if now is None or not akai_names.same_name(now.name, f.name) or (now.size, now.os_version, now.tags) != (f.size, f.os_version, f.tags):
+                raise EngineError("the new copy didn't come out the same size, OS version and tags as the original")
+            if self._read_whole(f.index, session)[size:] != original[size:]:
+                raise EngineError("the audio of the new copy isn't the same as the original's")
+        except EngineError as e:
+            self._undo_sample_edit(f, old, temp, made.index, spare if moved_old else None)
+            raise EngineError(f"“{f.name}” wasn't changed: {e}.") from None
+        self._write(f"deli {spare}")  # (the old copy, now in the spare slot)
+        final = next((x for x in parse.parse_files(self._run("dir").text) if x.index == f.index), None)
+        if final is None:
+            raise EngineError(f"“{f.name}” is missing after the edit: check {vol.name}.")
+        return final
 
     def _read_whole(self, index: int, session) -> bytes:
         _clear_dir(session.staging_dir)

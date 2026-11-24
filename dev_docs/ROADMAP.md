@@ -8,7 +8,7 @@ Last updated 2026-10-30. Current status of the app is in the
 None of this could be checked by the test runs, which use a fake audio device, offscreen Qt and akaiutil reading its own output back.
 
 - [ ] **A real sampler.** Load an edited, imported or copied image into an S3000/S1000/S900 (or Gotek/SCSI2SD setup). Especially:
-      sample-settings edits, imported loops and root notes, stereo `-L`/`-R` pairs (an edit doesn't touch the partner address,
+      sample-settings edits (written in place with `puti` since akaiutil 4.7, 2026-11-24; only akaiutil has read them back), imported loops and root notes, stereo `-L`/`-R` pairs (an edit doesn't touch the partner address,
       `stpaira`), S900 samples and compressed S9C, and files copied into a new volume.
 - [ ] **Files added anyway to a volume of another sampler** (an `.S3` in an S1000 or S900 volume). akaiutil writes them with the
       volume's OS version in place of the file's (4.40 in an S1000 volume, none in an S900 one). Check that an S3000-series sampler
