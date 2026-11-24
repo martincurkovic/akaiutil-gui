@@ -25,7 +25,7 @@ dependencies = [
 akaiutil-gui = "akaiutil_gui.main:main"
 
 [dependency-groups]
-dev = ["pytest>=9", "pyyaml>=6"]
+dev = ["pytest>=9", "pyyaml>=6", "ruff>=0.15"]
 # Only needed to make the standalone apps (scripts/build_*): Nuitka does the compiling, dmgbuild lays out the macOS DMG, and
 # imageio lets it turn the PNG icon into a Windows .ico. Same Nuitka pin as AKAISDS.
 # PySide6-Addons: Nuitka's PySide6 plugin refuses to run without it, even though the app only uses
@@ -35,6 +35,17 @@ build = ["Nuitka==4.1.3", "imageio>=2.37.4", "PySide6-Addons>=6.12,<6.13", "dmgb
 [tool.uv]
 # plain `uv sync` (which the build scripts and CI run) installs both groups
 default-groups = ["dev", "build"]
+
+[tool.ruff]
+# The code uses long lines on purpose; this keeps `uv run ruff check` to real problems (pycodestyle errors and pyflakes only).
+line-length = 140
+extend-exclude = ["akaiutil-*", "build"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+# F811: the tests import pytest fixtures from other test modules and take them as arguments, which looks like a redefinition.
+# E741: `l` is used for a loop in the marker code and its tests.
+ignore = ["F811", "E741"]
 
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]

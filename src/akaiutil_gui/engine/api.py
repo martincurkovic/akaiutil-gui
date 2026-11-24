@@ -23,20 +23,52 @@ from pathlib import Path
 from .. import akai_header, akai_names, describe, references, sorting, tags as filetags
 from ..audio import wavfile
 from ..formatting import human_size
-from . import formats, parse
+from . import formats, locate, parse
 from .models import DD_CLUSTER_BYTES, Disk, DiskUsage, ExportResult, FileEntry, ImportJob, Partition, PartitionCopy, SampleInfo, Take, Volume, VolumeCopy, take_clusters
 from .session import EngineError, Session, TrafficCallback
 
 log = logging.getLogger(__name__)
 
 
+# What akaiutil 4.7 added or fixed (dev_docs/akaiutil-notes.md): the tag commands (settagi, clrtagi, settagall, clrtagall) crash 4.6.7 and
+# 4.6.8, and `puti` (write bytes into an existing file) doesn't exist before it.
+MIN_VERSION_TAG_EDITING = (4, 7)
+MIN_VERSION_PUTI = (4, 7)
+
+
 class AkaiEngine:
     def __init__(self, binary: str | os.PathLike, on_traffic: TrafficCallback | None = None):
         self._binary = binary
+        self._version: tuple[int, ...] | None = None
+        self._version_read = False
         self._on_traffic = on_traffic
         self._session: Session | None = None
         self._lock = threading.RLock()
         self._tag_names: dict[tuple[int, str], dict[int, str]] = {}  # (disk, partition) -> its tag names; they never change under us
+
+    # ------------------------------------------------------------ version
+    @property
+    def version(self) -> tuple[int, ...] | None:
+        """The akaiutil version, e.g. (4, 7), asked of the program once (it runs `akaiutil -h`) and then remembered. None if
+        it can't be read; the capability checks below then say no, because a program that won't say what it is may be an old one."""
+        with self._lock:
+            if not self._version_read:
+                self._version = locate.parse_version(locate.binary_version(Path(self._binary)))
+                self._version_read = True
+            return self._version
+
+    def at_least(self, minimum: tuple[int, ...]) -> bool:
+        version = self.version
+        return version is not None and version >= minimum
+
+    @property
+    def can_edit_tags(self) -> bool:
+        return self.at_least(MIN_VERSION_TAG_EDITING)
+
+    @property
+    def can_put_bytes(self) -> bool:
+        """`puti`: write a chunk of bytes into an existing file in place."""
+        return self.at_least(MIN_VERSION_PUTI)
 
     # ------------------------------------------------------------ lifecycle
     @property

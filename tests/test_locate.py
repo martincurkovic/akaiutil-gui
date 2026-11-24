@@ -32,6 +32,18 @@ def test_no_version_when_it_cant_be_run_or_says_nothing(tmp_path):
     assert locate.binary_version(fake_binary(tmp_path)) is None  # prints "usage" only
 
 
+@pytest.mark.parametrize(
+    "text, expected",
+    [("4.7", (4, 7)), ("4.6.8", (4, 6, 8)), ("4.7a", (4, 7)), (" 5 ", (5,)), ("", None), (None, None), ("Rev. 4.7", None), ("x4.7", None)],
+)
+def test_parse_version(text, expected):
+    assert locate.parse_version(text) == expected
+
+
+def test_versions_compare_as_numbers_not_text():
+    assert locate.parse_version("4.10") > locate.parse_version("4.7") > locate.parse_version("4.6.8")
+
+
 @pytest.fixture
 def frozen(monkeypatch, tmp_path):
     """Pretend to be a built app unpacked into tmp_path/app."""

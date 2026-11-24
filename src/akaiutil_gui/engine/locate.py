@@ -59,6 +59,12 @@ def candidates(configured: str | None = None) -> list[Path]:
     return found
 
 
+def parse_version(text: str | None) -> tuple[int, ...] | None:
+    """"4.7" -> (4, 7); "4.6.8" -> (4, 6, 8); a trailing letter ("4.7a") is ignored. None for anything that isn't a number."""
+    found = re.match(r"\d+(?:\.\d+)*", (text or "").strip())
+    return tuple(int(n) for n in found.group().split(".")) if found else None
+
+
 def find_akaiutil(configured: str | None = None) -> Path | None:
     for path in candidates(configured):
         if path.is_file() and os.access(path, os.X_OK):

@@ -140,3 +140,46 @@ def test_disk_usage_adds_up(engine):
             files = sum(v.used_bytes for v in usage.volumes_in(p.name))
             overhead = p.used_bytes - files  # headers, FAT and volume directories
             assert 0 <= overhead < 0.1 * p.size_bytes, (d.path, p.name, overhead)
+
+
+def _stub_binary(folder, banner):
+    from akaiutil_gui.engine import locate
+
+    path = folder / locate.EXE_NAME
+    path.write_text(f"#!/bin/sh\necho '{banner}'\n" if banner else "#!/bin/sh\necho usage\n")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.mark.parametrize(
+    "banner, version, newer",
+    [
+        ("*  AKAI S900/S1000/S3000 File Manager, Rev. 4.6.8  *", (4, 6, 8), False),
+        ("*  AKAI S900/S1000/S3000 File Manager, Rev. 4.7  *", (4, 7), True),
+        ("*  AKAI S900/S1000/S3000 File Manager, Rev. 4.10  *", (4, 10), True),
+        (None, None, False),  # says nothing: treated as old
+    ],
+)
+def test_the_engine_gates_4_7_features_on_the_version(tmp_path, banner, version, newer):
+    from akaiutil_gui.engine.api import AkaiEngine
+
+    eng = AkaiEngine(_stub_binary(tmp_path, banner))
+    assert eng.version == version
+    assert eng.can_edit_tags is newer and eng.can_put_bytes is newer
+
+
+def test_the_version_is_asked_only_once(tmp_path):
+    from akaiutil_gui.engine.api import AkaiEngine
+
+    path = _stub_binary(tmp_path, "File Manager, Rev. 4.7")
+    eng = AkaiEngine(path)
+    assert eng.version == (4, 7)
+    path.unlink()
+    assert eng.version == (4, 7) and eng.can_edit_tags  # remembered, not asked again
+
+
+def test_the_pinned_akaiutil_has_the_4_7_features(engine):
+    from akaiutil_gui.engine import fetch, locate
+
+    assert engine.version == locate.parse_version(fetch.VERSION)
+    assert engine.can_edit_tags and engine.can_put_bytes
