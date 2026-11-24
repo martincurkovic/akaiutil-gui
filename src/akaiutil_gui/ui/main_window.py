@@ -588,6 +588,7 @@ class MainWindow(QMainWindow):
         self.act_rename = self._action("&Rename…", self._rename_focused)
         self.act_sample_settings = self._action("Sample Se&ttings…", self._sample_settings_selected)
         self.act_tag_files = self._action("Tag &Files…", self._tag_selected)
+        self.act_rename_tags = self._action("Rename Ta&gs…", self._rename_tags)
         self.act_delete = self._action("&Delete…", self._delete_focused)
         self.act_copy = self._action(
             "&Copy Files",
@@ -621,6 +622,7 @@ class MainWindow(QMainWindow):
                 self.act_sort,
                 self.act_sample_settings,
                 self.act_tag_files,
+                self.act_rename_tags,
                 self.act_rename,
                 self.act_delete,
             ]
@@ -2292,6 +2294,7 @@ class MainWindow(QMainWindow):
         old_akaiutil = bool(tag_rows) and not self._can_edit_tags()
         self.act_tag_files.setEnabled(bool(tag_rows) and not old_akaiutil)
         self.act_tag_files.setToolTip("Editing tags needs akaiutil 4.7 or newer." if old_akaiutil else "Give the selected files tags, or take them away.")
+        self.act_rename_tags.setEnabled(has and self._tag_partition() is not None)
         self.act_copy.setEnabled(bool(rows))
         self.act_cut.setEnabled(bool(rows))
         self.act_paste.setEnabled(
@@ -2417,6 +2420,49 @@ class MainWindow(QMainWindow):
         if not rows or len({(v.disk, v.partition) for v, _ in rows}) != 1:
             return []
         return [(v, f) for v, f in rows if filetags.untaggable_reason(v.type, f.kind) is None]
+
+    @staticmethod
+    def _has_tags(part: Partition) -> bool:
+        """A hard disk partition of an S1000 or S3000 has 26 tag names (a floppy, a direct-to-disk area or an S900 disk has none)."""
+        return part.type == "HD" and not part.is_dd
+
+    def _tag_partition(self) -> Partition | None:
+        """The partition whose tags Rename Tags would rename: the selected partition, or that of the selected volume."""
+        obj = self.tree.current_object()
+        if isinstance(obj, Volume):
+            obj = self.tree.partition(obj.disk, obj.partition)
+        return obj if isinstance(obj, Partition) and self._has_tags(obj) else None
+
+    def _rename_tags(self, part: Partition | None = None) -> None:
+        part = part if isinstance(part, Partition) else self._tag_partition()
+        if part is None or self._engine is None or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_rename_tags(part))
+
+    def _ask_tag_names(self, part: Partition, names: dict[int, str]) -> dict[int, str] | None:
+        dialog = edit_dialogs.TagNamesDialog(self, part.name, names)
+        return dialog.changes if dialog.exec() == dialog.DialogCode.Accepted else None
+
+    def _do_rename_tags(self, part: Partition) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+
+        def show(names: dict[int, str]) -> None:
+            if not names:
+                self._warn("No tags", f"Partition {part.name} has no tags to rename.")
+                return
+            changes = self._ask_tag_names(part, names)
+            if not changes:
+                return
+
+            def done(_after: dict[int, str]) -> None:
+                n = len(changes)
+                self._edited(part.disk, message=f"Renamed {n} tag{'s' if n != 1 else ''} of partition {part.name}.")
+
+            self._run_edit(lambda: engine.rename_tags(part, changes), done, lambda message: self._edit_failed(part.disk, message))
+
+        self._run(lambda: engine.partition_tag_names(part), show)
 
     def _on_details_link(self, link_id: str) -> None:
         if link_id == describe.TAGS_LINK:
@@ -3512,6 +3558,8 @@ class MainWindow(QMainWindow):
             if self._can_hold_volumes(obj):
                 menu.addAction("New Volume…", lambda: self._new_volume(obj))
                 menu.addAction("Copy Partition To…", lambda: self._copy_partition(obj))
+            if self._has_tags(obj):
+                menu.addAction("Rename Tags…", lambda: self._rename_tags(obj))
             if obj.is_dd:
                 menu.addAction("Import Takes…", lambda: self._import_takes_dialog(obj))
                 menu.addAction("Export Takes as WAV…", lambda: self._export_takes(obj, None, True))

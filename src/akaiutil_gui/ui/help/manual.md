@@ -254,6 +254,10 @@ A hard disk partition has 26 tags, and each file can carry up to four of them. A
 
 A tick means every selected file has that tag, a dash means only some of them do, and an empty box means none. Click a box to tick or clear it. A dashed tag you leave alone stays as it is on each file. The tags are named after the partition's tag names; a floppy has none, so its tags show as "Tag 1" and so on.
 
+### Renaming the tags
+
+The 26 tags are named per partition. Select a partition (or a volume in it) and choose **Edit > Rename Tags…**, or right-click the partition. Type the new names (up to 12 characters, capitals, the same characters as file names) and press OK; **Default Names** puts back `TAG A` to `TAG Z`. The files keep their tags and show them under the new names. A tag can't be given an empty name, but one that has none can be left as it is. A hard disk partition of an S1000 or S3000 has tags; a floppy, an S900 disk and a direct-to-disk area don't.
+
 Nothing else about a file changes. Editing tags needs akaiutil 4.7 or newer, which is the version the app downloads. Files in S900 volumes have no tags, and an S1000 floppy's operating system file keeps its bytes (they hold the sampler model), so those can't be tagged.
 
 ---
@@ -361,7 +365,7 @@ The log holds the app's version, your operating system, the images you opened an
 
 - **No undo,** and changes are written at once. Say yes to the backup when editing is switched on, and use **File > Revert to Backup…** to go back.
 - A sample's loops, root key, tuning, play mode and markers can be changed with **Edit > Sample Settings…** (S1000 and S3000 samples only).
-- Files can be tagged with **Edit > Tag Files…** (see [Tagging files](#tagging-files)); renaming a partition's tags isn't possible yet.
+- Files can be tagged with **Edit > Tag Files…** (see [Tagging files](#tagging-files)), and a partition's tags can be renamed with **Edit > Rename Tags…**.
 - S900 samples are previewed as one-shots, and get no loops on import.
 - Direct-to-disk recordings (takes) can be exported, imported, renamed and deleted, but only recordings made by akaiutil have been tried (see [Direct-to-disk takes](#direct-to-disk-takes)).
 - Adding or closing a disk image restarts akaiutil, so disk numbers can change and the search index is rebuilt.

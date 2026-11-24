@@ -886,6 +886,42 @@ class AkaiEngine:
                 self._enter_volume(vol)
             return self._partition_tag_names(vol.disk, vol.partition)
 
+    def partition_tag_names(self, part: Partition) -> dict[int, str]:
+        """The names of the tags of a hard disk partition ({} if it has none), read fresh from the disk."""
+        with self._lock:
+            self._run(f"cd {part.path}")
+            self._tag_names.pop((part.disk, part.name), None)
+            return dict(self._partition_tag_names(part.disk, part.name))
+
+    def rename_tags(self, part: Partition, names: dict[int, str]) -> dict[int, str]:
+        """Give some of a partition's 26 tags new names ({tag number: name}). Returns all the names as they are afterwards.
+        Each name is the 12-character name akaiutil stores (capitals, an underscore reads as a space); the files keep their
+        tags, so they show under the new names."""
+        with self._lock:
+            log.info("rename %d tag(s) of partition %s on disk%d", len(names), part.name, part.disk)
+            self._need_writable()
+            if part.type != "HD" or part.is_dd:
+                raise EngineError("Only a hard disk partition of an S1000 or S3000 has tags.")
+            wanted: dict[int, str] = {}
+            for n, text in names.items():
+                if not 1 <= n <= filetags.TAG_COUNT:
+                    raise EngineError(f"Tags are numbered 1 to {filetags.TAG_COUNT}.")
+                name, problem = akai_names.check_name(text, "S3000")
+                if problem:
+                    raise EngineError(f"Tag {n}: {problem}")
+                wanted[n] = name
+            before = self.partition_tag_names(part)
+            if not before:
+                raise EngineError(f"Partition {part.name} has no tags to rename.")
+            for n, name in wanted.items():
+                if not akai_names.same_name(before.get(n, ""), name):
+                    self._write(f"rentag {n} {akai_names.command_token(name)}")
+            after = self.partition_tag_names(part)
+            wrong = [n for n, name in wanted.items() if not akai_names.same_name(after.get(n, ""), name)]
+            if wrong:
+                raise EngineError("akaiutil didn't rename tag " + ", ".join(str(n) for n in wrong) + ".")
+            return after
+
     def change_file_tags(self, vol: Volume, files: list[FileEntry], add: list[int], remove: list[int]) -> list[str]:
         """Give files of one volume the tags in `add` and take away those in `remove` (numbers 1-26 into the partition's tag names).
         Needs akaiutil 4.7 (before it the tag commands crash). Each file is changed on its own and checked afterwards; returns

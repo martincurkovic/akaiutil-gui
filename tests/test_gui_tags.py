@@ -213,3 +213,94 @@ def test_the_details_link_opens_the_tag_dialog(qt_app, window, editable_hd, answ
     window._on_details_link(describe.TAGS_LINK)
     assert pump(qt_app, lambda: "Changed the tags of 1 file." in window.statusBar().currentMessage())
     assert pump(qt_app, lambda: "Tag 2" in window.info.toPlainText() or "TAG B" in window.info.toPlainText())
+
+
+# --------------------------------------------------------------------------------- renaming a partition's tags
+@pytest.fixture
+def asked_names(monkeypatch):
+    """Stand-in for the Rename Tags dialog: records the names it was shown and answers {number: name}, or None for Cancel."""
+
+    class Asked:
+        answer = None
+        shown: list = []
+
+    a = Asked()
+    a.shown = []
+    monkeypatch.setattr(MainWindow, "_ask_tag_names", lambda self, part, names: (a.shown.append((part.name, dict(names))), a.answer)[1])
+    return a
+
+
+def test_the_names_dialog_lists_the_names_and_reports_what_was_changed(qt_app):
+    names = {n: f"TAG {chr(64 + n)}" for n in range(1, 27)}
+    names[3] = ""
+    d = edit_dialogs.TagNamesDialog(None, "A", names)
+    ok = d.buttons.button(d.buttons.StandardButton.Ok)
+    assert d._edits[1].text() == "TAG A" and d._edits[3].text() == "" and d._edits[3].placeholderText() == "Tag 3"
+    assert d.changes == {} and not ok.isEnabled()
+    d._edits[1].setText("kicks")  # (setText isn't the user typing, so nothing tidies it: the dialog tidies on the way out)
+    d._edits[3].setText("bass_line")
+    assert d.changes == {1: "KICKS", 3: "BASS LINE"} and ok.isEnabled()
+    d._edits[1].setText("tag a")  # back to what it was
+    assert d.changes == {3: "BASS LINE"}
+    d.deleteLater()
+
+
+def test_the_names_dialog_wont_take_a_blank_or_bad_name(qt_app):
+    d = edit_dialogs.TagNamesDialog(None, "A", {n: f"TAG {chr(64 + n)}" for n in range(1, 27)})
+    ok = d.buttons.button(d.buttons.StandardButton.Ok)
+    d._edits[2].setText("")
+    assert not ok.isEnabled() and d.problem.text().startswith("Tag 2:")
+    d._edits[2].setText("FINE")
+    assert ok.isEnabled() and d.problem.text() == ""
+    d._edits[4].setText("a/b")
+    assert not ok.isEnabled() and "Tag 4" in d.problem.text()
+    d.deleteLater()
+
+
+def test_default_names_fill_in_tag_a_to_z(qt_app):
+    d = edit_dialogs.TagNamesDialog(None, "A", {n: "X" for n in range(1, 27)})
+    next(b for b in d.buttons.buttons() if b.text() == "Default Names").click()
+    assert d._edits[1].text() == "TAG A" and d._edits[26].text() == "TAG Z"
+    assert len(d.changes) == 26
+    d.deleteLater()
+
+
+def test_rename_tags_from_the_edit_menu(qt_app, window, editable_hd, answers, asked_names):
+    open_and_show(qt_app, window, editable_hd)  # (a volume is selected: its partition's tags are the ones renamed)
+    window._update_edit_actions()
+    assert window.act_rename_tags.isEnabled()
+    answers.confirm = True
+    asked_names.answer = {1: "KICKS", 2: "SNARES"}
+    window.act_rename_tags.trigger()
+    assert pump(qt_app, lambda: window._writable and "Renamed 2 tags of partition A" in window.statusBar().currentMessage())
+    assert asked_names.shown[0][0] == "A" and asked_names.shown[0][1][1] == "TAG A" and len(asked_names.shown[0][1]) == 26
+    assert pump(qt_app, lambda: window._engine.partition_tag_names(window.tree.partition(0, "A"))[1] == "KICKS")
+    assert answers.warnings == []
+
+
+def test_a_tagged_file_is_listed_under_the_new_name(qt_app, window, editable_hd, answers, asked_tags, asked_names):
+    open_and_show(qt_app, window, editable_hd)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    answers.confirm = True
+    asked_tags.answer = ([2], [])
+    window._tag_selected()
+    assert pump(qt_app, lambda: "Changed the tags of 1 file." in window.statusBar().currentMessage())
+    assert pump(qt_app, lambda: window._pending == 0 and window._writing == 0)
+    asked_names.answer = {2: "SNARES"}
+    assert pump(qt_app, lambda: window.tree.current_object() is not None)  # (the tree puts its selection back once it has reloaded)
+    window._rename_tags()
+    assert pump(qt_app, lambda: "Renamed 1 tag of partition A" in window.statusBar().currentMessage())
+    assert pump(qt_app, lambda: any("SNARES" in window.table.item(r, c).text() for r in range(window.table.rowCount()) for c in range(window.table.columnCount()) if window.table.item(r, c)))
+
+
+def test_the_partition_menu_offers_rename_tags_only_where_there_are_tags(qt_app, window, editable_hd, images, answers):
+    open_and_show(qt_app, window, editable_hd)
+    texts = lambda menu: [a.text() for a in menu.actions() if not a.isSeparator()]  # noqa: E731
+    assert "Rename Tags…" in texts(window._tree_menu(window.tree.partition(0, "A")))
+    window.close_images()
+    window.open_images([str(images["fl1"])])
+    assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1)
+    assert pump(qt_app, lambda: window._pending == 0)
+    part = window._engine.list_partitions(window._engine.list_disks()[0])[0]  # (a floppy's one partition isn't shown in the tree)
+    assert part.type.startswith("FL") and "Rename Tags…" not in texts(window._tree_menu(part))

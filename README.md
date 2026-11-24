@@ -29,7 +29,7 @@ A cross-platform Qt GUI for [akaiutil](https://sourceforge.net/projects/akaiutil
 - **Editing**: rename and delete files and volumes, create volumes, import samples, format and create new empty disk images.
 - **Direct-to-disk takes** (S1100/S3000 recordings): list them, export as WAV or `.TK`, import, rename and delete.
 - **Sample settings**: change an S1000/S3000 sample's root key, tuning, play mode, markers and loops (same mechanism as [AKAISDS](https://github.com/martincurkovic/AKAISDS)).
-- **Tags**: give files tags or take them away, one file or many (needs akaiutil 4.7 or newer).
+- **Tags**: give files tags or take them away, one file or many (needs akaiutil 4.7 or newer), and rename a partition's tags.
 - **Settings**: light, dark or Macintosh System 6 theme, audio output device and buffer size.
 
 Looks like [AKAISDS](https://github.com/martincurkovic/AKAISDS) (shared light/dark theme), and a black-and-white Macintosh System 6 theme (**View > Theme**).

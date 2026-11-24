@@ -77,6 +77,10 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   An S1000 floppy file accepts tags (there are no names for them: `lstags` is per partition). `rentag <n> <name>` renames a tag of the partition (capitals, `_` for a space).
   `settagall`/`clrtagall` act on the whole volume, so `engine.change_file_tags` uses the per-file commands (`settagi`/`clrtagi`), clears first, and checks the listing afterwards.
   It leaves OS files of S1000-and-older volumes alone: their four tag bytes hold the sampler model (os-floppy.md).
+- **`rentag <n> <name>`** (all versions we looked at; measured 2026-11-24 on 4.7) renames tag *n* of the partition akaiutil is in, which must be at partition level
+  (`cd /disk0/A`, not inside a volume), on a writable disk. The name is stored as an S1000/S3000 name (12 characters, capitals; `_` reads as a space), and a name needs at least one character
+  because the command takes it as an argument, so a tag can't be blanked. `rentag 30 X` says `invalid volume index` (wrong wording). A partition that isn't `HD` says `no tags in this partition type`.
+  `engine.rename_tags` checks every name first, writes only the ones that differ, then reads `lstags` back and compares; names are per partition (`_tag_names` is refreshed).
 
 ## Copying volumes
 - `copyvoli <n> <dst-path>` (run from the source partition) copies a volume across partitions and disks with everything: the files

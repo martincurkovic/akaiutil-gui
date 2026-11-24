@@ -1053,6 +1053,68 @@ class TagFilesDialog(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(changes and not too_many)
 
 
+class TagNamesDialog(QDialog):
+    """The 26 tag names of a hard disk partition, to be edited. `changes` is {tag number: new name} for the ones that were."""
+
+    def __init__(self, parent, partition: str, names: dict[int, str]):
+        super().__init__(parent)
+        self.setWindowTitle(f"Rename Tags of Partition {partition}")
+        self.setMinimumWidth(520)
+        self._start = {n: names.get(n, "").strip() for n in range(1, filetags.TAG_COUNT + 1)}
+        self._edits: dict[int, AkaiNameEdit] = {}
+        grid = QGridLayout()
+        per_column = (filetags.TAG_COUNT + 1) // 2
+        for n in range(1, filetags.TAG_COUNT + 1):
+            edit = AkaiNameEdit(self._start[n], "S3000")
+            edit.setPlaceholderText(f"Tag {n}")
+            edit.textChanged.connect(self._validate)
+            edit.rejected.connect(lambda note: self.problem.setText(note))
+            self._edits[n] = edit
+            column = (n - 1) // per_column
+            grid.addWidget(QLabel(f"{n:02d}"), (n - 1) % per_column, column * 2)
+            grid.addWidget(edit, (n - 1) % per_column, column * 2 + 1)
+        self.problem = _problem_label()
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        defaults = self.buttons.addButton("Default Names", QDialogButtonBox.ButtonRole.ResetRole)
+        defaults.setToolTip("Fill in TAG A to TAG Z, the names a new partition has.")
+        defaults.clicked.connect(self._fill_defaults)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Names for the tags (up to 12 characters). Files keep their tags; they show under the new names."))
+        layout.addLayout(grid)
+        layout.addWidget(self.problem)
+        layout.addWidget(self.buttons)
+        self._validate()
+
+    def _fill_defaults(self) -> None:
+        for n, edit in self._edits.items():
+            edit.setText(f"TAG {chr(ord('A') + n - 1)}")
+
+    def _checked(self) -> tuple[dict[int, str], str | None]:
+        """(the names that differ from what they were, the first problem). An empty field is fine only if it was empty."""
+        changes, problem = {}, None
+        for n, edit in self._edits.items():
+            text = edit.text().strip()
+            if not text and not self._start[n]:
+                continue
+            name, why = akai_names.check_name(text, "S3000")
+            if why:
+                problem = problem or f"Tag {n}: {why}"
+            elif not akai_names.same_name(name, self._start[n]):
+                changes[n] = name
+        return changes, problem
+
+    @property
+    def changes(self) -> dict[int, str]:
+        return self._checked()[0]
+
+    def _validate(self) -> None:
+        changes, problem = self._checked()
+        self.problem.setText(problem or "")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(problem is None and bool(changes))
+
+
 OTHER = "other"  # what confirm() answers when the second action was chosen
 
 

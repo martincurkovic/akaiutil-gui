@@ -377,7 +377,7 @@ def test_context_menus_offer_what_fits_what_was_clicked(qt_app, window, editable
     open_and_show(qt_app, window, editable_hd)
     texts = lambda menu: [a.text().replace("&", "") for a in menu.actions() if not a.isSeparator()]  # noqa: E731
     assert texts(window._tree_menu(window._volume)) == ["Import Files…", "Paste Files", "Sort Files by Name…", "Select Unused Samples", "Export Samples as WAV…", "Copy Volume To…", "Rename…", "Delete…"]
-    assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…", "Copy Partition To…", "Export Samples as WAV…"]
+    assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…", "Copy Partition To…", "Rename Tags…", "Export Samples as WAV…"]
 
     window.table.selectRow(0)
     rows = window._selected_rows()
