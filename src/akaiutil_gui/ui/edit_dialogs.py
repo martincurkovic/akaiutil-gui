@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 
 import dataclasses
 
-from akaiutil_gui import akai_header, akai_names, backup, importing, settings, sorting
+from akaiutil_gui import akai_header, akai_names, backup, importing, settings, sorting, tags as filetags
 from akaiutil_gui.audio import preview
 from akaiutil_gui.audio.preview import PreviewPlayer
 from akaiutil_gui.audio.sample import PlaybackPlan
@@ -982,6 +982,75 @@ class SortDialog(QDialog):
     @property
     def scope(self) -> str:
         return sorting.SAMPLES if self.only_samples.isChecked() else sorting.ALL
+
+
+class _TagBox(QCheckBox):
+    """A tag's check box: checked (every file has it), empty (none does), or dashed (some do). Clicking a dashed one ticks it."""
+
+    def __init__(self, text: str):
+        super().__init__(text)
+        self.setTristate(True)
+
+    def nextCheckState(self) -> None:
+        self.setCheckState(Qt.CheckState.Unchecked if self.checkState() == Qt.CheckState.Checked else Qt.CheckState.Checked)
+
+
+class TagFilesDialog(QDialog):
+    """Which of a partition's 26 tags the chosen files carry. `add` and `remove` are what the user changed, as tag numbers."""
+
+    def __init__(self, parent, files: list, names: dict[int, str]):
+        super().__init__(parent)
+        self._files = files
+        self.setWindowTitle("Tag Files" if len(files) > 1 else "Tags")
+        self.setMinimumWidth(460)
+        have = [set(f.tag_numbers) for f in files]
+        self._start: dict[int, Qt.CheckState] = {}
+        self._boxes: dict[int, _TagBox] = {}
+        grid = QGridLayout()
+        per_column = (filetags.TAG_COUNT + 1) // 2
+        for n in range(1, filetags.TAG_COUNT + 1):
+            count = sum(n in h for h in have)
+            state = Qt.CheckState.Checked if count == len(files) else Qt.CheckState.PartiallyChecked if count else Qt.CheckState.Unchecked
+            label = (names.get(n) or "").strip()
+            box = _TagBox(f"{n:02d}  {label}" if label else f"{n:02d}  Tag {n}")
+            box.setCheckState(state)
+            box.stateChanged.connect(self._validate)
+            self._start[n], self._boxes[n] = state, box
+            grid.addWidget(box, (n - 1) % per_column, (n - 1) // per_column)
+        what = f"“{files[0].name}”" if len(files) == 1 else f"{len(files)} files"
+        intro = f"Tags of {what}:" if len(files) == 1 else f"Tags of {what}. A dash means only some of them have it."
+        self.problem = _problem_label()
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(intro))
+        layout.addLayout(grid)
+        layout.addWidget(self.problem)
+        layout.addWidget(self.buttons)
+        self._validate()
+
+    @property
+    def add(self) -> list[int]:
+        """The tags that are ticked now though not every file had them."""
+        return [n for n, b in self._boxes.items() if b.checkState() == Qt.CheckState.Checked and self._start[n] != Qt.CheckState.Checked]
+
+    @property
+    def remove(self) -> list[int]:
+        """The tags that are empty now though some file had them."""
+        return [n for n, b in self._boxes.items() if b.checkState() == Qt.CheckState.Unchecked and self._start[n] != Qt.CheckState.Unchecked]
+
+    def _validate(self) -> None:
+        add, remove = self.add, self.remove
+        plans = [(f, filetags.plan_change(f.tag_numbers, add, remove)) for f in self._files]
+        too_many = [f.name for f, plan in plans if plan[3]]
+        changes = any(plan[0] or plan[1] for _, plan in plans)
+        if too_many:
+            shown = ", ".join(f"“{n}”" for n in too_many[:3]) + (" …" if len(too_many) > 3 else "")
+            self.problem.setText(f"A file holds up to {filetags.MAX_FILE_TAGS} tags; {shown} would have more.")
+        else:
+            self.problem.setText("")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(changes and not too_many)
 
 
 OTHER = "other"  # what confirm() answers when the second action was chosen

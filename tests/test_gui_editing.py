@@ -382,7 +382,7 @@ def test_context_menus_offer_what_fits_what_was_clicked(qt_app, window, editable
     window.table.selectRow(0)
     rows = window._selected_rows()
     menu = window._file_menu(rows)
-    assert texts(menu) == ["Export…", "Export as WAV…", "Copy", "Cut", "Rename…", "Sample Settings…", "Delete…"]
+    assert texts(menu) == ["Export…", "Export as WAV…", "Copy", "Cut", "Rename…", "Sample Settings…", "Tags…", "Delete…"]
     window.table.selectAll()
     menu = window._file_menu(window._selected_rows())
     rename = next(a for a in menu.actions() if a.text() == "Rename…")

@@ -45,6 +45,7 @@ from akaiutil_gui import (
     search,
     settings,
     sorting,
+    tags as filetags,
     takes as take_files,
     transfer,
 )
@@ -357,6 +358,7 @@ class MainWindow(QMainWindow):
         self.raw_btn.setCheckable(True)
         self.raw_btn.setToolTip("Show exactly what akaiutil printed")
         self.raw_btn.toggled.connect(self.info.set_raw_mode)
+        self.info.linkClicked.connect(self._on_details_link)
         bottom = QWidget()
         bv = QVBoxLayout(bottom)
         bv.setContentsMargins(0, 0, 0, 0)
@@ -585,6 +587,7 @@ class MainWindow(QMainWindow):
         self.act_new_volume = self._action("New &Volume…", self._new_volume)
         self.act_rename = self._action("&Rename…", self._rename_focused)
         self.act_sample_settings = self._action("Sample Se&ttings…", self._sample_settings_selected)
+        self.act_tag_files = self._action("Tag &Files…", self._tag_selected)
         self.act_delete = self._action("&Delete…", self._delete_focused)
         self.act_copy = self._action(
             "&Copy Files",
@@ -617,6 +620,7 @@ class MainWindow(QMainWindow):
                 self.act_import,
                 self.act_sort,
                 self.act_sample_settings,
+                self.act_tag_files,
                 self.act_rename,
                 self.act_delete,
             ]
@@ -1625,7 +1629,9 @@ class MainWindow(QMainWindow):
             vol, f = rows[0]
             self._show_info(
                 lambda: engine.file_info(vol, f),
-                lambda text: describe.describe_file(text, f, self._references(engine, vol) if f.is_sample or f.is_program else None),
+                lambda text: describe.describe_file(
+                    text, f, self._references(engine, vol) if f.is_sample or f.is_program else None, tags_editable=self._tags_editable(vol, f)
+                ),
             )
         elif len(rows) > 1:
             self._info_current = 0
@@ -2282,6 +2288,10 @@ class MainWindow(QMainWindow):
         self.act_select_unused.setEnabled(has and self._selected_volume() is not None and not self._in_results)
         rows = self._selected_rows() if has else []
         self.act_sample_settings.setEnabled(self._editable_sample(rows) is not None)
+        tag_rows = self._taggable_rows(rows)
+        old_akaiutil = bool(tag_rows) and not self._can_edit_tags()
+        self.act_tag_files.setEnabled(bool(tag_rows) and not old_akaiutil)
+        self.act_tag_files.setToolTip("Editing tags needs akaiutil 4.7 or newer." if old_akaiutil else "Give the selected files tags, or take them away.")
         self.act_copy.setEnabled(bool(rows))
         self.act_cut.setEnabled(bool(rows))
         self.act_paste.setEnabled(
@@ -2392,6 +2402,74 @@ class MainWindow(QMainWindow):
         vol, f = rows[0]
         ok = f.is_sample and vol.type != "S900" and not f.name.upper().endswith((".S9", ".S9C"))
         return (vol, f) if ok else None
+
+    # ------------------------------------------------------------------ tags
+    def _can_edit_tags(self) -> bool:
+        """The akaiutil in use has working tag commands (4.7 or newer)."""
+        return self._engine is not None and self._engine.can_edit_tags
+
+    def _tags_editable(self, vol: Volume, f: FileEntry) -> bool:
+        return filetags.untaggable_reason(vol.type, f.kind) is None and self._can_edit_tags()
+
+    @staticmethod
+    def _taggable_rows(rows: list[tuple[Volume, FileEntry]]) -> list[tuple[Volume, FileEntry]]:
+        """The selected files that can be tagged, provided they are all in one partition (its tag names are what the choice is of)."""
+        if not rows or len({(v.disk, v.partition) for v, _ in rows}) != 1:
+            return []
+        return [(v, f) for v, f in rows if filetags.untaggable_reason(v.type, f.kind) is None]
+
+    def _on_details_link(self, link_id: str) -> None:
+        if link_id == describe.TAGS_LINK:
+            self._tag_selected()
+
+    def _tag_selected(self) -> None:
+        rows = self._taggable_rows(self._selected_rows())
+        if not rows or self._engine is None or self._busy():
+            return
+        if not self._can_edit_tags():
+            self._warn("Can't edit tags", "Editing tags needs akaiutil 4.7 or newer. The tag commands of earlier versions crash.")
+            return
+        self._ensure_editing(lambda: self._do_tag_files(rows))
+
+    def _ask_tags(self, files: list[FileEntry], names: dict[int, str]) -> tuple[list[int], list[int]] | None:
+        dialog = edit_dialogs.TagFilesDialog(self, files, names)
+        return (dialog.add, dialog.remove) if dialog.exec() == dialog.DialogCode.Accepted else None
+
+    def _do_tag_files(self, rows: list[tuple[Volume, FileEntry]]) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+
+        def show(names: dict[int, str]) -> None:
+            chosen = self._ask_tags([f for _, f in rows], names)
+            if chosen is None:
+                return
+            add, remove = chosen
+            by_volume: dict[tuple[int, str, int], tuple[Volume, list[FileEntry]]] = {}
+            for vol, f in rows:
+                by_volume.setdefault((vol.disk, vol.partition, vol.index), (vol, []))[1].append(f)
+
+            def work() -> list[str]:
+                failed: list[str] = []
+                for vol, files in by_volume.values():
+                    failed += engine.change_file_tags(vol, files, add, remove)
+                return failed
+
+            def done(failed: list[str]) -> None:
+                vol, first = rows[0]
+                self._pending_reveal = (vol, first.index) if len(rows) == 1 and not self._in_results else None
+                n = len(rows) - len(failed)
+                self._edited(vol.disk, message=f"Changed the tags of {n} file{'s' if n != 1 else ''}." if n else "")
+                if failed:
+                    self._warn(
+                        "Some tags weren't changed",
+                        f"{len(failed)} file{'s' if len(failed) != 1 else ''} couldn't be changed.",
+                        failed,
+                    )
+
+            self._run_edit(work, done, lambda message: self._edit_failed(rows[0][0].disk, message))
+
+        self._run(lambda: engine.tag_names(rows[0][0]), show)
 
     def _sample_settings_selected(self) -> None:
         picked = self._editable_sample(self._selected_rows())
@@ -3466,6 +3544,8 @@ class MainWindow(QMainWindow):
         rename.setEnabled(len(rows) == 1)
         settings_action = menu.addAction("Sample Settings…", lambda: self._sample_settings(*rows[0]))
         settings_action.setEnabled(self._editable_sample(rows) is not None)
+        tag_action = menu.addAction("Tag Files…" if len(rows) > 1 else "Tags…", self._tag_selected)
+        tag_action.setEnabled(bool(self._taggable_rows(rows)) and self._can_edit_tags())
         menu.addAction(
             "Delete…" if len(rows) == 1 else f"Delete {len(rows)} Files…",
             lambda: self._delete_files(rows),

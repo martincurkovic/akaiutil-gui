@@ -61,3 +61,32 @@ def tagged_file_tar(name: str, data: bytes, osver: int, tags: list[int]) -> byte
     out.write(b"\0" * (-len(data) % TAR_BLOCK))
     out.write(b"\0" * (TAR_BLOCK * 2))
     return out.getvalue()
+
+
+# ------------------------------------------------------------------ editing (akaiutil 4.7+: settagi, clrtagi)
+MAX_FILE_TAGS = 4  # a file holds up to four tags
+TAG_COUNT = 26  # a partition has 26 tag names
+
+
+def untaggable_reason(vol_type: str, kind: str) -> str | None:
+    """Why a file of this kind in a volume of this type can't be tagged (None if it can).
+
+    S900 volumes have no tags at all (akaiutil says "no tags for this volume type"). On an S1000 or older volume the four bytes
+    after an operating system file's name hold the sampler model, not tags (os_floppy.py), so those files are left alone."""
+    if vol_type == "S900":
+        return "S900 volumes have no tags."
+    if kind == "Operating system" and vol_type not in ("S3000", "CD3000"):
+        return "The tag bytes of an operating system file hold the sampler model."
+    return None
+
+
+def plan_change(current: list[int], add: list[int], remove: list[int]) -> tuple[list[int], list[int], list[int], str | None]:
+    """What it takes to give a file `add` and take `remove` away from its `current` tags: (tags to clear, tags to set, the tags
+    it ends up with, a problem or None). Clears come first so they free the places the new ones need."""
+    clears = [n for n in dict.fromkeys(remove) if n in current]
+    kept = [n for n in current if n not in remove]
+    sets = [n for n in dict.fromkeys(add) if n not in kept]
+    result = kept + sets
+    problem = f"it would have {len(result)} tags, and a file holds up to {MAX_FILE_TAGS}" if len(result) > MAX_FILE_TAGS else None
+    return clears, sets, result, problem
+

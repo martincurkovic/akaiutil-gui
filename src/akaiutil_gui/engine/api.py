@@ -886,6 +886,46 @@ class AkaiEngine:
                 self._enter_volume(vol)
             return self._partition_tag_names(vol.disk, vol.partition)
 
+    def change_file_tags(self, vol: Volume, files: list[FileEntry], add: list[int], remove: list[int]) -> list[str]:
+        """Give files of one volume the tags in `add` and take away those in `remove` (numbers 1-26 into the partition's tag names).
+        Needs akaiutil 4.7 (before it the tag commands crash). Each file is changed on its own and checked afterwards; returns
+        "NAME: reason" for each one that couldn't be, and leaves the others changed."""
+        failed: list[str] = []
+        with self._lock:
+            log.info("tags of %d file(s) in %s: add %s, remove %s", len(files), vol.name, add, remove)
+            self._need_writable()
+            if not self.can_edit_tags:
+                raise EngineError("Editing tags needs akaiutil 4.7 or newer (the tag commands of earlier versions crash).")
+            if any(not 1 <= n <= filetags.TAG_COUNT for n in [*add, *remove]):
+                raise EngineError(f"Tags are numbered 1 to {filetags.TAG_COUNT}.")
+            self._enter_volume(vol)
+            present = {x.index: x for x in parse.parse_files(self._run("dir").text)}
+            expected: dict[int, list[int]] = {}
+            for f in files:
+                now = present.get(f.index)
+                if now is None or now.name != f.name:
+                    failed.append(f"{f.name}: it isn't file {f.index} of {vol.name} any more")
+                    continue
+                why = filetags.untaggable_reason(vol.type, now.kind)
+                clears, sets, result, problem = filetags.plan_change(now.tag_numbers, add, remove)
+                if why or problem:
+                    failed.append(f"{f.name}: {why or problem}")
+                    continue
+                try:
+                    for n in clears:
+                        self._write(f"clrtagi {f.index} {n}")
+                    for n in sets:
+                        self._write(f"settagi {f.index} {n}")
+                except EngineError as e:
+                    failed.append(f"{f.name}: {e}")
+                    continue
+                expected[f.index] = result
+            after = {x.index: x for x in parse.parse_files(self._run("dir").text)}
+            for f in files:
+                if f.index in expected and sorted(after[f.index].tag_numbers if f.index in after else []) != sorted(expected[f.index]):
+                    failed.append(f"{f.name}: akaiutil didn't leave it with the tags asked for")
+        return failed
+
     def copy_file(self, src: Volume, f: FileEntry, dst: Volume, new_name: str, tags: list[int] | None = None) -> str:
         """Copy a file, byte for byte, into another volume (any partition, any open disk) as `new_name` (with its
         extension). Returns the name it has there.

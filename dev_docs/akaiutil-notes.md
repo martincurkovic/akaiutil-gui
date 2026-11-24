@@ -61,15 +61,22 @@ Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` a
   Whether a real S3000 lists such a file is untested (see the roadmap).
 - `put` of a `.S9C` into a non-S900 volume writes a wrong OS version; refused, and the one mismatch "Add anyway" doesn't lift. Into an S900 volume it keeps the "uncompr" value.
 - `put` doesn't carry a file's **tags**; `reni` (a move inside one partition) does. A cross-partition move is copy + delete.
-- **`settagi`, `clrtagi`, `settagall` and `clrtagall` crash akaiutil 4.6.7 and 4.6.8** (exit 139): they call
+- **Fixed in 4.7 (see below): `settagi`, `clrtagi`, `settagall` and `clrtagall` crash akaiutil 4.6.7 and 4.6.8** (exit 139): they call
   `akai_rename_file(..., vp=NULL, ...)`, which then reads `vp->type` in its tags section. Nothing is written first. The GUI never
-  uses them. A fix would be `voldstp->type` there.
+  uses them on those versions. The fix, in 4.7, is `voldstp->type` there.
 - What does carry tags is **tar**: `tarc` writes a file's tags into the entry's link-name field (`\0T` + the 4 tag bytes) and `tarx`
   reads them back, for S3000/CD3000 volumes only (the OS version rides in the `devmajor` field, in octal). `tags.tagged_file_tar`
   builds a one-file tar, and `engine.copy_file(tags=...)` imports it. The tar entry's name is the plain file name (spaces and all).
 - Tags are numbers (1-26) into the **partition's** 26 tag names (`lstags`, which lists the partition of wherever the prompt is, even
   inside a volume). Another partition can use other names, so a copy maps tags by name (`tags.map_tags`). Floppies have none.
 - A format of a disk makes other blank images in the session print "invalid format" every restart: don't read that as failure.
+
+- **akaiutil 4.7 tag commands** (measured 2026-11-24 on generated images and a copy of a real one; no real sampler): `settagi <file> <tag>`, `clrtagi <file> <tag|all>`,
+  `settagall <tag>`, `clrtagall <tag|all>`, inside a volume. They change only the tag bytes (setting and clearing everything gave a byte-identical image). A fifth tag:
+  `no free tag entry`; a number outside 1-26: `invalid tag index`; setting a tag a file has: accepted, no change. An S900 volume says `no tags for this volume type`.
+  An S1000 floppy file accepts tags (there are no names for them: `lstags` is per partition). `rentag <n> <name>` renames a tag of the partition (capitals, `_` for a space).
+  `settagall`/`clrtagall` act on the whole volume, so `engine.change_file_tags` uses the per-file commands (`settagi`/`clrtagi`), clears first, and checks the listing afterwards.
+  It leaves OS files of S1000-and-older volumes alone: their four tag bytes hold the sampler model (os-floppy.md).
 
 ## Copying volumes
 - `copyvoli <n> <dst-path>` (run from the source partition) copies a volume across partitions and disks with everything: the files

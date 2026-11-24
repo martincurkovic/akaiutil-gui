@@ -2,6 +2,7 @@
 
 from html import escape
 
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetrics
 from PySide6.QtWidgets import QTextBrowser
 
@@ -32,6 +33,13 @@ def monospace_family() -> str:
     return QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
 
 
+def _link_html(row, p: dict) -> str:
+    if not row.link_text:
+        return ""
+    colour = p.get("link", p["accent"])
+    return f'&nbsp;&nbsp;<a href="{escape(row.link_id)}" style="color:{colour};">{escape(row.link_text)}</a>'
+
+
 def _block_html(block: Block, p: dict, mono: str, label_width: int = LABEL_WIDTH) -> str:
     out = []
     if block.title:
@@ -46,7 +54,7 @@ def _block_html(block: Block, p: dict, mono: str, label_width: int = LABEL_WIDTH
         for row in block.rows:
             out.append(
                 f'<tr><td width="{label_width}" style="color:{label_colour};">{escape(row.label)}</td>'
-                f'<td style="color:{value_colour};">{escape(row.value)}</td></tr>'
+                f'<td style="color:{value_colour};">{escape(row.value)}{_link_html(row, p)}</td></tr>'
             )
         out.append("</table>")
     if block.headers and block.table:
@@ -104,9 +112,12 @@ def render_html(details: Details, palette: dict, mono: str = "monospace", column
 
 
 class DetailsView(QTextBrowser):
+    linkClicked = Signal(str)  # the link_id of a link in the details ("Edit Tags…")
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setOpenLinks(False)
+        self.anchorClicked.connect(lambda url: self.linkClicked.emit(url.toString()))
         self.setPlaceholderText("Select a disk, partition, volume or file to see its details.")
         self._mono = monospace_family()
         self._details: Details | None = None

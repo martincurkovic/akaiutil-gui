@@ -21,6 +21,7 @@ akaiutil-GUI allows you to open, view and edit Akai S900, S1000 and S3000 disk i
 - [Copying and moving files](#copying-and-moving-files)
 - [Changing a sample's settings](#changing-a-samples-settings)
 - [Sorting a volume](#sorting-a-volume)
+- [Tagging files](#tagging-files)
 - [Direct-to-disk takes](#direct-to-disk-takes)
 - [New disk images and formatting](#new-disk-images-and-formatting)
 - [Several disks at once](#several-disks-at-once)
@@ -247,6 +248,16 @@ A volume with every slot in use (510 files, or 64 on an S900) has no room to shu
 
 ---
 
+## Tagging files
+
+A hard disk partition has 26 tags, and each file can carry up to four of them. A sampler can show only the files with a given tag. Select one or more files and choose **Edit > Tag Files…** (or right-click, or use **Edit Tags…** next to a file's tags in the details pane).
+
+A tick means every selected file has that tag, a dash means only some of them do, and an empty box means none. Click a box to tick or clear it. A dashed tag you leave alone stays as it is on each file. The tags are named after the partition's tag names; a floppy has none, so its tags show as "Tag 1" and so on.
+
+Nothing else about a file changes. Editing tags needs akaiutil 4.7 or newer, which is the version the app downloads. Files in S900 volumes have no tags, and an S1000 floppy's operating system file keeps its bytes (they hold the sampler model), so those can't be tagged.
+
+---
+
 ## Direct-to-disk takes
 
 S1100 and S3000-series samplers can record straight to a hard disk. Those recordings are **takes**. They don't live in a volume: they sit in a separate **direct-to-disk** area, shown as `DD` under the disk. (An S1000 has no direct-to-disk recording.)
@@ -350,6 +361,7 @@ The log holds the app's version, your operating system, the images you opened an
 
 - **No undo,** and changes are written at once. Say yes to the backup when editing is switched on, and use **File > Revert to Backup…** to go back.
 - A sample's loops, root key, tuning, play mode and markers can be changed with **Edit > Sample Settings…** (S1000 and S3000 samples only).
+- Files can be tagged with **Edit > Tag Files…** (see [Tagging files](#tagging-files)); renaming a partition's tags isn't possible yet.
 - S900 samples are previewed as one-shots, and get no loops on import.
 - Direct-to-disk recordings (takes) can be exported, imported, renamed and deleted, but only recordings made by akaiutil have been tried (see [Direct-to-disk takes](#direct-to-disk-takes)).
 - Adding or closing a disk image restarts akaiutil, so disk numbers can change and the search index is rebuilt.

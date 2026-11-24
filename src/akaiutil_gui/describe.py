@@ -26,11 +26,16 @@ if TYPE_CHECKING:
 from .formatting import human_duration, human_size, note_name, panel_os_version, percent, plural
 
 
+TAGS_LINK = "tags"  # the link_id of the Tags row's "Edit Tags…"
+
+
 # ------------------------------------------------------------------ the result
 @dataclass(frozen=True)
 class Row:
     label: str
     value: str
+    link_text: str = ""  # a link after the value ("Edit Tags…"); clicking it sends link_id to whoever shows the details
+    link_id: str = ""
 
 
 @dataclass
@@ -237,7 +242,7 @@ def _size_text(n: int) -> str:
 
 
 # ----------------------------------------------------------------------- files
-def describe_file(text: str, entry: FileEntry | None = None, refs: "VolumeReferences | None" = None) -> Details:
+def describe_file(text: str, entry: FileEntry | None = None, refs: "VolumeReferences | None" = None, tags_editable: bool = False) -> Details:
     path, root, other = parse_info(text)
     ftype = root.get("type")
     name = root.get("ramname") or (path.rsplit("/", 1)[-1] if path else "File")
@@ -245,6 +250,10 @@ def describe_file(text: str, entry: FileEntry | None = None, refs: "VolumeRefere
     details = Details(title=name, subtitle=f"{ftype}  ·  {path}" if ftype else path, raw=text)
 
     head = _rows(("Type", ftype), ("Size", _size_text(size) if size is not None else None))
+    if entry is not None and (entry.tags or tags_editable):  # (a volume that can't have tags shows none, unless they can be set)
+        head.append(
+            Row("Tags", ", ".join(entry.tag_labels) or "None", "Edit Tags…" if tags_editable else "", TAGS_LINK)
+        )
     start = root.get("start")
     block_no = _num(start.split()[-1]) if start.startswith("block") else None
     technical = _rows(
