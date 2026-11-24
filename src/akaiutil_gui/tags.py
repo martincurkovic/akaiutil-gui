@@ -2,7 +2,7 @@
 
 A hard disk partition has 26 tag names ("TAG A"...), and every file in its S3000 volumes can carry up to four of them,
 stored as numbers. A copy that goes through akaiutil's `put` loses them, and akaiutil's own tag commands (settagi...) crash
-in 4.6.8. What does carry tags is a tar import: akaiutil's tar export writes a file's tags into the entry's link-name field and
+in 4.6.8 (fixed in 4.7, which is what tag editing uses: see `plan_change`). What does carry tags is a tar import: akaiutil's tar export writes a file's tags into the entry's link-name field and
 its import reads them back. So a tagged file is copied by building a one-file tar and importing that.
 
 Another partition may name its tags differently, so a tag is matched by its name, not its number.

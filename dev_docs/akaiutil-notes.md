@@ -1,6 +1,6 @@
-# How akaiutil behaves (found by trying it, akaiutil 4.6.8)
+# How akaiutil behaves (found by trying it)
 
-Each point says what the GUI does about it. The source is in `akaiutil-4.6.x/` after `scripts/get_akaiutil.py` (git-ignored).
+Measured on akaiutil 4.6.8 unless a point says 4.7 (the version the app now downloads, from 2026-11-24). Each point says what the GUI does about it. The source can be kept in `akaiutil-<version>/` at the repo root (git-ignored); `scripts/get_akaiutil.py` fetches and builds the pinned release into `build/bin/`.
 
 ## Protocol
 - Interactive REPL; the prompt `<cwd> > ` ends every answer. Output and errors are merged. Commands are limited to 256 bytes and
