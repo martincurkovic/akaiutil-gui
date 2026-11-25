@@ -191,7 +191,7 @@ Plan: [dd-takes-plan.md](dd-takes-plan.md). Everything below was tried on throwa
   44.1 kHz (stored rate = the WAV's). Whether akaiutil converted the 8- and 24-bit audio correctly was never checked: the GUI writes
   16-bit WAVs itself (`takes.prepare_audio`) and gives akaiutil only those.
 - **Silent trap: the rate is stored in 16 bits.** A 96 kHz mono WAV imported without a message and showed `srate 30464`
-  (96000 mod 65536). The GUI has to refuse rates over 65,535 before calling `wav2take`.
+  (96000 mod 65536). The GUI has to deal with rates over 65,535 before calling `wav2take`: it refused them until 2026-11-25, and now resamples them to 48 kHz (44.1 kHz for a multiple of it) with `audio/resample.py`.
 - **Defaults on import:** fade in 10 ms, fade out 50 ms, stereo level 99, pan 0, stereo mix ON, MIDI channel 16, note 60, start mode
   `M.NOTE+DEL`, de-emphasis OFF, pre-delay 500, output level 50, output/FX bus OFF, send level 25.
 - **Export:** `take2wavi 2` wrote a stereo 44.1 kHz 16-bit WAV with all its frames, and a take whose chain was fragmented

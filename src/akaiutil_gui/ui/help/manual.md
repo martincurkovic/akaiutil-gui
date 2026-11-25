@@ -277,7 +277,7 @@ S1100 and S3000-series samplers can record straight to a hard disk. Those record
 Select the area to see its takes: name, mono or stereo, sample rate, length and size. Select a take for its settings (fades, pan, MIDI note, output and so on).
 
 - **Export:** **File > Export…** saves a take as a `.TK` file, which can be imported again, and **Export as WAV…** saves it as a WAV file. Right-click the area in the tree and choose **Export Takes as WAV…** to export all of them.
-- **Import:** **Edit > Import Takes…** (Ctrl/Cmd+I), or drop audio or `.TK` files, or a folder of them, on the window. A take is named after its file (12 characters at most) and stored as 16-bit audio. Files above 65,535 Hz, with more than two channels, or too big for the free space are refused, with the reason.
+- **Import:** **Edit > Import Takes…** (Ctrl/Cmd+I), or drop audio or `.TK` files, or a folder of them, on the window. A take is named after its file (12 characters at most) and stored as 16-bit audio. A file above 65,535 Hz (96 kHz, say) is converted to 48 kHz first (44.1 kHz for 88.2 or 176.4 kHz). Files with more than two channels, or too big for the free space, are refused, with the reason.
 - **Rename and delete:** F2 and Delete, as for files. Deleting a take doesn't renumber the others, and two takes can have the same name.
 
 Takes made or changed here haven't been tried on a real sampler yet.

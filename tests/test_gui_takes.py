@@ -209,13 +209,22 @@ def test_takes_are_deleted_after_asking(app, editable):
 def test_audio_and_tk_files_import_as_takes_and_what_cannot_is_reported(app, editable):
     w = editable.window
     good = audio(editable.tmp / "loop one.wav")
-    fast = audio(editable.tmp / "FAST.wav", rate=96000, seconds=0.1)
-    w.import_takes([good, fast])
+    surround = editable.tmp / "SURROUND.wav"
+    soundfile.write(str(surround), np.zeros((100, 3)), 44100, subtype="PCM_16")
+    w.import_takes([good, surround])
     assert pump(app, lambda: names(w) == ["MONO", "STEREO", "LOOP ONE"])
     assert [w.takes.item(2, c).text() for c in (0, 2, 3, 4)] == ["3", "Mono", "44,100 Hz", "500 ms"]
     assert pump(app, lambda: editable.warnings)
     title, text, details = editable.warnings[-1]
-    assert title == "Some files weren't imported" and "FAST.wav" in details[0] and "96,000 Hz" in details[0]
+    assert title == "Some files weren't imported" and "SURROUND.wav" in details[0] and "3 channels" in details[0]
+
+
+def test_a_96_khz_file_comes_in_as_a_48_khz_take(app, editable):
+    w = editable.window
+    w.import_takes([audio(editable.tmp / "FAST.wav", rate=96000, seconds=1)])
+    assert pump(app, lambda: names(w) == ["MONO", "STEREO", "FAST"])
+    assert [w.takes.item(2, c).text() for c in (3, 4)] == ["48,000 Hz", "1.00 s"]
+    assert not editable.warnings
 
 
 def test_files_dropped_on_the_window_become_takes_while_a_dd_partition_is_open(app, editable):

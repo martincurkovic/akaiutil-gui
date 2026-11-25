@@ -32,7 +32,7 @@ None of this could be checked by the test runs, which use a fake audio device, o
 1. **Open an SD card / physical drive directly.** akaiutil can open raw devices. Needs OS permissions per platform and safety
    rails against picking the wrong disk; start read-only, add editing later.
 2. **Direct-to-disk takes** (S1100/S3000 recordings): listing, settings, export (WAV or `.TK`), import, rename and delete are built
-   (2026-10-30), with a manual section. What's left: a manual screenshot, drag-out, resampling a too-fast file instead of refusing it, and checking all of it against
+   (2026-10-30), with a manual section. What's left: a manual screenshot, drag-out, and checking all of it against
    a real recording. Details and the rules akaiutil won't enforce (a 96 kHz WAV is silently stored as 30,464 Hz): [dd-takes-plan.md](dd-takes-plan.md).
    No public image exists, so one has to be asked for from an S1100/S3000 owner (the plan says what to ask for).
 3. **Multis.** akaiutil only prints "S3000 multi" for one, so showing its parts means reading the file's bytes ourselves, which

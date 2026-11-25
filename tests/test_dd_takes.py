@@ -167,8 +167,7 @@ def _import(eng, part, src_path, tmp_path):
     src = takes_module.inspect(src_path)
     assert not src.problem, src.problem
     local = tmp_path / f"{takes_module.take_name(src_path)}.wav"
-    takes_module.prepare_audio(src, local)
-    return eng.import_take(part, local, expect=(src.channels, src.rate, src.frames)), local
+    return eng.import_take(part, local, expect=takes_module.prepare_audio(src, local)), local
 
 
 def test_a_24_bit_stereo_file_becomes_a_take_with_its_audio_intact(dd_ed, binary, tmp_path):
@@ -213,9 +212,47 @@ def test_reading_in_blocks_gives_the_same_samples_as_reading_the_whole_file(tmp_
     assert channels == 2 and np.array_equal(np.frombuffer(raw, dtype='<i2').reshape(-1, 2), expected) and whole.read_bytes() == blocks.read_bytes()
 
 
+@pytest.mark.parametrize(
+    "rate, target",
+    [(44100, 0), (48000, 0), (65535, 0), (88200, 44100), (176400, 44100), (96000, 48000), (192000, 48000), (70000, 48000)],
+)
+def test_a_rate_a_take_cant_hold_is_converted_to_a_usual_one(rate, target):
+    assert takes_module.resample_target(rate) == target
+
+
+def test_a_96_khz_stereo_file_is_resampled_to_a_take_at_48_khz(dd_ed, tmp_path):
+    part = _dd_partition(dd_ed)
+    wav = _audio(tmp_path / "FAST.wav", channels=2, rate=96000, seconds=1)
+    src = takes_module.inspect(wav)
+    assert not src.problem and src.resample_to == 48000  # (akaiutil would have stored 96,000 Hz as 30,464 without a word)
+    take, prepared = _import(dd_ed, part, wav, tmp_path)
+    assert (take.stereo, take.rate, take.frames) == (True, 48000, 48000)
+    out = tmp_path / "out"
+    out.mkdir()
+    dd_ed.export_takes(part, [take], out, as_wav=True)
+    channels, rate, raw = _frames(out / "FAST.wav")
+    assert (channels, rate) == (2, 48000) and _frames(prepared) == (channels, rate, raw)
+    heard = np.frombuffer(raw, dtype="<i2").reshape(-1, 2).astype("float64") / 32767.0
+    n = np.arange(len(heard)) / 48000
+    for c in range(2):  # the tones are where they were: 440 and 880 Hz, at half scale
+        assert np.abs(heard[2000:-2000, c] - 0.5 * np.sin(2 * np.pi * 440 * (c + 1) * n[2000:-2000])).max() < 0.01
+
+
+def test_88_2_khz_goes_to_44_1_khz_and_an_odd_rate_to_about_48_khz(tmp_path):
+    exact = takes_module.inspect(_audio(tmp_path / "A.wav", rate=88200, seconds=0.5))
+    assert takes_module.prepare_audio(exact, tmp_path / "a.wav") == (1, 44100, 22050)
+    odd = takes_module.inspect(_audio(tmp_path / "B.wav", rate=70000, seconds=0.5))
+    channels, rate, frames = takes_module.prepare_audio(odd, tmp_path / "b.wav")
+    assert channels == 1 and abs(rate - 48000) <= 50 and rate <= takes_module.MAX_RATE and frames == len(_frames(tmp_path / "b.wav")[2]) // 2
+
+
+def test_a_file_at_a_rate_a_take_holds_is_not_resampled(tmp_path):
+    src = takes_module.inspect(_audio(tmp_path / "OK.wav", rate=48000, seconds=0.2))
+    assert src.resample_to == 0
+    assert takes_module.prepare_audio(src, tmp_path / "ok.wav") == (1, 48000, 9600)
+
+
 def test_what_cannot_be_a_take_is_refused_with_a_reason(tmp_path):
-    fast = takes_module.inspect(_audio(tmp_path / "FAST.wav", rate=96000, seconds=0.1))
-    assert "96,000 Hz" in fast.problem and "65,535" in fast.problem  # akaiutil would have stored it as 30,464 Hz without a word
     many = tmp_path / "MANY.wav"
     soundfile.write(str(many), np.zeros((100, 3)), 44100, subtype="PCM_16")
     assert "3 channels" in takes_module.inspect(many).problem
@@ -278,13 +315,14 @@ def test_a_failed_import_leaves_nothing_in_the_staging_folder(dd_ed, tmp_path, m
 def test_import_run_reports_each_file_and_carries_on(dd_ed, tmp_path):
     part = _dd_partition(dd_ed)
     good = _audio(tmp_path / "GOOD.wav", subtype="PCM_16")
-    bad = _audio(tmp_path / "FAST.wav", rate=96000, seconds=0.1)
+    bad = tmp_path / "EMPTY.wav"
+    soundfile.write(str(bad), np.zeros((0, 1)), 44100, subtype="PCM_16")
     work = tmp_path / "work"
     work.mkdir()
     seen = []
     res = takes_module.run_import(dd_ed, part, [takes_module.inspect(bad), takes_module.inspect(good)], work, progress=lambda i, n, name: seen.append((i, n, name)))
-    assert res.imported == ["GOOD"] and len(res.failed) == 1 and res.failed[0].startswith("FAST.wav: its sample rate is 96,000 Hz")
-    assert seen == [(0, 2, "FAST.wav"), (1, 2, "GOOD.wav")]
+    assert res.imported == ["GOOD"] and len(res.failed) == 1 and res.failed[0].startswith("EMPTY.wav:")
+    assert seen == [(0, 2, "EMPTY.wav"), (1, 2, "GOOD.wav")]
 
 
 def test_a_take_is_renamed_by_number_and_duplicates_are_allowed(dd_ed, binary):
