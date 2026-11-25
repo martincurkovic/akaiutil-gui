@@ -1518,12 +1518,17 @@ class MainWindow(QMainWindow):
         elif isinstance(obj, Partition):
             if obj.is_dd:
                 self._set_files_title(f"Takes in {obj.path}")
-                self._show_dd_details()
                 token = self._files_token
-                self._run(
-                    lambda: engine.list_takes(obj),
-                    lambda takes: self._takes_loaded(token, takes),
-                )
+                self._info_seq += 1
+                info_token = self._info_current = self._info_seq
+
+                def dd_loaded(result: tuple[list[Take], str]) -> None:  # one `dir` gives both the details and the table
+                    takes, text = result
+                    if info_token == self._info_current:
+                        self.info.show_details(describe.describe_takes(f"Direct-to-disk area {obj.name}", text))
+                    self._takes_loaded(token, takes)
+
+                self._run(lambda: engine.list_takes_with_text(obj), dd_loaded)
             else:
                 self._set_files_title("Select a volume to see its files")
                 self._show_info(

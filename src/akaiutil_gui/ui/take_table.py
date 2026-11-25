@@ -29,6 +29,7 @@ class TakeTable(QTableWidget):
         self.setSortingEnabled(True)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         hdr = self.horizontalHeader()
+        hdr.setSortIndicator(0, Qt.SortOrder.AscendingOrder)  # take-number order to begin with, as akaiutil lists them
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hdr.setStretchLastSection(True)
         hdr.setMinimumSectionSize(32)
@@ -37,6 +38,8 @@ class TakeTable(QTableWidget):
         self.itemSelectionChanged.connect(lambda: self.selectionTakesChanged.emit(self.selected_takes()))
 
     def set_takes(self, takes: list[Take]) -> None:
+        header = self.horizontalHeader()
+        column, order = header.sortIndicatorSection(), header.sortIndicatorOrder()  # (what the user chose, kept over a reload)
         self.setSortingEnabled(False)  # otherwise rows move while we fill them
         self.setRowCount(len(takes))
         right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -58,7 +61,7 @@ class TakeTable(QTableWidget):
                     item.setData(_ROLE_TAKE, t)
                 self.setItem(row, col, item)
         self.setSortingEnabled(True)
-        self.sortByColumn(0, Qt.SortOrder.AscendingOrder)  # in take-number order, as akaiutil lists them
+        self.sortByColumn(column, order)
         self.selectionTakesChanged.emit([])
 
     def clear_takes(self) -> None:

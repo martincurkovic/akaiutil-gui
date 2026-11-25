@@ -60,11 +60,20 @@ def take_name(path: str | Path) -> str:
     return importing.clean_stem(Path(path).stem, NAME_LENGTH)
 
 
+READ_BLOCK_FRAMES = 1 << 18  # (a block as float64 is 4 MB mono; the whole file as float64 would be 8 bytes a sample)
+
+
 def prepare_audio(src: TakeSource, dest: Path) -> None:
-    """Write the 16-bit WAV akaiutil reads (a clean one: its reader trips over the padding of some chunks)."""
-    data, rate = soundfile.read(str(src.path), dtype="float64", always_2d=True)
-    pcm = np.clip(np.round(data * 32767.0), -32768, 32767).astype("<i2")
-    wavfile.write_wav16(dest, pcm, rate)
+    """Write the 16-bit WAV akaiutil reads (a clean one: its reader trips over the padding of some chunks).
+    Plain rounding, no dither; read a block at a time so a long file doesn't need several float64 copies of itself in memory."""
+    with soundfile.SoundFile(str(src.path)) as f:
+        pcm = np.empty((f.frames, f.channels), dtype="<i2")
+        rate = f.samplerate
+        at = 0
+        for block in f.blocks(blocksize=READ_BLOCK_FRAMES, dtype="float64", always_2d=True):
+            pcm[at : at + len(block)] = np.clip(np.round(block * 32767.0), -32768, 32767)
+            at += len(block)
+    wavfile.write_wav16(dest, pcm[:at], rate)
 
 
 @dataclass

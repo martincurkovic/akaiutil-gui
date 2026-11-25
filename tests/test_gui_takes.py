@@ -246,3 +246,28 @@ def test_delete_and_rename_leave_the_takes_alone_while_the_tree_has_the_keyboard
     w._update_edit_actions()
     assert not w.act_delete.isEnabled() and not w.act_rename.isEnabled()
     assert names(w) == ["MONO", "STEREO"]
+
+
+def test_a_chosen_sort_survives_a_reload_of_the_takes(app, window, images):
+    from PySide6.QtCore import Qt
+
+    disk = open_dd(app, window, images)
+    window.tree.setCurrentItem(disk.child(2))
+    assert pump(app, lambda: window.takes.rowCount() == 2)
+    assert [window.takes.item(r, 1).text() for r in range(2)] == ["MONO", "STEREO"]  # take-number order to begin with
+    window.takes.sortByColumn(1, Qt.SortOrder.DescendingOrder)  # by name, backwards
+    assert [window.takes.item(r, 1).text() for r in range(2)] == ["STEREO", "MONO"]
+    window.takes.set_takes(window._engine.list_takes(window._dd_partition))  # what a rename or delete does
+    assert [window.takes.item(r, 1).text() for r in range(2)] == ["STEREO", "MONO"]
+    assert window.takes.horizontalHeader().sortIndicatorSection() == 1
+
+
+def test_selecting_the_dd_partition_lists_it_once(app, window, images, monkeypatch):
+    disk = open_dd(app, window, images)
+    engine = window._engine
+    seen = []
+    real = engine._run
+    monkeypatch.setattr(engine, "_run", lambda cmd, *a, **kw: (seen.append(cmd), real(cmd, *a, **kw))[1])
+    window.tree.setCurrentItem(disk.child(2))
+    assert pump(app, lambda: window.takes.rowCount() == 2 and "Direct-to-disk area" in window.info.toPlainText())
+    assert len([c for c in seen if c.startswith("dir")]) == 1

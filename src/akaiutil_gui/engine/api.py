@@ -165,8 +165,13 @@ class AkaiEngine:
             return self._run(f"dir {part.path}").text.strip("\n")
 
     def list_takes(self, part: Partition) -> list[Take]:
+        return self.list_takes_with_text(part)[0]
+
+    def list_takes_with_text(self, part: Partition) -> tuple[list[Take], str]:
+        """The takes and akaiutil's own text for them, from one `dir`."""
         with self._lock:
-            return parse.parse_takes(self._run(f"dir {part.path}").text)
+            text = self._run(f"dir {part.path}").text
+        return parse.parse_takes(text), text.strip("\n")
 
     def take_info(self, part: Partition, take: Take) -> str:
         """akaiutil's `tinfoi` for one take (it only works from inside the DD partition)."""
@@ -768,10 +773,12 @@ class AkaiEngine:
             if need > free:
                 raise EngineError(f"There isn't room for “{local.stem}”: it needs {human_size(need)} and the partition has {human_size(free)} free.")
             _clear_dir(session.staging_dir)
-            # akaiutil reads a file from its own working directory, and takes '_' on the command line for a space in its name
-            shutil.copyfile(local, session.staging_dir / local.name)
-            text = self._run(f"{'tput' if is_tk else 'wav2take'} {akai_names.command_token(local.name)}", timeout=600).text
-            _clear_dir(session.staging_dir)
+            try:
+                # akaiutil reads a file from its own working directory, and takes '_' on the command line for a space in its name
+                shutil.copyfile(local, session.staging_dir / local.name)
+                text = self._run(f"{'tput' if is_tk else 'wav2take'} {akai_names.command_token(local.name)}", timeout=600).text
+            finally:  # (a full disk or a timeout mustn't leave the copy for a later geti/puti to find)
+                _clear_dir(session.staging_dir)
             added = [t for t in parse.parse_takes(self._run("dir").text) if t.index not in before]
             if len(added) != 1:
                 said = " ".join(ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("importing"))
@@ -779,7 +786,9 @@ class AkaiEngine:
             take = added[0]
             if expect is not None and (take.channels, take.rate, take.frames) != expect:
                 self._write(f"tdeli {take.index}")  # (leave the disk as it was)
-                raise EngineError(f"akaiutil stored “{local.stem}” differently from the file (a take of {take.channels} channel(s), {take.rate:,} Hz, {take.frames:,} frames, for a file of {expect[0]}, {expect[1]:,} Hz, {expect[2]:,}), so it was taken out again.")
+                log.warning("take %d from %s came out as %d channel(s), %d Hz, %d frames; the file has %d channel(s), %d Hz, %d frames",
+                            take.index, local.name, take.channels, take.rate, take.frames, *expect)
+                raise EngineError(f"akaiutil stored “{local.stem}” differently from the file, so it was taken out again.")
             return take
 
     def rename_take(self, part: Partition, take: Take, new_name: str) -> Take:

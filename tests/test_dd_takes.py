@@ -197,6 +197,22 @@ def test_a_tk_file_comes_back_as_the_take_it_was(dd_ed, tmp_path):
     assert (back.index, back.name, back.stereo, back.rate, back.words) == (1, "MONO", False, 44100, 44100)  # the slot it had is free again
 
 
+@pytest.mark.parametrize("subtype", ["PCM_16", "PCM_24", "FLOAT"])
+def test_reading_in_blocks_gives_the_same_samples_as_reading_the_whole_file(tmp_path, monkeypatch, subtype):
+    wav = _audio(tmp_path / "LONG.wav", channels=2, rate=44100, seconds=1, subtype=subtype)
+    src = takes_module.inspect(wav)
+    whole = tmp_path / "whole.wav"
+    monkeypatch.setattr(takes_module, "READ_BLOCK_FRAMES", 10**7)
+    takes_module.prepare_audio(src, whole)
+    blocks = tmp_path / "blocks.wav"
+    monkeypatch.setattr(takes_module, "READ_BLOCK_FRAMES", 4097)  # not a divisor of 44,100: the last block is short
+    takes_module.prepare_audio(src, blocks)
+    data, _ = soundfile.read(str(wav), dtype="float64", always_2d=True)
+    expected = np.clip(np.round(data * 32767.0), -32768, 32767).astype("<i2")  # what the whole-file version did
+    channels, _, raw = _frames(blocks)
+    assert channels == 2 and np.array_equal(np.frombuffer(raw, dtype='<i2').reshape(-1, 2), expected) and whole.read_bytes() == blocks.read_bytes()
+
+
 def test_what_cannot_be_a_take_is_refused_with_a_reason(tmp_path):
     fast = takes_module.inspect(_audio(tmp_path / "FAST.wav", rate=96000, seconds=0.1))
     assert "96,000 Hz" in fast.problem and "65,535" in fast.problem  # akaiutil would have stored it as 30,464 Hz without a word
@@ -224,8 +240,38 @@ def test_a_take_that_comes_out_different_from_the_file_is_taken_out_again(dd_ed,
     src = takes_module.inspect(_audio(tmp_path / "ODD.wav", subtype="PCM_16"))
     local = tmp_path / "ODD.wav.prepared.wav"
     takes_module.prepare_audio(src, local)
-    with pytest.raises(EngineError, match="differently from the file"):
+    with pytest.raises(EngineError, match="differently from the file") as err:
         dd_ed.import_take(part, local, expect=(1, 44100, 12345))
+    assert len(str(err.value)) < 100 and "12,345" not in str(err.value)  # a line; the numbers go to the log
+    assert [t.name for t in dd_ed.list_takes(part)] == ["MONO", "STEREO"]
+
+
+def test_the_numbers_of_a_mismatched_take_are_logged(dd_ed, tmp_path, caplog):
+    src = takes_module.inspect(_audio(tmp_path / "ODD.wav", subtype="PCM_16"))
+    local = tmp_path / "ODD.wav.prepared.wav"
+    takes_module.prepare_audio(src, local)
+    with caplog.at_level("WARNING"), pytest.raises(EngineError):
+        dd_ed.import_take(_dd_partition(dd_ed), local, expect=(1, 44100, 12345))
+    assert "12345 frames" in caplog.text and "44100 Hz" in caplog.text
+
+
+def test_a_failed_import_leaves_nothing_in_the_staging_folder(dd_ed, tmp_path, monkeypatch):
+    part = _dd_partition(dd_ed)
+    local = _audio(tmp_path / "BOOM.wav", subtype="PCM_16")
+    staging = dd_ed._session.staging_dir
+    real_run = dd_ed._run
+
+    def run(cmd, *a, **kw):
+        if cmd.startswith("wav2take"):
+            assert any(staging.iterdir())  # the copy is there while akaiutil runs
+            raise EngineError("akaiutil timed out")
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(dd_ed, "_run", run)
+    with pytest.raises(EngineError, match="timed out"):
+        dd_ed.import_take(part, local)
+    assert not any(staging.iterdir())
+    monkeypatch.undo()
     assert [t.name for t in dd_ed.list_takes(part)] == ["MONO", "STEREO"]
 
 
