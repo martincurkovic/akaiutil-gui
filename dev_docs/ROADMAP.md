@@ -7,7 +7,7 @@ Last updated 2026-10-30. Current status of the app is in the
 
 None of this could be checked by the test runs, which use a fake audio device, offscreen Qt and akaiutil reading its own output back.
 
-- [ ] **A real sampler.** Load an edited, imported or copied image into an S3000/S1000/S900 (or Gotek/SCSI2SD setup). Especially:
+- [ ] **A real sampler.** Load an edited, imported, copied or partition-restored image into an S3000/S1000/S900 (or Gotek/SCSI2SD setup). Especially:
       sample-settings edits (written in place with `puti` since akaiutil 4.7, 2026-11-24; only akaiutil has read them back), imported loops and root notes, stereo `-L`/`-R` pairs (an edit doesn't touch the partner address,
       `stpaira`), S900 samples and compressed S9C, and files copied into a new volume.
 - [ ] **Files added anyway to a volume of another sampler** (an `.S3` in an S1000 or S900 volume). akaiutil writes them with the
@@ -37,7 +37,8 @@ None of this could be checked by the test runs, which use a fake audio device, o
    No public image exists, so one has to be asked for from an S1100/S3000 owner (the plan says what to ask for).
 3. **Multis.** akaiutil only prints "S3000 multi" for one, so showing its parts means reading the file's bytes ourselves, which
    needs the format. A multi names programs, so it would also allow "programs no multi uses".
-4. **Copy a whole partition to a file and back** (`pget`/`pput`). Partition to partition is done (Copy Partition To…); it is not checked on a real sampler.
+4. **Copy a whole partition to a file and back** (`getpart`/`putpart`): built 2026-11-25 (right-click a partition: Save Partition to File…, Restore Partition from File…; HD sampler partitions and DD areas, not floppies or S900 hard disks) and
+   tested against akaiutil only. Partition to partition is done too (Copy Partition To…). What's left: S900 hard disk partitions (no test image), and checking a restored partition on a real sampler.
 5. **Tags**: setting and clearing a file's tags (Edit > Tag Files…, the file menu, a link in the details pane; akaiutil 4.7 or newer), renaming a partition's tag names (Edit > Rename Tags…,
    the partition menu, and a button in the Tag Files window) and a tag menu beside the search box (files with a tag, across the open disks) are built, tested against akaiutil only.
    What's left: checking a tagged and renamed image on a real sampler.

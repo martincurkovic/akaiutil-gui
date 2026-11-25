@@ -111,7 +111,8 @@ def test_selected_takes_export_from_the_menu_actions(app, window, images, tmp_pa
     assert pump(app, lambda: window.act_export.isEnabled() and window.act_export_wav.isEnabled())
     monkeypatch.setattr(type(window), "_export_destination", lambda self: str(tmp_path))
     window.act_export_wav.trigger()
-    assert pump(app, lambda: (tmp_path / "STEREO.wav").exists())
+    assert pump(app, lambda: (tmp_path / "STEREO.wav").exists() and window._pending == 0)  # (the file is there a moment before the window is idle)
+    assert window.act_export.isEnabled()  # (a disabled action ignores trigger())
     window.act_export.trigger()
     assert pump(app, lambda: (tmp_path / "STEREO.TK").exists())
     assert sorted(p.name for p in tmp_path.iterdir()) == ["STEREO.TK", "STEREO.wav"]  # just the selected take

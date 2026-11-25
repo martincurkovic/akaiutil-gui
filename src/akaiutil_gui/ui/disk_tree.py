@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import shiboken6
 from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QToolTip, QTreeWidget, QTreeWidgetItem
@@ -373,21 +374,26 @@ class DiskTree(QTreeWidget):
         engine = self._engine
         if disk_item is None or engine is None:
             return
-        current = select if select is not None else self.current_object()
-        self._expand_after_load = {
+        # A reload that is still on its way has already emptied the tree (nothing is selected, nothing open), so asking the
+        # tree what to put back would lose it: that reload's aims stand, unless the caller says what to select.
+        under_way = select is None and self._reveal is not None and self._reveal[0] == disk_index and self.currentItem() is None
+        opened = {
             (disk_index, c.data(0, _ROLE_OBJ).name)
             for c in map(disk_item.child, range(disk_item.childCount()))
             if isinstance(c.data(0, _ROLE_OBJ), Partition) and c.isExpanded()
         }
-        if isinstance(current, Volume) and current.disk == disk_index:
-            self._reveal = (disk_index, current.partition, current.index)
-        elif isinstance(current, Partition) and current.disk == disk_index:
-            self._reveal = (disk_index, current.name, None)
-        elif isinstance(current, Disk) and current.index == disk_index:
-            self._reveal = (disk_index, None, None)
-        else:
-            self._reveal = None
-        self._announce = announce if self._reveal is not None else True
+        self._expand_after_load = (self._expand_after_load | opened) if under_way else opened
+        if not under_way:
+            current = select if select is not None else self.current_object()
+            if isinstance(current, Volume) and current.disk == disk_index:
+                self._reveal = (disk_index, current.partition, current.index)
+            elif isinstance(current, Partition) and current.disk == disk_index:
+                self._reveal = (disk_index, current.name, None)
+            elif isinstance(current, Disk) and current.index == disk_index:
+                self._reveal = (disk_index, None, None)
+            else:
+                self._reveal = None
+            self._announce = announce if self._reveal is not None else True
         gen = self._generation
         self._refreshing = True
         try:
@@ -511,8 +517,10 @@ class DiskTree(QTreeWidget):
 
     def _stale(self, gen: int, item: QTreeWidgetItem, token: int) -> bool:
         """True if this answer is to a question that no longer matters: the tree was reloaded, or the item was
-        thrown away or asked again since."""
-        return gen != self._generation or item.treeWidget() is not self or item.data(0, _ROLE_TOKEN) != token
+        thrown away or asked again since. (An item that was thrown away may be gone from Qt altogether: asking it anything raises.)"""
+        if gen != self._generation or not shiboken6.isValid(item):
+            return True
+        return item.treeWidget() is not self or item.data(0, _ROLE_TOKEN) != token
 
     def _add_partitions(self, gen: int, disk_item: QTreeWidgetItem, parts: list[Partition], token: int) -> None:
         if self._stale(gen, disk_item, token):

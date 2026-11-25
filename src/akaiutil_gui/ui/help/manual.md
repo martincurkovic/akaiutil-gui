@@ -210,6 +210,12 @@ Right-click a volume and choose **Copy Volume To…** to copy it into a hard dis
 
 Right-click a partition and choose **Copy Partition To…** to copy all its volumes into another hard disk partition, on this disk or another. The volumes keep their names, and the dialog tells you if that partition has a volume with the same name or not enough free space. Nothing is merged or overwritten, and if a volume can't be copied the ones already done are taken away again. The tag names go along if the other partition still has the default ones.
 
+### Saving and restoring a partition
+
+Right-click a hard disk partition (a sampler partition or a direct-to-disk area) and choose **Save Partition to File…** to write the whole partition, block for block, to a `.part` file. That is a backup of everything in it.
+
+**Restore Partition from File…** puts a saved partition back, over the one you right-clicked, which can be on another disk. **Everything in the partition is replaced, and that can't be undone**, so you are asked first (and, as with any edit, offered a backup of the image). The file has to be exactly as big as the partition and has to be a partition of the same kind; otherwise it is refused before anything is written. When it is done, the partition is read back and compared with the file. A disk's first partition keeps the disk's own partition table, so restoring a saved first partition onto another disk doesn't change how that disk is divided up.
+
 ---
 
 ## Changing a sample's settings

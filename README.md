@@ -68,6 +68,7 @@ Every image opens read-only by default. **Edit > Allow Editing** enables edit fu
 - **New Volume** (right-click a partition): name, volume number, type and load number.
 - **Format Disk** (right-click a disk): erases it and sets it up as an S1000, S3000, CD3000 or S900 disk.
 - **Copy and move files** between volumes, partitions and disks. Drag audio samples out of the list to Finder, Explorer or your DAW to export as WAV files.
+- **Save and restore a partition** (right-click a partition): a block-for-block backup of a hard disk partition to a `.part` file, and putting one back (replaces everything in the partition).
 - **Sort a volume** (Edit > Sort Files by Name, or right-click a volume): puts its files in alphabetical order.
 - **Import** (drop files on a volume, or Edit > Import Files): WAV, AIFF, FLAC, OGG and MP3 files are all converted to Akai format.
 - **Takes** (the direct-to-disk area of an S1100/S3000 disk): import audio or `.TK` files, rename, delete, export. Not yet checked against a real sampler.

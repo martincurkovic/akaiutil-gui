@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from akaiutil_gui import search, settings
 from akaiutil_gui.engine.models import Volume
-from akaiutil_gui.ui import file_table, theme
+from akaiutil_gui.ui import disk_tree, file_table, theme
 
 
 @pytest.fixture(scope="module")
@@ -73,6 +73,24 @@ def test_browse_hd_select_volume_and_file(app, window, images):
     # a volume whose name contains a space
     window.tree.setCurrentItem(part_a.child(2))
     assert pump(app, lambda: window.table.rowCount() == 1 and window.table.item(0, 1).text() == "LEAD.S3")
+
+
+def test_an_answer_for_a_tree_item_that_has_been_thrown_away_is_ignored(app, window, images):
+    import shiboken6
+    from PySide6.QtWidgets import QTreeWidgetItem
+
+    window.open_images([str(images["hd"])])
+    assert pump(app, lambda: window.tree.topLevelItemCount() == 1)
+    tree = window.tree
+    item = QTreeWidgetItem(["a partition"])
+    tree.topLevelItem(0).addChild(item)
+    item.setData(0, disk_tree._ROLE_TOKEN, 7)
+    assert not tree._stale(tree._generation, item, 7)  # still there and still the question that was asked
+    assert tree._stale(tree._generation, item, 8)  # asked again since
+    assert tree._stale(tree._generation - 1, item, 7)  # the tree was reloaded
+    tree.topLevelItem(0).removeChild(item)
+    shiboken6.delete(item)  # what throwing the item away does on the Qt side
+    assert tree._stale(tree._generation, item, 7)  # (used to raise "already deleted")
 
 
 def test_single_floppy_selects_its_volume_automatically(app, window, images):

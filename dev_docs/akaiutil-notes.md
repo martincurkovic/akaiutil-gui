@@ -156,6 +156,20 @@ Measured on akaiutil 4.6.8 unless a point says 4.7 (the version the app now down
 - `reni <idx> /disk0/A/VOL_NAME/NEW_NAME.S3` moves between volumes of one partition.
 - `updateuncompri` recomputes the uncompressed size of a compressed S900 file.
 
+## Partition files: `getpart` and `putpart` (measured 2026-11-25, akaiutil 4.7 built from the pinned tarball, macOS arm64, on generated images: an 18-partition 5 MB S3000 disk, a 4-partition 5 MB one, a 3-partition 5 MB one made with `create_image`, a 3-partition 10 MB one, and the generated DD image)
+- `getpart [<partition-path>] <file>` (aliases `pget`, `pexport`) writes the partition block for block: 640 blocks of 8,192 = 5,242,880 bytes for a 5 MB partition. Works on sampler partitions and DD areas. It prints a progress bar and, on an unreadable block, `error in block 0x...` and carries on.
+  A relative file name is created in akaiutil's working directory (our staging folder), so use a plain name.
+- `putpart <file> [<partition-path>]` (`pput`, `pimport`) writes the file over an *existing* partition and then **restarts akaiutil** (banner and disk list again; the session carries on, the working directory is `/`). It refuses on a read-only session (`disk0: read-only, cannot write`).
+- **It doesn't check the file against the partition.** A 10 MB file put into a 5 MB partition B printed `import larger than current partition size, ignored` and then wrote all 10 MB: B and the first half of C changed, and the restart reported
+  `inconsistent size of partition B (0x0500 instead of 0x0280), ignored`, `invalid format in partition R` and 17 partitions instead of 18. So the GUI refuses any file whose size isn't exactly the partition's, before calling it.
+  (A smaller file was not tried: the source suggests akaiutil would then see the partition as inconsistent in the same way. The GUI refuses it anyway.)
+- Restoring over the **first** sampler partition keeps the disk's own partition table: the file came from a disk with 18 (and with 4) partitions and went onto a disk with 3; the disk still had A, B and C afterwards and the volumes came back.
+  Reading the partition back, 31 bytes differed from the file, all in 0x4500-0x4527, inside the partition table at 0x4400 (+0x202 bytes) in the header (offset worked out from `struct akai_parthead_s`: 2 + 98*2 + 4 + 100*16 + 0x1e00*2 + 0xf6).
+  The GUI's read-back check leaves that range out for partition A only.
+- A sampler partition starts with its size in blocks (16 bits, low byte first) and magic fields that are 3333 * their number (0, 3333, 6666, ...); a DD area has no such magic. The GUI uses these to refuse a file of the wrong kind.
+- Restoring a DD area (takes deleted, then the saved area put back) brought the takes back with the same numbers and names.
+- Not tried: S900 hard disk partitions (no image), floppies (the image file is the disk), a partition file written by a different akaiutil version, a very full or fragmented partition.
+
 ## Direct-to-disk (DD) takes (measured 2026-10-30 on akaiutil-made images, akaiutil 4.6.8; no real sampler recording seen yet)
 Plan: [dd-takes-plan.md](dd-takes-plan.md). Everything below was tried on throwaway images in the scratchpad, with takes made by
 `wav2take` from sine and noise WAVs.

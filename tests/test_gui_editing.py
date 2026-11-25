@@ -25,6 +25,13 @@ def pump(app, cond, timeout=10.0):
     return False
 
 
+def idle(window) -> bool:
+    """Nothing is loading or being written, and the disks' usage is known again: an edit reloads all of it, and the
+    table's rows (and their selection) are replaced when that lands, so a test waits for it before it selects or clicks.
+    The file picked after the edit is selected again last of all (`_pending_reveal`), once the tree has put its own selection back."""
+    return window._pending == 0 and window._writing == 0 and window._index_ready() and window._pending_reveal is None and window._pending_reselect is None
+
+
 @pytest.fixture(autouse=True)
 def delete_widgets(qt_app):
     """Delete every widget a test made (dialogs and fields it never gave a parent): left to Python's exit, Qt can
@@ -377,7 +384,7 @@ def test_context_menus_offer_what_fits_what_was_clicked(qt_app, window, editable
     open_and_show(qt_app, window, editable_hd)
     texts = lambda menu: [a.text().replace("&", "") for a in menu.actions() if not a.isSeparator()]  # noqa: E731
     assert texts(window._tree_menu(window._volume)) == ["Import Files…", "Paste Files", "Sort Files by Name…", "Select Unused Samples", "Export Samples as WAV…", "Copy Volume To…", "Rename…", "Delete…"]
-    assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…", "Copy Partition To…", "Rename Tags…", "Export Samples as WAV…"]
+    assert texts(window._tree_menu(window.tree.partition(0, "A"))) == ["New Volume…", "Copy Partition To…", "Rename Tags…", "Export Samples as WAV…", "Save Partition to File…", "Restore Partition from File…"]
 
     window.table.selectRow(0)
     rows = window._selected_rows()
@@ -1444,3 +1451,13 @@ def test_file_list_rows_have_no_hover_highlight_but_the_tree_keeps_its_own():
         qss = theme.render_stylesheet(palette)
         assert "QTableView::item:hover" not in qss
         assert "QTreeView::item:hover:!selected" in qss
+
+
+def test_a_second_reload_before_the_first_is_done_keeps_the_selection(qt_app, window, editable_hd):
+    open_and_show(qt_app, window, editable_hd)
+    chosen = window.tree.current_object()
+    assert chosen is not None and chosen.name == "DRUMS"
+    window.tree.refresh_disk(0)
+    window.tree.refresh_disk(0)  # (two edits in a row: the second finds the tree emptied by the first)
+    assert pump(qt_app, lambda: window.tree.current_object() is not None and window.tree.current_object().name == "DRUMS")
+    assert pump(qt_app, lambda: window._pending == 0)

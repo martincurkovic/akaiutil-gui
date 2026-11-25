@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from .. import akai_header, akai_names, describe, references, sorting, tags as filetags
+from .. import akai_header, akai_names, describe, partition_files, references, sorting, tags as filetags
 from ..audio import wavfile
 from ..formatting import human_size
 from . import formats, locate, parse
@@ -34,6 +34,9 @@ log = logging.getLogger(__name__)
 # 4.6.8, and `puti` (write bytes into an existing file) doesn't exist before it.
 MIN_VERSION_TAG_EDITING = (4, 7)
 MIN_VERSION_PUTI = (4, 7)
+
+STAGED_PARTITION = "partition.bin"  # a partition file in the staging folder (a plain name: akaiutil splits commands on spaces)
+STAGED_READBACK = "readback.bin"
 
 
 class AkaiEngine:
@@ -479,6 +482,60 @@ class AkaiEngine:
                 raise EngineError(f"{e} The {len(copied)} volume{'s' if many else ''} copied before it {'were' if many else 'was'} removed again.") from e
             notes += self._carry_tags(sources, files, copied, dst)
             return PartitionCopy(copied, notes)
+
+    def export_partition(self, part: Partition, dest: str | os.PathLike) -> int:
+        """Write a hard disk partition, block for block, to a file (akaiutil's `getpart`): a backup that `import_partition` puts back.
+        An existing file at `dest` is replaced once the new one is complete. Returns the size of the file."""
+        why = partition_files.unsupported(part)
+        if why:
+            raise EngineError(why)
+        dest = Path(dest)
+        with self._lock:
+            log.info("export partition disk%d %s to %s", part.disk, part.name, dest)
+            session = self._need_session()
+            staged = session.staging_dir / STAGED_PARTITION
+            _clear_dir(session.staging_dir)
+            try:
+                text = self._run(f"getpart {part.path} {STAGED_PARTITION}", timeout=900).text
+                size = staged.stat().st_size if staged.exists() else -1
+                if size != part.size_bytes or "error" in text.lower():  # (akaiutil goes on past a block it can't read, and says so)
+                    raise EngineError(f"akaiutil couldn't read all of partition {part.name}, so nothing was saved.")
+                temp = dest.with_name(f".{dest.name}.tmp")
+                try:
+                    shutil.move(str(staged), temp)
+                    os.replace(temp, dest)
+                except OSError as e:
+                    raise EngineError(f"Couldn't write {dest.name}: {e.strerror or e}") from e
+                finally:
+                    temp.unlink(missing_ok=True)
+            finally:
+                _clear_dir(session.staging_dir)
+        return size
+
+    def import_partition(self, part: Partition, src: str | os.PathLike) -> None:
+        """Put a partition file over a hard disk partition, replacing everything in it (akaiutil's `putpart`). The file has to be
+        as big as the partition and look like one: akaiutil would carry on into the partitions after it if it were bigger. It is
+        read back afterwards and compared with the file (apart from the disk's own partition table, which `putpart` keeps)."""
+        why = partition_files.unsupported(part) or partition_files.problem_with_file(src, part)
+        if why:
+            raise EngineError(why)
+        with self._lock:
+            log.info("restore partition disk%d %s from %s", part.disk, part.name, src)
+            self._need_writable()
+            session = self._need_session()
+            staged, readback = session.staging_dir / STAGED_PARTITION, session.staging_dir / STAGED_READBACK
+            _clear_dir(session.staging_dir)
+            try:
+                shutil.copyfile(src, staged)
+                self._run(f"putpart {STAGED_PARTITION} {part.path}", timeout=900)  # (it restarts akaiutil when it is done)
+                self._tag_names.clear()  # the partition holds other tag names now
+                staged.unlink(missing_ok=True)
+                self._run(f"getpart {part.path} {STAGED_READBACK}", timeout=900)
+                if not readback.exists() or not partition_files.same_apart_from(src, readback, partition_files.table_range(part)):
+                    log.warning("partition disk%d %s doesn't read back the same as %s", part.disk, part.name, src)
+                    raise EngineError(f"Partition {part.name} was written, but it doesn't read back the same as the file. Don't rely on it.")
+            finally:
+                _clear_dir(session.staging_dir)
 
     def _carry_tags(self, sources: list[Volume], files: dict[int, list[FileEntry]], copied: list[Volume], dst: Partition) -> list[str]:
         """After a partition copy: give the destination the source's tag names if it still has the default ones, and say which

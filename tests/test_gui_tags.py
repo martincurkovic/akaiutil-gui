@@ -13,7 +13,7 @@ from akaiutil_gui.engine.models import FileEntry
 from akaiutil_gui.engine.session import EngineError
 from akaiutil_gui.ui import edit_dialogs
 from akaiutil_gui.ui.main_window import MainWindow
-from test_gui_editing import answers, delete_widgets, open_and_show, pump, vol, window  # noqa: F401  (fixtures)
+from test_gui_editing import answers, delete_widgets, idle, open_and_show, pump, vol, window  # noqa: F401  (fixtures)
 
 
 @pytest.fixture
@@ -152,7 +152,7 @@ def test_cancelling_the_tag_dialog_writes_nothing(qt_app, window, editable_hd, a
     window._tag_selected()
     assert pump(qt_app, lambda: asked_tags.shown)
     before = editable_hd.read_bytes()
-    assert pump(qt_app, lambda: window._pending == 0)
+    assert pump(qt_app, lambda: idle(window))
     assert editable_hd.read_bytes() == before
 
 
@@ -165,7 +165,7 @@ def test_files_that_cant_take_a_tag_are_reported_and_the_rest_are_tagged(qt_app,
     asked_tags.answer = ([1, 2, 3, 4], [])
     window._tag_selected()
     assert pump(qt_app, lambda: tags_of(window, "KICK.S3") == "01 02 03 04")
-    assert pump(qt_app, lambda: [f.name for _, f in window.table.selected_rows()] == ["KICK.S3"] and window._pending == 0)
+    assert pump(qt_app, lambda: [f.name for _, f in window.table.selected_rows()] == ["KICK.S3"] and idle(window))
 
     window.table.selectAll()
     assert pump(qt_app, lambda: len(window._selected_rows()) == 2)
@@ -279,7 +279,8 @@ def test_rename_tags_from_the_edit_menu(qt_app, window, editable_hd, answers, as
     window.act_rename_tags.trigger()
     assert pump(qt_app, lambda: window._writable and "Renamed 2 tags of partition A" in window.statusBar().currentMessage())
     assert asked_names.shown[0][0] == "A" and asked_names.shown[0][1][1] == "TAG A" and len(asked_names.shown[0][1]) == 26
-    assert pump(qt_app, lambda: window._engine.partition_tag_names(window.tree.partition(0, "A"))[1] == "KICKS")
+    # (the tree is rebuilt after an edit, and for a moment has no partition A)
+    assert pump(qt_app, lambda: (part := window.tree.partition(0, "A")) is not None and window._engine.partition_tag_names(part)[1] == "KICKS")
     assert answers.warnings == []
 
 
@@ -291,7 +292,7 @@ def test_a_tagged_file_is_listed_under_the_new_name(qt_app, window, editable_hd,
     asked_tags.answer = ([2], [])
     window._tag_selected()
     assert pump(qt_app, lambda: "Changed the tags of 1 file." in window.statusBar().currentMessage())
-    assert pump(qt_app, lambda: window._pending == 0 and window._writing == 0)
+    assert pump(qt_app, lambda: idle(window))
     asked_names.answer = {2: "SNARES"}
     assert pump(qt_app, lambda: window.tree.current_object() is not None)  # (the tree puts its selection back once it has reloaded)
     window._rename_tags()
@@ -306,7 +307,7 @@ def test_the_partition_menu_offers_rename_tags_only_where_there_are_tags(qt_app,
     window.close_images()
     window.open_images([str(images["fl1"])])
     assert pump(qt_app, lambda: window.tree.topLevelItemCount() == 1)
-    assert pump(qt_app, lambda: window._pending == 0)
+    assert pump(qt_app, lambda: idle(window))
     part = window._engine.list_partitions(window._engine.list_disks()[0])[0]  # (a floppy's one partition isn't shown in the tree)
     assert part.type.startswith("FL") and "Rename Tags…" not in texts(window._tree_menu(part))
 
@@ -427,6 +428,20 @@ def test_two_tags_that_already_shared_a_name_are_not_nagged_about(qt_app):
     d.deleteLater()
 
 
+def test_the_tag_dialog_keeps_its_rename_button_when_the_tree_is_rebuilding(qt_app, window, editable_hd, answers, asked_tags, asked_names, monkeypatch):
+    open_and_show(qt_app, window, editable_hd)
+    window.table.selectRow(0)
+    assert pump(qt_app, lambda: window._selected_rows())
+    answers.confirm = True
+    asked_names.answer = {2: "SNARES"}
+    asked_tags.answer = [edit_dialogs.RENAME_TAGS, None]
+    real = window.tree.partition
+    monkeypatch.setattr(window.tree, "partition", lambda *a: None if asked_names.shown else real(*a))  # (gone once the tags are renamed)
+    window._tag_selected()
+    assert pump(qt_app, lambda: len(asked_tags.shown) == 2)
+    assert [s[2] for s in asked_tags.shown] == [True, True]
+
+
 def test_renaming_the_tags_from_the_tag_dialog_comes_back_to_it(qt_app, window, editable_hd, answers, asked_tags, asked_names):
     open_and_show(qt_app, window, editable_hd)
     window.table.selectRow(0)
@@ -438,7 +453,7 @@ def test_renaming_the_tags_from_the_tag_dialog_comes_back_to_it(qt_app, window, 
     assert pump(qt_app, lambda: "Changed the tags of 1 file." in window.statusBar().currentMessage())
     assert [s[2] for s in asked_tags.shown] == [True, True]  # (the button was there both times)
     assert asked_names.shown[0][0] == "A"
-    assert pump(qt_app, lambda: window._pending == 0 and window._writing == 0 and window.tree.partition(0, "A") is not None)  # (the tree has reloaded)
+    assert pump(qt_app, lambda: idle(window) and window.tree.partition(0, "A") is not None)  # (the tree has reloaded)
     assert window._engine.partition_tag_names(window.tree.partition(0, "A"))[2] == "SNARES"
     assert pump(qt_app, lambda: tags_of(window, "KICK.S3") == "02")
     assert asked_tags.shown[1][1][2] == "SNARES"  # the second dialog was given the new names

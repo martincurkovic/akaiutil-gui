@@ -42,6 +42,7 @@ from akaiutil_gui import (
     hfe_work,
     importing,
     os_floppy,
+    partition_files,
     search,
     settings,
     sorting,
@@ -88,6 +89,7 @@ RECENT_WIDTH = 520  # px: the recent list on the start screen
 STATUS_BAR_MARGIN = 10  # px: the status bar's text keeps this far from the window's sides (and so its rounded corners)
 RECENT_SHOWN = 6  # how many of the remembered images the start screen lists
 
+PARTITION_FILTER = f"Partition files (*{partition_files.SUFFIX});;All files (*)"
 IMAGE_FILTER = "Disk images (*.img *.iso *.bin *.dsk *.hfe *.akai *.fdi *.raw);;All files (*)"
 
 
@@ -2545,17 +2547,19 @@ class MainWindow(QMainWindow):
             return dialog.add, dialog.remove
         return edit_dialogs.RENAME_TAGS if dialog.rename_requested else None
 
-    def _do_tag_files(self, rows: list[tuple[Volume, FileEntry]]) -> None:
+    def _do_tag_files(self, rows: list[tuple[Volume, FileEntry]], part: Partition | None = None) -> None:
         engine = self._engine
         if engine is None:
             return
 
         def show(names: dict[int, str]) -> None:
-            part = self.tree.partition(rows[0][0].disk, rows[0][0].partition)
+            # (the partition is kept when the dialog comes back after Rename Tags…: the tree is being rebuilt just then and may not have it)
+            nonlocal part
+            part = part or self.tree.partition(rows[0][0].disk, rows[0][0].partition)
             can_rename = part is not None and self._has_tags(part)
             chosen = self._ask_tags([f for _, f in rows], names, can_rename)
             if chosen == edit_dialogs.RENAME_TAGS and part is not None:
-                self._do_rename_tags(part, then=lambda: self._do_tag_files(rows))  # (and then the tags again, under their new names)
+                self._do_rename_tags(part, then=lambda: self._do_tag_files(rows, part))  # (and then the tags again, under their new names)
                 return
             if chosen is None:
                 return
@@ -2861,6 +2865,71 @@ class MainWindow(QMainWindow):
             )
 
         self._run(survey, show)
+
+    # ------------------------------------------------------- partition files
+    def _ask_partition_save_path(self, suggestion: str) -> str | None:
+        path, _ = QFileDialog.getSaveFileName(self, "Save partition to file", suggestion, PARTITION_FILTER)
+        return path or None
+
+    def _ask_partition_file(self) -> str | None:
+        start = settings.get_last_dir("partition") or str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(self, "Restore partition from file", start, PARTITION_FILTER)
+        return path or None
+
+    def _save_partition(self, part: Partition) -> None:
+        """A partition, block for block, into a file: a backup that Restore Partition from File puts back."""
+        engine = self._engine
+        if engine is None or self._busy():
+            return
+        image = self.tree.disk_path(part.disk)
+        name = f"{Path(image).stem if image else f'disk{part.disk}'} partition {part.name}{partition_files.SUFFIX}"
+        dest = self._ask_partition_save_path(str(Path(settings.get_last_dir("partition") or Path.home()) / name))
+        if not dest:
+            return
+        settings.set_last_dir("partition", str(Path(dest).parent))
+        self.statusBar().showMessage(f"Saving partition {part.name}…")
+
+        def failed(message: str) -> None:
+            self.statusBar().clearMessage()
+            self._warn("Couldn't save the partition", message.splitlines()[0] if message else "akaiutil refused.", message.splitlines()[1:])
+
+        self._run(
+            lambda: engine.export_partition(part, dest),
+            lambda size: self.statusBar().showMessage(f"Saved partition {part.name} ({human_size(size)}) to {Path(dest).name}.", 10000),
+            failed,
+        )
+
+    def _restore_partition(self, part: Partition) -> None:
+        if self._engine is None or self._busy():
+            return
+        self._ensure_editing(lambda: self._do_restore_partition(part))
+
+    def _do_restore_partition(self, part: Partition) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+        src = self._ask_partition_file()
+        if not src:
+            return
+        settings.set_last_dir("partition", str(Path(src).parent))
+        problem = partition_files.problem_with_file(src, part)
+        if problem:
+            self._warn("Can't restore the partition", problem)
+            return
+        if not edit_dialogs.confirm(
+            self,
+            "Replace partition?",
+            f"Replace everything in partition {part.name} with the contents of “{Path(src).name}”?",
+            "What is in the partition now is lost. This can't be undone.",
+            action="Replace Partition",
+        ):
+            return
+        self.statusBar().showMessage(f"Restoring partition {part.name}…")
+        self._run_edit(
+            lambda: engine.import_partition(part, src),
+            lambda _none: self._edited(part.disk, select=part, message=f"Restored partition {part.name} from {Path(src).name}."),
+            lambda message: self._edit_failed(part.disk, message),
+        )
 
     def _ask_copy_partition(self, part: Partition, names, files: int, need: int, targets) -> Partition | None:
         dialog = edit_dialogs.CopyPartitionDialog(self, part, names, files, need, targets)
@@ -3635,6 +3704,10 @@ class MainWindow(QMainWindow):
                 menu.addAction("Export Takes as WAV…", lambda: self._export_takes(obj, None, True))
             else:
                 menu.addAction("Export Samples as WAV…", lambda: self._export_node(obj))
+            if not partition_files.unsupported(obj):
+                menu.addSeparator()
+                menu.addAction("Save Partition to File…", lambda: self._save_partition(obj))
+                menu.addAction("Restore Partition from File…", lambda: self._restore_partition(obj))
         elif isinstance(obj, Disk):
             menu.addAction("Export Samples as WAV…", lambda: self._export_node(obj))
             menu.addSeparator()
