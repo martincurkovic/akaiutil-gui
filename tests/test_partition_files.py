@@ -223,3 +223,77 @@ def test_a_sampler_partition_is_not_put_over_a_direct_to_disk_area(dd_ed, ed, tm
     forged.write_bytes(sampler.read_bytes()[: part.size_bytes].ljust(part.size_bytes, b"\0"))
     with pytest.raises(EngineError, match="not a direct-to-disk area"):
         dd_ed.import_partition(part, forged)
+
+
+# ---------------------------------------------------------------- what the review found
+def test_the_comparison_works_a_block_at_a_time_and_skips_the_table_across_block_edges(tmp_path, monkeypatch):
+    monkeypatch.setattr(partition_files, "COMPARE_BLOCK", 7)  # (the skipped range 10..25 starts in one block and ends in a third)
+    base = bytes(range(100))
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.write_bytes(base)
+
+    def other(changed_at):
+        data = bytearray(base)
+        data[changed_at] ^= 0xFF
+        b.write_bytes(data)
+        return partition_files.same_apart_from(a, b, (10, 25))
+
+    assert other(10) and other(17) and other(24)  # (inside the skipped bytes)
+    assert not other(9) and not other(25) and not other(0) and not other(99)  # (just outside, and the ends)
+    b.write_bytes(base + b"x")
+    assert not partition_files.same_apart_from(a, b, (10, 25))  # (a different size)
+    b.write_bytes(base)
+    assert partition_files.same_apart_from(a, b) and partition_files.same_apart_from(a, b, (10, 25))
+
+
+def test_only_akaiutils_error_line_makes_a_save_fail_not_a_name_with_error_in_it(ed, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    real = ed._run
+
+    def with_text(extra):
+        return lambda cmd, timeout=120: SimpleNamespace(text=real(cmd, timeout=timeout).text + extra)
+
+    part = partition(ed)
+    monkeypatch.setattr(ed, "_run", with_text("\nterrors.img\n"))
+    assert ed.export_partition(part, tmp_path / "ok.part") == part.size_bytes
+    monkeypatch.setattr(ed, "_run", with_text("\nerror in block 0x10\n"))
+    with pytest.raises(EngineError, match="couldn't read all"):
+        ed.export_partition(part, tmp_path / "bad.part")
+    assert not (tmp_path / "bad.part").exists()
+
+
+def test_the_tag_names_are_forgotten_even_when_putpart_gives_up(ed, tmp_path, monkeypatch):
+    saved = tmp_path / "A.part"
+    ed.export_partition(partition(ed), saved)
+    ed._tag_names[(0, "B")] = {1: "OLD"}
+    real = ed._run
+
+    def failing(cmd, timeout=120):
+        if cmd.startswith("putpart"):
+            raise EngineError("akaiutil didn't answer")
+        return real(cmd, timeout=timeout)
+
+    monkeypatch.setattr(ed, "_run", failing)
+    with pytest.raises(EngineError, match="didn't answer"):
+        ed.import_partition(partition(ed, "B"), saved)
+    assert ed._tag_names == {}
+    assert staging_is_empty(ed)
+
+
+def test_a_save_or_restore_with_no_room_for_the_temporary_copy_says_so(ed, editable_hd, tmp_path, monkeypatch):
+    from collections import namedtuple
+
+    from akaiutil_gui.engine import api
+
+    part = partition(ed)
+    saved = tmp_path / "A.part"
+    ed.export_partition(part, saved)
+    before = editable_hd.read_bytes()
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(api.shutil, "disk_usage", lambda path: usage(10**9, 10**9 - 1000, 1000))
+    with pytest.raises(EngineError, match="enough free space"):
+        ed.export_partition(part, tmp_path / "B.part")
+    with pytest.raises(EngineError, match="enough free space"):
+        ed.import_partition(partition(ed, "B"), saved)
+    assert not (tmp_path / "B.part").exists() and editable_hd.read_bytes() == before and staging_is_empty(ed)

@@ -332,7 +332,12 @@ class DiskTree(QTreeWidget):
             disk_item.setExpanded(True)
         part_item = next((c for c in map(disk_item.child, range(disk_item.childCount())) if isinstance(c.data(0, _ROLE_OBJ), Partition) and c.data(0, _ROLE_OBJ).name == part_name), None)
         if part_item is None:
-            return  # the partitions are still loading
+            loading = disk_item.childCount() == 1 and disk_item.child(0).data(0, _ROLE_OBJ) is None
+            if loading or not disk_item.data(0, _ROLE_LOADED):
+                return  # the partitions are still loading
+            self._reveal = None  # it isn't there (the disk was formatted or changed): the disk is the next best thing
+            self._select(disk_item)
+            return
         if vnr is None:  # just the partition
             self._reveal = None
             self._select(part_item)

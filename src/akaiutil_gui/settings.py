@@ -31,13 +31,14 @@ def set_akaiutil_path(path: str | None) -> None:
     _qs().setValue("akaiutil_path", path or "")
 
 
-def get_old_akaiutil_noticed() -> str | None:
-    """The version of an older akaiutil the user has already been told about (once is enough for each)."""
-    return _qs().value("akaiutil_old_noticed", None) or None
+def get_old_akaiutil_noticed() -> set[str]:
+    """The versions of an older akaiutil the user has already been told about (once is enough for each)."""
+    value = _qs().value("akaiutil_old_noticed", []) or []
+    return {value} if isinstance(value, str) else {str(v) for v in value}
 
 
-def set_old_akaiutil_noticed(version: str | None) -> None:
-    _qs().setValue("akaiutil_old_noticed", version or "")
+def add_old_akaiutil_noticed(version: str) -> None:
+    _qs().setValue("akaiutil_old_noticed", sorted(get_old_akaiutil_noticed() | {version}))
 
 
 def get_last_dir(key: str) -> str | None:

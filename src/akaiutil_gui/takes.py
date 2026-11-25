@@ -76,7 +76,7 @@ def prepare_audio(src: TakeSource, dest: Path) -> tuple[int, int, int]:
     with soundfile.SoundFile(str(src.path)) as f:
         rate = f.samplerate
         target = resample_target(rate)
-        pcm = np.empty((f.frames, f.channels), dtype="<i2")
+        pcm = None if target else np.empty((f.frames, f.channels), dtype="<i2")
         heard = np.empty((f.frames, f.channels), dtype="float32") if target else None
         at = 0
         for block in f.blocks(blocksize=READ_BLOCK_FRAMES, dtype="float32" if target else "float64", always_2d=True):
@@ -130,6 +130,9 @@ def run_import(
             if not engine.is_open or not engine.is_writable:
                 raise
             result.failed.append(f"{src.path.name}: {e}")
+            continue
+        except MemoryError:
+            result.failed.append(f"{src.path.name}: not enough memory to convert it (it is a very long recording)")
             continue
         except (OSError, RuntimeError, soundfile.LibsndfileError) as e:
             result.failed.append(f"{src.path.name}: {importing._why(e)}")

@@ -69,11 +69,24 @@ def problem_with_file(path: str | os.PathLike, part: Partition) -> str:
     return ""
 
 
+COMPARE_BLOCK = 1 << 20  # (a partition can be hundreds of megabytes: compare it a block at a time)
+
+
 def same_apart_from(a: str | os.PathLike, b: str | os.PathLike, skip: tuple[int, int] | None = None) -> bool:
     """Whether two files hold the same bytes, leaving out the ones in `skip` (start, end)."""
-    pa, pb = Path(a).read_bytes(), Path(b).read_bytes()
-    if len(pa) != len(pb):
+    if Path(a).stat().st_size != Path(b).stat().st_size:
         return False
-    if skip is not None:
-        pa, pb = pa[: skip[0]] + pa[skip[1] :], pb[: skip[0]] + pb[skip[1] :]
-    return pa == pb
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        at = 0
+        while True:
+            block_a, block_b = fa.read(COMPARE_BLOCK), fb.read(COMPARE_BLOCK)
+            if not block_a and not block_b:
+                return True
+            if skip is not None:  # (blank out the part of this block that lies in the skipped range)
+                lo, hi = max(skip[0] - at, 0), max(skip[1] - at, 0)
+                if lo < len(block_a) and hi > 0:
+                    block_a = block_a[:lo] + block_a[hi:]
+                    block_b = block_b[:lo] + block_b[hi:]
+            if block_a != block_b:
+                return False
+            at += COMPARE_BLOCK

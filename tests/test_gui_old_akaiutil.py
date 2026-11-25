@@ -52,7 +52,7 @@ def test_an_old_akaiutil_is_mentioned_once_and_not_again_for_the_same_version(qt
     use(old)
     opened(qt_app, window, editable_hd)
     assert pump(qt_app, lambda: offers.asked) and offers.asked == [("4.6.8", str(old))]
-    assert settings.get_old_akaiutil_noticed() == "4.6.8"
+    assert settings.get_old_akaiutil_noticed() == {"4.6.8"}
     opened(qt_app, window, editable_hd)
     assert len(offers.asked) == 1  # (told once is enough)
     assert offers.downloads == []  # (it was refused)
@@ -79,7 +79,7 @@ def test_saying_yes_downloads_the_new_one_and_says_how_to_use_it(qt_app, window,
 def test_akaiutil_4_7_is_not_mentioned(qt_app, window, binary, editable_hd, offers):
     use(binary)
     opened(qt_app, window, editable_hd)
-    assert offers.asked == [] and settings.get_old_akaiutil_noticed() is None
+    assert offers.asked == [] and settings.get_old_akaiutil_noticed() == set()
 
 
 def test_a_program_that_does_not_say_its_version_is_left_alone(qt_app, window, binary, editable_hd, tmp_path, offers):

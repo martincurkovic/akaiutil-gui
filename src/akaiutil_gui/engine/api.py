@@ -13,6 +13,7 @@ there is a subprocess underneath.
 
 import logging
 import os
+import re
 import shutil
 import struct
 import threading
@@ -496,9 +497,10 @@ class AkaiEngine:
             staged = session.staging_dir / STAGED_PARTITION
             _clear_dir(session.staging_dir)
             try:
+                self._need_staging_room(session, part)
                 text = self._run(f"getpart {part.path} {STAGED_PARTITION}", timeout=900).text
                 size = staged.stat().st_size if staged.exists() else -1
-                if size != part.size_bytes or "error" in text.lower():  # (akaiutil goes on past a block it can't read, and says so)
+                if size != part.size_bytes or re.search(r"error in block", text, re.I):  # (akaiutil goes on past a block it can't read, and says so)
                     raise EngineError(f"akaiutil couldn't read all of partition {part.name}, so nothing was saved.")
                 temp = dest.with_name(f".{dest.name}.tmp")
                 try:
@@ -511,6 +513,13 @@ class AkaiEngine:
             finally:
                 _clear_dir(session.staging_dir)
         return size
+
+    @staticmethod
+    def _need_staging_room(session: Session, part: Partition) -> None:
+        """A partition goes through the staging folder as a whole file, so that folder's drive needs room for it."""
+        free = shutil.disk_usage(session.staging_dir).free
+        if free < part.size_bytes + (1 << 20):
+            raise EngineError(f"There isn't enough free space for the temporary copy of partition {part.name}: it needs {human_size(part.size_bytes)} free on the drive that holds {session.staging_dir.parent}.")
 
     def import_partition(self, part: Partition, src: str | os.PathLike) -> None:
         """Put a partition file over a hard disk partition, replacing everything in it (akaiutil's `putpart`). The file has to be
@@ -526,9 +535,12 @@ class AkaiEngine:
             staged, readback = session.staging_dir / STAGED_PARTITION, session.staging_dir / STAGED_READBACK
             _clear_dir(session.staging_dir)
             try:
+                self._need_staging_room(session, part)
                 shutil.copyfile(src, staged)
-                self._run(f"putpart {STAGED_PARTITION} {part.path}", timeout=900)  # (it restarts akaiutil when it is done)
-                self._tag_names.clear()  # the partition holds other tag names now
+                try:
+                    self._run(f"putpart {STAGED_PARTITION} {part.path}", timeout=900)  # (it restarts akaiutil when it is done)
+                finally:
+                    self._tag_names.clear()  # the partition holds other tag names now (even if putpart gave up part of the way)
                 staged.unlink(missing_ok=True)
                 self._run(f"getpart {part.path} {STAGED_READBACK}", timeout=900)
                 if not readback.exists() or not partition_files.same_apart_from(src, readback, partition_files.table_range(part)):

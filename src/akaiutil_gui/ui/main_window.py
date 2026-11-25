@@ -1193,9 +1193,9 @@ class MainWindow(QMainWindow):
         if engine is not self._engine or version is None or engine.can_edit_tags or self._setup_running:
             return
         text = ".".join(str(n) for n in version)
-        if settings.get_old_akaiutil_noticed() == text:
+        if text in settings.get_old_akaiutil_noticed():
             return
-        settings.set_old_akaiutil_noticed(text)
+        settings.add_old_akaiutil_noticed(text)
         log.info("akaiutil %s is older than %s", text, fetch.VERSION)
         if self._ask_update_akaiutil(text, self._engine_binary):
             self._download_akaiutil(

@@ -1461,3 +1461,11 @@ def test_a_second_reload_before_the_first_is_done_keeps_the_selection(qt_app, wi
     window.tree.refresh_disk(0)  # (two edits in a row: the second finds the tree emptied by the first)
     assert pump(qt_app, lambda: window.tree.current_object() is not None and window.tree.current_object().name == "DRUMS")
     assert pump(qt_app, lambda: window._pending == 0)
+
+
+def test_a_wanted_partition_that_is_not_on_the_disk_is_given_up_not_waited_for(qt_app, window, editable_hd):
+    open_and_show(qt_app, window, editable_hd)
+    window.tree._reveal = (0, "Z", None)  # (a partition that a format or restore took away)
+    window.tree._try_reveal()
+    assert window.tree._reveal is None
+    assert window.tree.currentItem() is window.tree.topLevelItem(0)  # (the disk is the next best thing)

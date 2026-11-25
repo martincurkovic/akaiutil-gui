@@ -252,6 +252,23 @@ def test_a_file_at_a_rate_a_take_holds_is_not_resampled(tmp_path):
     assert takes_module.prepare_audio(src, tmp_path / "ok.wav") == (1, 48000, 9600)
 
 
+def test_a_file_too_long_to_convert_is_reported_and_the_rest_carry_on(dd_ed, tmp_path, monkeypatch):
+    part = _dd_partition(dd_ed)
+    big, good = _audio(tmp_path / "BIG.wav", rate=96000, seconds=0.1), _audio(tmp_path / "GOOD.wav", subtype="PCM_16")
+    real = takes_module.prepare_audio
+
+    def prepare(src, dest):
+        if src.path.name == "BIG.wav":
+            raise MemoryError
+        return real(src, dest)
+
+    monkeypatch.setattr(takes_module, "prepare_audio", prepare)
+    work = tmp_path / "work"
+    work.mkdir()
+    res = takes_module.run_import(dd_ed, part, [takes_module.inspect(big), takes_module.inspect(good)], work)
+    assert res.imported == ["GOOD"] and len(res.failed) == 1 and res.failed[0].startswith("BIG.wav: not enough memory")
+
+
 def test_what_cannot_be_a_take_is_refused_with_a_reason(tmp_path):
     many = tmp_path / "MANY.wav"
     soundfile.write(str(many), np.zeros((100, 3)), 44100, subtype="PCM_16")
