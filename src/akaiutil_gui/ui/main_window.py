@@ -749,7 +749,7 @@ class MainWindow(QMainWindow):
         if self._engine is not None:
             self._engine.close()
         self._engine = AkaiEngine(binary, on_traffic=self._traffic.feed)
-        run_async(lambda engine=self._engine: engine.version, lambda _version: None)  # (asked here, on a worker, so the window only ever reads the answer)
+        run_async(lambda engine=self._engine: engine.version, lambda version, engine=self._engine: self._note_old_akaiutil(engine, version))  # (asked here, on a worker, so the window only ever reads the answer)
         self._engine_binary = binary
         self._writable = False  # until akaiutil says otherwise (see _opened)
         self._reset_views()
@@ -1187,6 +1187,32 @@ class MainWindow(QMainWindow):
             self._download_akaiutil(then)
         elif choice == "locate" and self.locate_binary() is not None:
             then()
+
+    def _note_old_akaiutil(self, engine: AkaiEngine, version) -> None:
+        """An akaiutil older than 4.7 works for everything except editing tags: say so once for each version, and offer the new one."""
+        if engine is not self._engine or version is None or engine.can_edit_tags or self._setup_running:
+            return
+        text = ".".join(str(n) for n in version)
+        if settings.get_old_akaiutil_noticed() == text:
+            return
+        settings.set_old_akaiutil_noticed(text)
+        log.info("akaiutil %s is older than %s", text, fetch.VERSION)
+        if self._ask_update_akaiutil(text, self._engine_binary):
+            self._download_akaiutil(
+                lambda: self.statusBar().showMessage(f"akaiutil {fetch.VERSION} is ready. Open the images again to use it.", 10000)
+            )
+
+    def _ask_update_akaiutil(self, version: str, binary) -> bool:
+        box = QMessageBox(QMessageBox.Icon.Information, "akaiutil is out of date", f"This akaiutil is version {version}.", parent=self)
+        box.setInformativeText(
+            f"Everything works with it except editing tags, which needs {fetch.VERSION}. "
+            f"Download {fetch.VERSION} now? It is checked against a known checksum, and used instead of {binary}."
+        )
+        download = box.addButton(f"Download {fetch.VERSION}", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Not Now", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(download)
+        box.exec()
+        return box.clickedButton() is download
 
     def _ask_setup(self) -> str:
         """The first-run question. Returns "download", "locate" or "cancel"."""

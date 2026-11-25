@@ -31,6 +31,15 @@ def set_akaiutil_path(path: str | None) -> None:
     _qs().setValue("akaiutil_path", path or "")
 
 
+def get_old_akaiutil_noticed() -> str | None:
+    """The version of an older akaiutil the user has already been told about (once is enough for each)."""
+    return _qs().value("akaiutil_old_noticed", None) or None
+
+
+def set_old_akaiutil_noticed(version: str | None) -> None:
+    _qs().setValue("akaiutil_old_noticed", version or "")
+
+
 def get_last_dir(key: str) -> str | None:
     return _qs().value(f"last_dir/{key}", None) or None
 
