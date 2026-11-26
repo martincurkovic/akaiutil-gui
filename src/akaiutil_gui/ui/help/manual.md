@@ -105,6 +105,8 @@ Type in the search box (Ctrl/Cmd+F) to search **every open disk** at once. The t
 
 The **tag menu** beside it lists the tags that files on the open disks carry, and shows only the files with the one you pick. It works on its own or together with the words and the type. Tags are matched by name, so "DRUMS" finds the files tagged DRUMS in every partition that has a tag of that name, whatever its number; a tag with no name is called "Tag 7".
 
+![The tag menu](screenshots/search-tag.png "Only the files with the tag FAVOURITES, picked from the tag menu")
+
 Results show where each file lives. Double-click a result (or press Enter) to jump to it in its location. You can preview, export, rename, copy and delete results just as you can in a volume. Press Escape, or clear the box and the menus, to go back.
 
 Results are indexed. If you try to search before indexing is complete, only the indexed results will appear and the app will let you know that indexing is still happening in the background.
@@ -262,9 +264,13 @@ A hard disk partition has 26 tags, and each file can carry up to four of them. A
 
 A tick means every selected file has that tag, a dash means only some of them do, and an empty box means none. Click a box to tick or clear it. A dashed tag you leave alone stays as it is on each file. The tags are named after the partition's tag names; a floppy has none, so its tags show as "Tag 1" and so on.
 
+![The Tag Files window](screenshots/tag-files.png "Tag Files for three files: DRUMS on all of them, FAVOURITES and ONE SHOTS on some")
+
 ### Renaming the tags
 
 The 26 tags are named per partition. Select a partition (or a volume in it) and choose **Edit > Rename Tags…**, or right-click the partition. The **Tag Files** window has a **Rename Tags…** button too: it closes that window, lets you rename, and brings it back with the new names. Type the new names (up to 12 characters, capitals, the same characters as file names) and press OK; **Default Names** puts back `TAG A` to `TAG Z`. The files keep their tags and show them under the new names. If a name you type is already the name of another tag, the dialog says so but lets you go ahead (files with either tag would look the same in the list). A tag can't be given an empty name, but one that has none can be left as it is. A hard disk partition of an S1000 or S3000 has tags; a floppy, an S900 disk and a direct-to-disk area don't.
+
+![The Rename Tags window](screenshots/rename-tags.png "Rename Tags: 26 names, up to 12 characters each")
 
 Nothing else about a file changes. Editing tags needs akaiutil 4.7 or newer, which is the version the app downloads. If the akaiutil in use is older, the app says so once for each version it finds and offers to download 4.7. Files in S900 volumes have no tags, and an S1000 floppy's operating system file keeps its bytes (they hold the sampler model), so those can't be tagged.
 

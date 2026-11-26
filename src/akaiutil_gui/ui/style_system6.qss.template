@@ -125,6 +125,12 @@ QCheckBox::indicator:checked {
     image: url(${s6_icon_dir}/s6_check_x.svg);
 }
 
+QCheckBox::indicator:indeterminate {
+    background: ${bg_input};
+    border: 1px solid ${border_checkbox};
+    image: url(${s6_icon_dir}/s6_check_dash.svg);
+}
+
 QCheckBox::indicator:disabled {
     border-color: ${border_disabled};
 }

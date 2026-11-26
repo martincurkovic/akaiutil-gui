@@ -145,6 +145,60 @@ def extra_pictures(app, window, work: Path, volume) -> None:
     question.close()
 
 
+def tag_pictures(app, work: Path, binary: Path, image: Path) -> None:
+    """The Tag Files and Rename Tags dialogs and the tag menu beside the search box, on a copy of the demo disk with some tags
+    named and given (the other pictures use the untagged disk, so their Tags column stays empty)."""
+    import shutil
+
+    from akaiutil_gui.ui.main_window import MainWindow
+
+    tagged = work / "tagged.img"
+    shutil.copy(image, tagged)
+    commands = ["cd /disk0/A"]
+    for n, name in enumerate(["DRUMS", "BASS", "FAVOURITES", "LIVE SET", "ONE SHOTS"], 1):
+        commands.append(f"rentag {n} {name.replace(' ', '_')}")
+    # (tag numbers by file slot: the kick and snare are one shots, the kick and hats are favourites, the bass is a bass)
+    commands += ["cd /disk0/A/DRUMS"]
+    for slot, tags in {1: (1, 3, 5), 2: (1, 5), 3: (1, 3), 4: (1,), 5: (1, 4)}.items():
+        commands += [f"settagi {slot} {n}" for n in tags]
+    commands += ["cd /disk0/A/BASS", "settagi 1 2", "settagi 1 3"]
+    imagegen._script(binary, tagged, commands, work)
+
+    window = MainWindow()
+    window.resize(*SIZE)
+    window.show()
+    window.open_images([str(tagged)])
+    pump(app, lambda: window.tree.topLevelItemCount() == 1)
+    drums = Volume(0, "A", 1, "", "-", "", "", "")
+    window.tree.reveal_volume(drums)
+    pump(app, lambda: window._volume is not None and window.table.rowCount() == 5 and window._pending == 0)
+    pump(app, timeout=1.0)
+
+    engine = window._engine
+    volume = next(v for v in window.tree.volumes_in(0, "A") if v.name == "DRUMS")
+    part = window.tree.partition(0, "A")
+    names = engine.partition_tag_names(part)
+    files = [f for f in engine.list_files(volume) if f.name in ("KICK.S3", "SNARE.S3", "HAT CLOSED.S3")]
+    dialog = edit_dialogs.TagFilesDialog(window, files, names, can_rename=True)
+    dialog.show()
+    pump(app, timeout=0.3)
+    save(dialog, "tag-files.png")
+    dialog.close()
+
+    dialog = edit_dialogs.TagNamesDialog(window, part.name, names)
+    dialog.show()
+    pump(app, timeout=0.3)
+    save(dialog, "rename-tags.png")
+    dialog.close()
+
+    pump(app, lambda: window.search_tag.count() > 1)
+    window.search_tag.setCurrentIndex(window.search_tag.findData("FAVOURITES"))
+    pump(app, lambda: window._in_results and window.table.rowCount() == 3 and window._pending == 0)
+    pump(app, timeout=0.5)
+    save(window, "search-tag.png")
+    window.close()
+
+
 def main(argv: list[str]) -> int:
     gallery_only = "--gallery" in argv
     binary = find_akaiutil()
@@ -208,6 +262,7 @@ def main(argv: list[str]) -> int:
             save(settings_dialog, "settings.png")
             settings_dialog.close()
             extra_pictures(app, window, work, volume)
+            tag_pictures(app, work, Path(binary), image)
         window.close()
     print("done:", OUT)
     return 0

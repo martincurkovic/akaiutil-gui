@@ -1,5 +1,8 @@
 """Both palettes must satisfy every ${placeholder} in the stylesheet template."""
 
+import os
+import re
+
 import pytest
 
 from akaiutil_gui.ui import theme
@@ -308,3 +311,18 @@ def test_system6_selected_tree_row_draws_its_arrows_in_the_inverted_colour(qt_ap
         assert "#ffffff" in cell and "#000000" in cell  # (a white arrow on the black selected row)
     finally:
         theme.set_theme_preference(settings.THEME_DARK)
+
+
+@pytest.mark.parametrize("palette", [theme.DARK_PALETTE, theme.LIGHT_PALETTE], ids=["dark", "light"])
+def test_every_theme_draws_the_dash_of_a_partly_ticked_check_box(palette):
+    """The Tag Files window shows "only some files have this tag" as a dash; a theme with no rule for it showed an empty box."""
+    qss = theme.render_stylesheet(palette)
+    rule = re.search(r"QCheckBox::indicator:indeterminate\s*\{[^}]*image:\s*url\(([^)]+)\)", qss)
+    assert rule, "no :indeterminate rule for check boxes"
+    assert os.path.exists(rule.group(1))
+
+
+def test_system6_draws_the_dash_too():
+    qss = theme.render_stylesheet(theme.SYSTEM6_PALETTE)
+    rule = re.search(r"QCheckBox::indicator:indeterminate\s*\{[^}]*image:\s*url\(([^)]+)\)", qss)
+    assert rule and os.path.exists(rule.group(1))
