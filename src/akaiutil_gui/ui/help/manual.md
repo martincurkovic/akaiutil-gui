@@ -70,7 +70,7 @@ Opening or closing an image restarts akaiutil, which can take a moment with seve
 
 `.hfe` files are not natively supported by akaiutil, so akaiutil-GUI converts them to a format that akaiutil can understand. The editing experience should be reasonably seamless, however `.hfe` files might take a split second longer to load.
 
-- **Edits are written back into the `.hfe` file after each change,** just as they are for an ordinary image. 
+- **Edits are written back into the `.hfe` file after each change,** just as they are for an ordinary image.
 - **The backup** that editing offers is a copy of the `.hfe` file, and **File > Revert to Backup…** puts it back.
 - **File > Save Disk as HFE…** saves the selected floppy as an `.hfe` file.
 - **Damaged files** (a few sectors that can't be read) open **for viewing only**. The warning says which sectors, and which files they belong to. The damaged sectors show as blank, editing is off, and **Save Disk as HFE…** is refused, so the blanks never get written to a file.
@@ -260,9 +260,9 @@ A volume with every slot in use (510 files, or 64 on an S900) has no room to shu
 
 ## Tagging files
 
-A hard disk partition has 26 tags, and each file can carry up to four of them. A sampler can show only the files with a given tag. Select one or more files and choose **Edit > Tag Files…** (or right-click, or use **Edit Tags…** next to a file's tags in the details pane).
+A hard disk partition has 26 tags, and each file can have up to four tags. Select one or more files and choose **Edit > Tag Files…** (or right-click, or use **Edit Tags…** next to a file's tags in the details pane).
 
-A tick means every selected file has that tag, a dash means only some of them do, and an empty box means none. Click a box to tick or clear it. A dashed tag you leave alone stays as it is on each file. The tags are named after the partition's tag names; a floppy has none, so its tags show as "Tag 1" and so on.
+The tags are named after the partition's tag names; a floppy has none, so its tags show as "Tag 1" and so on.
 
 ![The Tag Files window](screenshots/tag-files.png "Tag Files for three files: DRUMS on all of them, FAVOURITES and ONE SHOTS on some")
 
@@ -272,7 +272,7 @@ The 26 tags are named per partition. Select a partition (or a volume in it) and 
 
 ![The Rename Tags window](screenshots/rename-tags.png "Rename Tags: 26 names, up to 12 characters each")
 
-Nothing else about a file changes. Editing tags needs akaiutil 4.7 or newer, which is the version the app downloads. If the akaiutil in use is older, the app says so once for each version it finds and offers to download 4.7. Files in S900 volumes have no tags, and an S1000 floppy's operating system file keeps its bytes (they hold the sampler model), so those can't be tagged.
+Nothing else about a file changes. Files in S900 volumes have no tags, and an S1000 floppy's operating system file keeps its bytes (they hold the sampler model), so those can't be tagged.
 
 ---
 
